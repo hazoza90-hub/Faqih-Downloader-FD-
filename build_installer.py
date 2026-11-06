@@ -43,7 +43,7 @@ STALE_DIST_ARTIFACTS = [
 
 
 def clean_stale_shadow_modules():
-    """Removes any stale smart_download.py or smart_download.pyc files from build/, dist/, core_plugin, and root."""
+    """Removes any stale smart_download or faqih_downloader shadow py/pyc files from build/, dist/, core_plugin, and __pycache__."""
     search_dirs = [
         os.path.join(BASE_DIR, "build"),
         DIST_DIR,
@@ -57,22 +57,24 @@ def clean_stale_shadow_modules():
     except Exception:
         pass
 
+    shadow_stems = ("smart_download", "faqih_downloader")
     for d in search_dirs:
         if not os.path.isdir(d):
             continue
         for root, dirs, files in os.walk(d):
             for fname in files:
                 fn_lower = fname.lower()
-                if fn_lower in ("smart_download.py", "smart_download.pyc") or (
-                    fn_lower.startswith("smart_download.") and fn_lower.endswith(".pyc")
-                ):
-                    fpath = os.path.join(root, fname)
-                    try:
-                        os.chmod(fpath, 0o777)
-                        os.remove(fpath)
-                        print(f"[*] Removed stale shadow file: {fpath}")
-                    except Exception as e:
-                        print(f"[-] Warning: Failed to remove {fpath}: {e}")
+                for stem in shadow_stems:
+                    if fn_lower in (f"{stem}.py", f"{stem}.pyc") or (
+                        fn_lower.startswith(f"{stem}.") and fn_lower.endswith(".pyc")
+                    ):
+                        fpath = os.path.join(root, fname)
+                        try:
+                            os.chmod(fpath, 0o777)
+                            os.remove(fpath)
+                            print(f"[*] Removed stale shadow file: {fpath}")
+                        except Exception as e:
+                            print(f"[-] Warning: Failed to remove {fpath}: {e}")
 
     for root_shadow in ("smart_download.py", "smart_download.pyc"):
         fpath = os.path.join(BASE_DIR, root_shadow)
@@ -156,7 +158,7 @@ def purge_stale_core_plugin():
     """Removes any stale %APPDATA%\\SmartDownload\\core_plugin directory."""
     try:
         try:
-            from smart_download.services.core_patch_updater import get_core_plugin_dir
+            from faqih_downloader.services.core_patch_updater import get_core_plugin_dir
             plugin_dir = get_core_plugin_dir()
         except Exception:
             appdata = os.environ.get("APPDATA") or os.path.expanduser("~")
@@ -193,7 +195,7 @@ def build_app(rebuild: bool = False):
 
     clean_stale_dist_artifacts()
     try:
-        from smart_download.services.youtube_models import find_ffmpeg_bin
+        from faqih_downloader.services.youtube_models import find_ffmpeg_bin
         ffmpeg_bin = find_ffmpeg_bin()
         if ffmpeg_bin and os.path.isfile(ffmpeg_bin):
             dist_ffmpeg = os.path.join(DIST_DIR, "ffmpeg.exe")
@@ -244,8 +246,8 @@ def prepare_payload():
 
     # 4. Host launcher batch and registration script
     try:
-        from smart_download.services.browser import registry as rb
-        from smart_download.services.browser.host_manifest import generate_host_manifest, get_default_extension_origins
+        from faqih_downloader.services.browser import registry as rb
+        from faqih_downloader.services.browser.host_manifest import generate_host_manifest, get_default_extension_origins
     except ImportError:
         import register_browser as rb
         from host_manifest import generate_host_manifest, get_default_extension_origins
@@ -260,18 +262,18 @@ def prepare_payload():
     except Exception:
         pass
 
-    reg_script = os.path.join(BASE_DIR, "src", "smart_download", "services", "browser", "registry.py")
+    reg_script = os.path.join(BASE_DIR, "src", "faqih_downloader", "services", "browser", "registry.py")
     if not os.path.isfile(reg_script):
         reg_script = os.path.join(BASE_DIR, "register_browser.py")
     if os.path.isfile(reg_script):
         shutil.copy2(reg_script, os.path.join(PAYLOAD_DIR, "register_browser.py"))
-    hm_script = os.path.join(BASE_DIR, "src", "smart_download", "services", "browser", "host_manifest.py")
+    hm_script = os.path.join(BASE_DIR, "src", "faqih_downloader", "services", "browser", "host_manifest.py")
     if os.path.isfile(hm_script):
         shutil.copy2(hm_script, os.path.join(PAYLOAD_DIR, "host_manifest.py"))
 
     # 5. FFmpeg binary bundling if available
     try:
-        from smart_download.services.youtube_models import find_ffmpeg_bin
+        from faqih_downloader.services.youtube_models import find_ffmpeg_bin
         ffmpeg_bin = find_ffmpeg_bin()
         if ffmpeg_bin and os.path.isfile(ffmpeg_bin):
             shutil.copy2(ffmpeg_bin, os.path.join(PAYLOAD_DIR, "ffmpeg.exe"))
@@ -352,7 +354,7 @@ def main():
     print("=" * 70)
 
     try:
-        from smart_download.installer import terminate_running_app
+        from faqih_downloader.installer import terminate_running_app
         terminate_running_app()
     except Exception as e:
         print(f"[*] Warning terminating running app: {e}")
@@ -366,7 +368,7 @@ def main():
 
     if not args.installer_only:
         try:
-            from smart_download.installer import get_default_install_dir, install_application, terminate_running_app
+            from faqih_downloader.installer import get_default_install_dir, install_application, terminate_running_app
             default_dir = get_default_install_dir()
             if os.path.exists(default_dir):
                 print(f"[*] Updating installed application in default directory: {default_dir}")
@@ -398,7 +400,7 @@ def main():
     if not args.installer_only:
         print("[*] Packaging and applying core patch...")
         try:
-            from smart_download.services.core_patch_updater import build_core_patch_zip, CoreHotPatchUpdater
+            from faqih_downloader.services.core_patch_updater import build_core_patch_zip, CoreHotPatchUpdater
 
             patch_zip = os.path.join(DIST_DIR, "FaqihDownloader-CorePatch.zip")
             build_core_patch_zip(patch_zip)

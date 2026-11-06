@@ -23,21 +23,21 @@ if PROJECT_ROOT not in sys.path:
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
-from smart_download.locales.i18n import LocalizationManager, tr
-from smart_download.config import get_setting, set_setting, APP_TITLE
-from smart_download.utils.window_effects import apply_acrylic_or_mica_effect
-from smart_download.utils.file_ops import (
+from faqih_downloader.locales.i18n import LocalizationManager, tr
+from faqih_downloader.config import get_setting, set_setting, APP_TITLE
+from faqih_downloader.utils.window_effects import apply_acrylic_or_mica_effect
+from faqih_downloader.utils.file_ops import (
     resolve_existing_download_path,
     open_containing_folder,
 )
-from smart_download.ui.panels.kanban_cards import (
+from faqih_downloader.ui.panels.kanban_cards import (
     _truncate_title,
     _draw_default_video_thumbnail,
     _draw_video_play_overlay,
     build_vault_card,
     _THUMB_SEMAPHORE,
 )
-from smart_download.ui.modals.settings_modal import SettingsModal
+from faqih_downloader.ui.modals.settings_modal import SettingsModal
 
 
 class TestRebrandingAndImprovements(unittest.TestCase):
@@ -88,7 +88,7 @@ class TestRebrandingAndImprovements(unittest.TestCase):
 
     def test_single_instance_accepts_all_names(self):
         """Verifies single_instance IPC accepts both new and backwards-compatible app names."""
-        from smart_download.services.single_instance import notify_running_instance
+        from faqih_downloader.services.single_instance import notify_running_instance
         accepted_names = [
             "Faqih Downloader (FD)",
             "Faqih Downloader",
@@ -234,7 +234,7 @@ class TestRebrandingAndImprovements(unittest.TestCase):
 
     def test_fetching_toast_suppression_when_window_visible(self):
         """Verifies duplicate floating FetchingLinkToast is suppressed when main window is visible."""
-        from smart_download.ui.controllers.toast_controller import ToastControllerMixin
+        from faqih_downloader.ui.controllers.toast_controller import ToastControllerMixin
 
         class MockApp(ToastControllerMixin):
             def __init__(self, root):
@@ -276,7 +276,7 @@ class TestRebrandingAndImprovements(unittest.TestCase):
 
     def test_vault_category_filtering(self):
         """Verifies filter_vault_entries properly partitions entries into video, audio, archive, and docs."""
-        from smart_download.ui.panels.kanban_vault_helpers import filter_vault_entries
+        from faqih_downloader.ui.panels.kanban_vault_helpers import filter_vault_entries
 
         test_entries = [
             {"filename": "lecture.mp4", "url": "https://example.com/v1"},
@@ -305,7 +305,7 @@ class TestRebrandingAndImprovements(unittest.TestCase):
 
     def test_vault_context_menu_creation(self):
         """Verifies show_vault_context_menu instantiates dark-themed popup menu."""
-        from smart_download.ui.panels.kanban_vault_helpers import show_vault_context_menu
+        from faqih_downloader.ui.panels.kanban_vault_helpers import show_vault_context_menu
 
         entry = {"filename": "video.mp4", "file_path": "C:/fake/video.mp4", "url": "https://example.com"}
         event = MagicMock()
@@ -326,7 +326,7 @@ class TestRebrandingAndImprovements(unittest.TestCase):
 
     def test_vault_pagination_load_more_button(self):
         """Verifies build_load_more_button creates load-more widget displaying remaining count."""
-        from smart_download.ui.panels.kanban_vault_helpers import build_load_more_button
+        from faqih_downloader.ui.panels.kanban_vault_helpers import build_load_more_button
 
         clicked = []
         btn_frame = build_load_more_button(self.root, remaining=15, on_load_more=lambda: clicked.append(True))
@@ -342,7 +342,7 @@ class TestRebrandingAndImprovements(unittest.TestCase):
 
     def test_queued_card_real_title_and_badge(self):
         """Verifies build_queued_card correctly embeds real title and custom resolution badge."""
-        from smart_download.ui.panels.kanban_cards import build_queued_card
+        from faqih_downloader.ui.panels.kanban_cards import build_queued_card
 
         parent = tk.Frame(self.root)
         card = build_queued_card(
@@ -358,7 +358,7 @@ class TestRebrandingAndImprovements(unittest.TestCase):
 
     def test_installer_migration_logic(self):
         """Verifies migrate_legacy_installations migrates config files and cleans up legacy directory."""
-        from smart_download.installer.installer_migration import migrate_legacy_installations
+        from faqih_downloader.installer.installer_migration import migrate_legacy_installations
 
         temp_legacy = tempfile.mkdtemp()
         temp_target = tempfile.mkdtemp()
@@ -369,9 +369,9 @@ class TestRebrandingAndImprovements(unittest.TestCase):
             with open(os.path.join(temp_legacy, "settings.json"), "w") as f:
                 f.write('{"dark_mode": true}')
 
-            with patch("smart_download.installer.installer_migration._get_target_data_dir", return_value=temp_target), \
-                 patch("smart_download.installer.installer_migration.LEGACY_APP_DIRS", [os.path.basename(temp_legacy)]), \
-                 patch("smart_download.installer.installer_migration.terminate_all_instances"), \
+            with patch("faqih_downloader.installer.installer_migration._get_target_data_dir", return_value=temp_target), \
+                 patch("faqih_downloader.installer.installer_migration.LEGACY_APP_DIRS", [os.path.basename(temp_legacy)]), \
+                 patch("faqih_downloader.installer.installer_migration.terminate_all_instances"), \
                  patch.dict(os.environ, {"LOCALAPPDATA": os.path.dirname(os.path.dirname(temp_legacy))}):
 
                 # Ensure candidate_sources finds temp_legacy
@@ -401,7 +401,7 @@ class TestRebrandingAndImprovements(unittest.TestCase):
 
     def test_window_alpha_restoration_after_minimize_map_focus(self):
         """Verifies alpha restores to 0.92 after minimize, map, and FocusIn events."""
-        from smart_download.ui.controllers.window_controller import WindowChromeMixin
+        from faqih_downloader.ui.controllers.window_controller import WindowChromeMixin
 
         class DummyWindow(WindowChromeMixin):
             def __init__(self, root):
@@ -441,7 +441,7 @@ class TestRebrandingAndImprovements(unittest.TestCase):
 
     def test_top_bar_title_icon_display_in_canvas_cloud(self):
         """Verifies _title_icon_photo is created and rendered inside canvas_cloud."""
-        from smart_download.ui.components.top_bar import TopHeaderBarMixin
+        from faqih_downloader.ui.components.top_bar import TopHeaderBarMixin
 
         class DummyTopBar(TopHeaderBarMixin):
             def __init__(self, root):
@@ -482,8 +482,8 @@ class TestRebrandingAndImprovements(unittest.TestCase):
         """Verifies restore_vault_entries_from_disk scans disk and populates history_manager."""
         import tempfile
         import shutil
-        from smart_download.ui.panels.kanban_vault_helpers import restore_vault_entries_from_disk
-        from smart_download.core.history import DownloadHistoryManager
+        from faqih_downloader.ui.panels.kanban_vault_helpers import restore_vault_entries_from_disk
+        from faqih_downloader.core.history import DownloadHistoryManager
 
         tmp_dir = tempfile.mkdtemp(prefix="sd_test_vault_restore_")
         try:
@@ -513,7 +513,7 @@ class TestRebrandingAndImprovements(unittest.TestCase):
                 def refresh_history_table(self): self.refreshed_table = True
 
             gui = DummyGUI(history_mgr)
-            with patch("smart_download.config.get_setting", return_value=tmp_dir):
+            with patch("faqih_downloader.config.get_setting", return_value=tmp_dir):
                 restored = restore_vault_entries_from_disk(gui)
 
             self.assertEqual(restored, 2)
@@ -532,8 +532,8 @@ class TestRebrandingAndImprovements(unittest.TestCase):
 
     def test_vault_clear_completed_confirm_modal(self):
         """Verifies clear_completed_vault_entries prompts confirmation and respects user decision."""
-        from smart_download.ui.panels.kanban_vault_helpers import clear_completed_vault_entries
-        from smart_download.core.history import DownloadHistoryManager
+        from faqih_downloader.ui.panels.kanban_vault_helpers import clear_completed_vault_entries
+        from faqih_downloader.core.history import DownloadHistoryManager
         import tempfile, shutil
 
         tmp_dir = tempfile.mkdtemp(prefix="sd_test_vault_clear_")
@@ -570,7 +570,7 @@ class TestRebrandingAndImprovements(unittest.TestCase):
     def test_window_alpha_auto_migration_from_70(self):
         """Verifies that window_alpha <= 0.72 is automatically corrected to 0.95."""
         import tempfile, json, shutil
-        from smart_download.config import load_settings, _clear_settings_cache
+        from faqih_downloader.config import load_settings, _clear_settings_cache
 
         tmp_dir = tempfile.mkdtemp(prefix="sd_test_alpha_mig_")
         try:
@@ -578,7 +578,7 @@ class TestRebrandingAndImprovements(unittest.TestCase):
             with open(settings_path, "w", encoding="utf-8") as f:
                 json.dump({"window_alpha": 0.70, "language": "en"}, f)
 
-            with patch("smart_download.config.get_settings_file_path", return_value=settings_path):
+            with patch("faqih_downloader.config.get_settings_file_path", return_value=settings_path):
                 _clear_settings_cache()
                 data = load_settings()
                 self.assertAlmostEqual(data["window_alpha"], 0.95, places=2)
@@ -588,7 +588,7 @@ class TestRebrandingAndImprovements(unittest.TestCase):
             with open(settings_path, "w", encoding="utf-8") as f:
                 json.dump({"window_alpha": 0.85, "language": "en"}, f)
 
-            with patch("smart_download.config.get_settings_file_path", return_value=settings_path):
+            with patch("faqih_downloader.config.get_settings_file_path", return_value=settings_path):
                 _clear_settings_cache()
                 data2 = load_settings()
                 self.assertAlmostEqual(data2["window_alpha"], 0.85, places=2)
@@ -598,8 +598,8 @@ class TestRebrandingAndImprovements(unittest.TestCase):
 
     def test_safe_modal_destruction_order(self):
         """Verifies destroy() runs super().destroy() without exception and detaches photo refs safely."""
-        from smart_download.ui.components.base_modal import SafeModalDialog
-        from smart_download.ui.modals.refresh_modal import RefreshLinkModal
+        from faqih_downloader.ui.components.base_modal import SafeModalDialog
+        from faqih_downloader.ui.modals.refresh_modal import RefreshLinkModal
 
         modal1 = SafeModalDialog(self.root, "Test", "Message", dialog_type="info")
         self.root.update_idletasks()
@@ -614,8 +614,8 @@ class TestRebrandingAndImprovements(unittest.TestCase):
     def test_vault_restore_modal_discovery_and_ui(self):
         """Verifies VaultRestoreModal discovers files on disk and renders checkboxes and rows."""
         import tempfile, shutil
-        from smart_download.ui.modals.vault_restore_modal import VaultRestoreModal
-        from smart_download.core.history import DownloadHistoryManager
+        from faqih_downloader.ui.modals.vault_restore_modal import VaultRestoreModal
+        from faqih_downloader.core.history import DownloadHistoryManager
 
         tmp_dir = tempfile.mkdtemp(prefix="sd_test_modal_disc_")
         try:
@@ -635,7 +635,7 @@ class TestRebrandingAndImprovements(unittest.TestCase):
                 def refresh_history_table(self): pass
 
             gui = DummyGUI(self.root, hm)
-            with patch("smart_download.config.get_setting", return_value=tmp_dir):
+            with patch("faqih_downloader.config.get_setting", return_value=tmp_dir):
                 modal = VaultRestoreModal(gui)
                 self.root.update_idletasks()
 
@@ -653,8 +653,8 @@ class TestRebrandingAndImprovements(unittest.TestCase):
     def test_vault_restore_modal_search_filtering(self):
         """Verifies live typing in entry_search filters displayed files."""
         import tempfile, shutil
-        from smart_download.ui.modals.vault_restore_modal import VaultRestoreModal
-        from smart_download.core.history import DownloadHistoryManager
+        from faqih_downloader.ui.modals.vault_restore_modal import VaultRestoreModal
+        from faqih_downloader.core.history import DownloadHistoryManager
 
         tmp_dir = tempfile.mkdtemp(prefix="sd_test_modal_srch_")
         try:
@@ -674,7 +674,7 @@ class TestRebrandingAndImprovements(unittest.TestCase):
                 def refresh_history_table(self): pass
 
             gui = DummyGUI(self.root, hm)
-            with patch("smart_download.config.get_setting", return_value=tmp_dir):
+            with patch("faqih_downloader.config.get_setting", return_value=tmp_dir):
                 modal = VaultRestoreModal(gui)
                 self.root.update_idletasks()
 
@@ -695,8 +695,8 @@ class TestRebrandingAndImprovements(unittest.TestCase):
     def test_vault_restore_modal_selective_restore(self):
         """Verifies restore_selected restores only checked files and ignores unchecked ones."""
         import tempfile, shutil
-        from smart_download.ui.modals.vault_restore_modal import VaultRestoreModal
-        from smart_download.core.history import DownloadHistoryManager
+        from faqih_downloader.ui.modals.vault_restore_modal import VaultRestoreModal
+        from faqih_downloader.core.history import DownloadHistoryManager
 
         tmp_dir = tempfile.mkdtemp(prefix="sd_test_modal_sel_")
         try:
@@ -716,7 +716,7 @@ class TestRebrandingAndImprovements(unittest.TestCase):
                 def refresh_history_table(self): pass
 
             gui = DummyGUI(self.root, hm)
-            with patch("smart_download.config.get_setting", return_value=tmp_dir):
+            with patch("faqih_downloader.config.get_setting", return_value=tmp_dir):
                 modal = VaultRestoreModal(gui)
                 self.root.update_idletasks()
 
@@ -737,8 +737,8 @@ class TestRebrandingAndImprovements(unittest.TestCase):
     def test_vault_restore_modal_browse_files(self):
         """Verifies browse_files opens file dialog and adds chosen file to history."""
         import tempfile, shutil
-        from smart_download.ui.modals.vault_restore_modal import VaultRestoreModal
-        from smart_download.core.history import DownloadHistoryManager
+        from faqih_downloader.ui.modals.vault_restore_modal import VaultRestoreModal
+        from faqih_downloader.core.history import DownloadHistoryManager
 
         tmp_dir = tempfile.mkdtemp(prefix="sd_test_modal_brw_")
         try:
@@ -756,7 +756,7 @@ class TestRebrandingAndImprovements(unittest.TestCase):
                 def refresh_history_table(self): pass
 
             gui = DummyGUI(self.root, hm)
-            with patch("smart_download.config.get_setting", return_value=tmp_dir):
+            with patch("faqih_downloader.config.get_setting", return_value=tmp_dir):
                 modal = VaultRestoreModal(gui)
                 self.root.update_idletasks()
 
@@ -774,8 +774,8 @@ class TestRebrandingAndImprovements(unittest.TestCase):
     def test_vault_restore_modal_restore_all(self):
         """Verifies restore_all restores all discovered files and finalizes cleanly."""
         import tempfile, shutil
-        from smart_download.ui.modals.vault_restore_modal import VaultRestoreModal
-        from smart_download.core.history import DownloadHistoryManager
+        from faqih_downloader.ui.modals.vault_restore_modal import VaultRestoreModal
+        from faqih_downloader.core.history import DownloadHistoryManager
 
         tmp_dir = tempfile.mkdtemp(prefix="sd_test_modal_all_")
         try:
@@ -795,7 +795,7 @@ class TestRebrandingAndImprovements(unittest.TestCase):
                 def refresh_history_table(self): pass
 
             gui = DummyGUI(self.root, hm)
-            with patch("smart_download.config.get_setting", return_value=tmp_dir):
+            with patch("faqih_downloader.config.get_setting", return_value=tmp_dir):
                 modal = VaultRestoreModal(gui)
                 self.root.update_idletasks()
 
@@ -808,8 +808,8 @@ class TestRebrandingAndImprovements(unittest.TestCase):
     def test_vault_delete_entry_with_confirm(self):
         """Verifies delete_vault_entry_with_confirm prompts confirmation and respects user choice."""
         import tempfile, shutil
-        from smart_download.core.history import DownloadHistoryManager
-        from smart_download.ui.panels.kanban_vault_helpers import delete_vault_entry_with_confirm
+        from faqih_downloader.core.history import DownloadHistoryManager
+        from faqih_downloader.ui.panels.kanban_vault_helpers import delete_vault_entry_with_confirm
 
         tmp_dir = tempfile.mkdtemp(prefix="sd_test_del_confirm_")
         try:
@@ -860,7 +860,7 @@ class TestRebrandingAndImprovements(unittest.TestCase):
 
     def test_stage_probed_link_and_remove(self):
         """Tests staging probed link in Column 1 and removing it."""
-        from smart_download.ui.panels.kanban_panel import KanbanPanelMixin
+        from faqih_downloader.ui.panels.kanban_panel import KanbanPanelMixin
         class DummyKanban(KanbanPanelMixin):
             def __init__(self):
                 self._staged_links = []
@@ -901,7 +901,7 @@ class TestRebrandingAndImprovements(unittest.TestCase):
         """Tests build_staged_link_card and context menu callbacks."""
         if not self.root:
             return
-        from smart_download.ui.panels.kanban_staged_helpers import (
+        from faqih_downloader.ui.panels.kanban_staged_helpers import (
             build_staged_link_card,
             show_staged_context_menu,
             render_col1_staged_cards
@@ -947,7 +947,7 @@ class TestRebrandingAndImprovements(unittest.TestCase):
         """Tests FileInfoModal displaying metadata for completed and staged files."""
         if not self.root:
             return
-        from smart_download.ui.modals.file_info_modal import FileInfoModal, open_file_info_modal, _format_size_with_bytes
+        from faqih_downloader.ui.modals.file_info_modal import FileInfoModal, open_file_info_modal, _format_size_with_bytes
 
         # Size formatting helper
         fmt = _format_size_with_bytes(1048576)
@@ -988,7 +988,7 @@ class TestRebrandingAndImprovements(unittest.TestCase):
 
     def test_probe_and_stage_pasted_url(self):
         """Tests probe_and_stage_pasted_url triggering stage_probed_link_in_col1."""
-        from smart_download.ui.panels.kanban_staged_helpers import probe_and_stage_pasted_url
+        from faqih_downloader.ui.panels.kanban_staged_helpers import probe_and_stage_pasted_url
 
         staged_items = []
         class DummyGUI:
@@ -999,7 +999,7 @@ class TestRebrandingAndImprovements(unittest.TestCase):
                 fn()
 
         gui = DummyGUI()
-        with patch("smart_download.core.html_resolver.resolve_real_download_url", return_value={
+        with patch("faqih_downloader.core.html_resolver.resolve_real_download_url", return_value={
             "resolved": True,
             "url": "https://example.com/sample_download.iso",
             "filename": "sample_download.iso",
@@ -1017,7 +1017,7 @@ class TestRebrandingAndImprovements(unittest.TestCase):
 
     def test_confirm_modal_and_clipboard_stage_in_col1(self):
         """Tests confirm modal _on_open_in_main and clipboard controller integration."""
-        from smart_download.ui.modals.confirm_modal import DownloadConfirmationModal
+        from faqih_downloader.ui.modals.confirm_modal import DownloadConfirmationModal
 
         staged_in_gui = []
         class MockParentApp:
@@ -1050,8 +1050,8 @@ class TestRebrandingAndImprovements(unittest.TestCase):
 
     def test_media_open_in_main_stages_in_col1(self):
         """Verifies _on_open_in_main in youtube_download_controller stages video card into Col1."""
-        from smart_download.services.youtube_service import VideoFormatOption
-        from smart_download.ui.panels.kanban_staged_helpers import stage_media_option_in_col1
+        from faqih_downloader.services.youtube_service import VideoFormatOption
+        from faqih_downloader.ui.panels.kanban_staged_helpers import stage_media_option_in_col1
 
         staged_items = []
         class MockGUI:
@@ -1101,8 +1101,8 @@ class TestRebrandingAndImprovements(unittest.TestCase):
 
     def test_probe_and_stage_pasted_media_url(self):
         """Verifies probe_and_stage_pasted_url extracts YouTubeResolver data and stages Col1 card."""
-        from smart_download.ui.panels.kanban_staged_helpers import probe_and_stage_pasted_url
-        from smart_download.services.youtube_service import VideoFormatOption
+        from faqih_downloader.ui.panels.kanban_staged_helpers import probe_and_stage_pasted_url
+        from faqih_downloader.services.youtube_service import VideoFormatOption
 
         parsing_added = []
         parsing_removed = []
@@ -1144,7 +1144,7 @@ class TestRebrandingAndImprovements(unittest.TestCase):
             )
         ]
 
-        with patch("smart_download.services.youtube_service.YouTubeResolver.extract_format_options", return_value=(mock_raw_info, mock_opts)):
+        with patch("faqih_downloader.services.youtube_service.YouTubeResolver.extract_format_options", return_value=(mock_raw_info, mock_opts)):
             probe_and_stage_pasted_url(gui, tiktok_url)
             import time
             for _ in range(30):
@@ -1170,8 +1170,8 @@ class TestRebrandingAndImprovements(unittest.TestCase):
 
     def test_start_staged_media_download_preserves_context(self):
         """Verifies _start_staged_download restores media context and triggers start_download."""
-        from smart_download.ui.panels.kanban_staged_helpers import _start_staged_download
-        from smart_download.services.youtube_service import VideoFormatOption
+        from faqih_downloader.ui.panels.kanban_staged_helpers import _start_staged_download
+        from faqih_downloader.services.youtube_service import VideoFormatOption
 
         opt = VideoFormatOption(
             format_id="mp4_1080",
@@ -1224,8 +1224,8 @@ class TestRebrandingAndImprovements(unittest.TestCase):
 
     def test_preview_confirm_does_not_stage_col1(self):
         """Verifies preview confirm starts download without leaving duplicate card in Col1."""
-        from smart_download.ui.panels.media_options_bar import MediaOptionsBarMixin
-        from smart_download.services.youtube_service import VideoFormatOption
+        from faqih_downloader.ui.panels.media_options_bar import MediaOptionsBarMixin
+        from faqih_downloader.services.youtube_service import VideoFormatOption
 
         opt = VideoFormatOption(
             format_id="720p",
@@ -1270,8 +1270,8 @@ class TestRebrandingAndImprovements(unittest.TestCase):
         """Verifies _probe_media_worker categorizes destination into Video/Audio,
         extracts audio/subtitle tracks into _pending_media_context, updates entry_dest,
         and calls populate_main_media_bar."""
-        from smart_download.ui.panels.kanban_staged_helpers import _probe_media_worker
-        from smart_download.services.youtube_service import VideoFormatOption
+        from faqih_downloader.ui.panels.kanban_staged_helpers import _probe_media_worker
+        from faqih_downloader.services.youtube_service import VideoFormatOption
 
         opt = VideoFormatOption(
             format_id="1080p",
@@ -1330,9 +1330,9 @@ class TestRebrandingAndImprovements(unittest.TestCase):
         url = "https://youtube.com/watch?v=cat_test_123"
         cand = {"title": "Categorized Test Video", "file_name": "video.mp4"}
 
-        with patch("smart_download.services.youtube_service.YouTubeResolver") as mock_res_cls, \
-             patch("smart_download.services.youtube_tracks.extract_audio_tracks", return_value=[{"id": "a1", "label": "English"}]) as mock_aud, \
-             patch("smart_download.services.youtube_tracks.extract_subtitle_tracks", return_value=[{"id": "s1", "label": "Arabic"}]) as mock_sub:
+        with patch("faqih_downloader.services.youtube_service.YouTubeResolver") as mock_res_cls, \
+             patch("faqih_downloader.services.youtube_tracks.extract_audio_tracks", return_value=[{"id": "a1", "label": "English"}]) as mock_aud, \
+             patch("faqih_downloader.services.youtube_tracks.extract_subtitle_tracks", return_value=[{"id": "s1", "label": "Arabic"}]) as mock_sub:
             mock_inst = MagicMock()
             mock_inst.extract_format_options.return_value = (fake_info, [opt])
             mock_res_cls.return_value = mock_inst
@@ -1362,8 +1362,8 @@ class TestRebrandingAndImprovements(unittest.TestCase):
     def test_start_pending_media_download_prioritizes_ctx_options(self):
         """Verifies _start_pending_media_download prioritizes ctx['options'] over
         _main_media_options and avoids mismatch when bar options differ."""
-        from smart_download.ui.panels.media_options_bar import MediaOptionsBarMixin
-        from smart_download.services.youtube_service import VideoFormatOption
+        from faqih_downloader.ui.panels.media_options_bar import MediaOptionsBarMixin
+        from faqih_downloader.services.youtube_service import VideoFormatOption
 
         opt_ctx = VideoFormatOption(
             format_id="ctx_1080",
@@ -1435,8 +1435,8 @@ class TestRebrandingAndImprovements(unittest.TestCase):
     def test_quality_change_and_open_in_main_syncs_col1(self):
         """Verifies changing quality in media bar and 'open in main' updates _pending_media_context
         and updates Column 1 staged card via stage_media_option_in_col1."""
-        from smart_download.ui.panels.media_options_bar import MediaOptionsBarMixin
-        from smart_download.services.youtube_service import VideoFormatOption
+        from faqih_downloader.ui.panels.media_options_bar import MediaOptionsBarMixin
+        from faqih_downloader.services.youtube_service import VideoFormatOption
 
         opt720 = VideoFormatOption(
             format_id="720",
@@ -1520,7 +1520,7 @@ class TestRebrandingAndImprovements(unittest.TestCase):
 
     def test_atomic_write_json_config(self):
         """Verifies _atomic_write_json writes safely and replaces target file."""
-        from smart_download.config import _atomic_write_json
+        from faqih_downloader.config import _atomic_write_json
         import tempfile
         import json
         with tempfile.TemporaryDirectory() as td:
@@ -1538,7 +1538,7 @@ class TestRebrandingAndImprovements(unittest.TestCase):
 
     def test_run_cancellable_ffmpeg_cancellation(self):
         """Verifies run_cancellable_ffmpeg terminates process cleanly when cancel_event is set."""
-        from smart_download.services.subtitle_processor import run_cancellable_ffmpeg
+        from faqih_downloader.services.subtitle_processor import run_cancellable_ffmpeg
         import threading
         ev = threading.Event()
         ev.set()
@@ -1558,7 +1558,7 @@ class TestRebrandingAndImprovements(unittest.TestCase):
 
     def test_preview_bridge_hardening_and_pruning(self):
         """Verifies _safe_int, session pruning at 15, and CSRF Origin 403 blocking."""
-        from smart_download.services.preview_stream_proxy import _safe_int, _is_preview_origin_allowed, _prune_preview_sessions
+        from faqih_downloader.services.preview_stream_proxy import _safe_int, _is_preview_origin_allowed, _prune_preview_sessions
         self.assertEqual(_safe_int("42"), 42)
         self.assertEqual(_safe_int("invalid", 10), 10)
         self.assertEqual(_safe_int(None, 5), 5)
@@ -1577,7 +1577,7 @@ class TestRebrandingAndImprovements(unittest.TestCase):
 
     def test_browser_bridge_csrf_and_wake_protection(self):
         """Verifies GET /show and Origin/Referer/Sec-Fetch-Site CSRF protections in bridge_server."""
-        from smart_download.services.browser.bridge_server import BrowserBridgeHandler
+        from faqih_downloader.services.browser.bridge_server import BrowserBridgeHandler
         handler = BrowserBridgeHandler.__new__(BrowserBridgeHandler)
         handler.headers = {"Origin": "https://malicious.com"}
         self.assertFalse(handler._is_origin_allowed())
@@ -1596,7 +1596,7 @@ class TestRebrandingAndImprovements(unittest.TestCase):
 
     def test_atomic_replace_with_retry(self):
         """Verifies atomic_replace_with_retry handles retry on transient lock."""
-        from smart_download.utils.file_ops import atomic_replace_with_retry
+        from faqih_downloader.utils.file_ops import atomic_replace_with_retry
         import tempfile
         with tempfile.TemporaryDirectory() as td:
             src = os.path.join(td, "src.tmp")
@@ -1626,7 +1626,7 @@ class TestRebrandingAndImprovements(unittest.TestCase):
 
     def test_archive_utils_safety_verification(self):
         """Verifies _verify_extracted_tree_safe blocks symlinks and escaping paths."""
-        from smart_download.utils.archive_utils import _verify_extracted_tree_safe
+        from faqih_downloader.utils.archive_utils import _verify_extracted_tree_safe
         import tempfile
         with tempfile.TemporaryDirectory() as td:
             safe_dir = os.path.join(td, "extracted")
@@ -1641,8 +1641,8 @@ class TestRebrandingAndImprovements(unittest.TestCase):
 
     def test_trusted_update_urls_and_patch_integrity(self):
         """Verifies _is_trusted_update_url and zip testzip integrity verification."""
-        from smart_download.services.updater_service import _is_trusted_update_url
-        from smart_download.services.core_patch_updater import CoreHotPatchUpdater
+        from faqih_downloader.services.updater_service import _is_trusted_update_url
+        from faqih_downloader.services.core_patch_updater import CoreHotPatchUpdater
         
         self.assertTrue(_is_trusted_update_url("https://github.com/hazoza90-hub/Faqih-Downloader-FD-/releases/v2.0.2"))
         self.assertTrue(_is_trusted_update_url("https://api.github.com/repos/hazoza90-hub/Faqih-Downloader-FD-/releases/latest"))
@@ -1669,7 +1669,7 @@ class TestRebrandingAndImprovements(unittest.TestCase):
 
     def test_subtitle_downloader_ssl_security(self):
         """Verifies subtitle_downloader attempts default SSL context first and falls back on SSLError."""
-        from smart_download.services.subtitle_downloader import _translate_srt_cues_via_gtx
+        from faqih_downloader.services.subtitle_downloader import _translate_srt_cues_via_gtx
         import ssl
         
         cues = [(0.0, 1.0, "Hello")]
@@ -1695,7 +1695,7 @@ class TestPhase2SecurityAndHardening(unittest.TestCase):
 
     def test_uninstall_safe_directory_validation(self):
         """Verifies _is_safe_uninstall_target rejects dangerous paths and accepts safe ones."""
-        from smart_download.installer.installer_migration import _is_safe_uninstall_target
+        from faqih_downloader.installer.installer_migration import _is_safe_uninstall_target
         import tempfile
 
         # Unsafe targets
@@ -1727,7 +1727,7 @@ class TestPhase2SecurityAndHardening(unittest.TestCase):
 
     def test_extract_payload_zip_slip_and_integrity_protection(self):
         """Verifies extract_payload_lzma_archive rejects zip slip paths and corrupted archives."""
-        from smart_download.installer.installer_migration import extract_payload_lzma_archive
+        from faqih_downloader.installer.installer_migration import extract_payload_lzma_archive
         import tempfile
         import zipfile
 
@@ -1764,8 +1764,8 @@ class TestPhase2SecurityAndHardening(unittest.TestCase):
 
     def test_atomic_chunk_assembly_with_rollback(self):
         """Verifies TurboDownloadEngine.assemble uses temporary file and cleans it up on error."""
-        from smart_download.core.engine import TurboDownloadEngine
-        from smart_download.core.chunk import DownloadChunk
+        from faqih_downloader.core.engine import TurboDownloadEngine
+        from faqih_downloader.core.chunk import DownloadChunk
         import tempfile
 
         with tempfile.TemporaryDirectory() as td:
@@ -1802,7 +1802,7 @@ class TestPhase2SecurityAndHardening(unittest.TestCase):
 
     def test_ytdlp_updater_trusted_domain_and_zip_integrity(self):
         """Verifies YtDlpAutoUpdater rejects untrusted domains and corrupted archives."""
-        from smart_download.services.ytdlp_updater import YtDlpAutoUpdater
+        from faqih_downloader.services.ytdlp_updater import YtDlpAutoUpdater
         import tempfile
 
         with tempfile.TemporaryDirectory() as td:
@@ -1831,7 +1831,7 @@ class TestPhase2SecurityAndHardening(unittest.TestCase):
 
     def test_html_resolver_ssrf_mitigation(self):
         """Verifies SSRF mitigation blocks internal/loopback hosts and redirects."""
-        from smart_download.core.html_resolver import _is_private_or_loopback_host, resolve_real_download_url
+        from faqih_downloader.core.html_resolver import _is_private_or_loopback_host, resolve_real_download_url
 
         self.assertTrue(_is_private_or_loopback_host("127.0.0.1"))
         self.assertTrue(_is_private_or_loopback_host("localhost"))
@@ -1855,7 +1855,7 @@ class TestPhase2SecurityAndHardening(unittest.TestCase):
 
     def test_preview_html_builder_xss_mitigation(self):
         """Verifies preview HTML escaping prevents </script> breakout and escapes iframe quotes."""
-        from smart_download.ui.modals.preview_html_builder import generate_preview_html
+        from faqih_downloader.ui.modals.preview_html_builder import generate_preview_html
 
         xss_url = 'https://example.com/embed" onload="alert(1)'
         xss_title = "Video </script><script>alert('xss')</script>"

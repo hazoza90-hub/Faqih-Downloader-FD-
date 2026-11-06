@@ -4,6 +4,8 @@
   "path": "C:\\Users\\hazoz\\OneDrive\\Desktop\\swi copy\\fd_host.bat",
   "type": "stdio",
   "allowed_origins": [
+    "chrome-extension://faqih-downloader-integration/",
+    "chrome-extension://com.faqihdownloader.extension/",
     "chrome-extension://smart-download-integration/",
     "chrome-extension://com.smartdownload.extension/",
     "chrome-extension://turbo-downloader-integration/",

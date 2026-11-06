@@ -1,6 +1,6 @@
 """
 Backward compatibility entry-point for updater.
-Logic has moved to smart_download.services.updater_service.
+Logic has moved to faqih_downloader.services.updater_service.
 """
 import sys
 import os
@@ -10,13 +10,13 @@ if os.path.isdir(_src_dir) and _src_dir not in sys.path:
     sys.path.insert(0, _src_dir)
 
 try:
-    from smart_download.services.core_patch_updater import init_core_loader
+    from faqih_downloader.services.core_patch_updater import init_core_loader
     init_core_loader()
 except Exception:
     pass
 
-from smart_download.services.updater_service import *
-from smart_download.services.updater_service import (
+from faqih_downloader.services.updater_service import *
+from faqih_downloader.services.updater_service import (
     APP_NAME,
     APP_ID,
     APP_VERSION,
@@ -43,6 +43,6 @@ from smart_download.services.updater_service import (
 )
 
 if __name__ == "__main__":
-    import smart_download.services.updater_service as _us
+    import faqih_downloader.services.updater_service as _us
     if hasattr(_us, "main"):
         _us.main()

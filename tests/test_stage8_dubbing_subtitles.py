@@ -8,12 +8,12 @@ import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
-from smart_download.services.youtube_models import (
+from faqih_downloader.services.youtube_models import (
     VideoFormatOption,
     YouTubeStreamInfo,
 )
-from smart_download.services.youtube_format_builder import YouTubeFormatBuilderMixin
-from smart_download.services.youtube_tracks import (
+from faqih_downloader.services.youtube_format_builder import YouTubeFormatBuilderMixin
+from faqih_downloader.services.youtube_tracks import (
     extract_audio_tracks,
     extract_subtitle_tracks,
     convert_vtt_to_srt,
@@ -367,7 +367,7 @@ Hello world from <i>smart</i> download!
         except Exception:
             return  # Headless environment
         try:
-            from smart_download.ui.modals.quality_modal import QualitySelectionModal
+            from faqih_downloader.ui.modals.quality_modal import QualitySelectionModal
             audio_tracks = [
                 {"track_id": "original", "language": "en", "label": "Original (Default)", "url": "http://audio_orig", "is_original": True},
                 {"track_id": "ar", "language": "ar", "label": "العربية (ar) - 128kbps", "url": "http://audio_ar", "is_original": False},
@@ -479,7 +479,7 @@ Hello world from <i>smart</i> download!
 
     def test_progressive_merge_stream_mapping(self):
         """Verifies merge_video_audio uses explicit stream mapping (-map 0:v:0 -map 1:a:0)."""
-        from smart_download.services.youtube_service import YouTubeResolver
+        from faqih_downloader.services.youtube_service import YouTubeResolver
         with tempfile.TemporaryDirectory() as tmpdir:
             v_path = os.path.join(tmpdir, "v.mp4")
             a_path = os.path.join(tmpdir, "a.m4a")
@@ -495,7 +495,7 @@ Hello world from <i>smart</i> download!
                 res.returncode = 0
                 return res
 
-            with patch("smart_download.services.youtube_service.find_ffmpeg_bin", return_value="ffmpeg"), \
+            with patch("faqih_downloader.services.youtube_service.find_ffmpeg_bin", return_value="ffmpeg"), \
                  patch("subprocess.run", side_effect=mock_run):
                 YouTubeResolver.merge_video_audio(v_path, a_path, out_path)
 
@@ -515,7 +515,7 @@ Hello world from <i>smart</i> download!
         option.selected_audio_track = {
             "track_id": "ar", "language": "ar", "url": "http://audio_ar", "is_original": False
         }
-        with patch("smart_download.services.youtube_format_builder.has_ffmpeg", return_value=False):
+        with patch("faqih_downloader.services.youtube_format_builder.has_ffmpeg", return_value=False):
             stream_info = self.builder.build_stream_info(info, option)
             self.assertTrue(stream_info.is_progressive)
 
@@ -534,10 +534,10 @@ Hello world from <i>smart</i> download!
             with open(v_path, "wb") as f: f.write(b"fake_video")
             with open(srt_path, "wb") as sf: sf.write(b"fake_srt")
 
-            with patch("smart_download.services.subtitle_processor.download_subtitle_as_srt", return_value=srt_path), \
-                 patch("smart_download.services.subtitle_processor.find_ffmpeg_bin") as mock_ffmpeg, \
-                 patch("smart_download.services.subtitle_processor.embed_subtitle_into_mp4") as mock_embed, \
-                 patch("smart_download.services.subtitle_processor.burn_subtitle_into_video") as mock_burn:
+            with patch("faqih_downloader.services.subtitle_processor.download_subtitle_as_srt", return_value=srt_path), \
+                 patch("faqih_downloader.services.subtitle_processor.find_ffmpeg_bin") as mock_ffmpeg, \
+                 patch("faqih_downloader.services.subtitle_processor.embed_subtitle_into_mp4") as mock_embed, \
+                 patch("faqih_downloader.services.subtitle_processor.burn_subtitle_into_video") as mock_burn:
                 handle_subtitles_post_download(stream_info, v_path, on_log=logs.append)
                 mock_ffmpeg.assert_not_called()
                 mock_embed.assert_not_called()
@@ -558,10 +558,10 @@ Hello world from <i>smart</i> download!
             with open(v_path, "wb") as f: f.write(b"fake_video")
             with open(srt_path, "wb") as sf: sf.write(b"fake_srt")
 
-            with patch("smart_download.services.subtitle_processor.download_subtitle_as_srt", return_value=srt_path), \
-                 patch("smart_download.services.subtitle_processor.find_ffmpeg_bin", return_value="ffmpeg"), \
-                 patch("smart_download.services.subtitle_processor.embed_subtitle_into_mp4", return_value=True) as mock_embed, \
-                 patch("smart_download.services.subtitle_processor.burn_subtitle_into_video") as mock_burn:
+            with patch("faqih_downloader.services.subtitle_processor.download_subtitle_as_srt", return_value=srt_path), \
+                 patch("faqih_downloader.services.subtitle_processor.find_ffmpeg_bin", return_value="ffmpeg"), \
+                 patch("faqih_downloader.services.subtitle_processor.embed_subtitle_into_mp4", return_value=True) as mock_embed, \
+                 patch("faqih_downloader.services.subtitle_processor.burn_subtitle_into_video") as mock_burn:
                 handle_subtitles_post_download(stream_info, v_path)
                 mock_embed.assert_called_once_with(v_path, srt_path, "ar", "ffmpeg", on_log=None)
                 mock_burn.assert_not_called()
@@ -580,10 +580,10 @@ Hello world from <i>smart</i> download!
             with open(v_path, "wb") as f: f.write(b"fake_video")
             with open(srt_path, "wb") as sf: sf.write(b"fake_srt")
 
-            with patch("smart_download.services.subtitle_processor.download_subtitle_as_srt", return_value=srt_path), \
-                 patch("smart_download.services.subtitle_processor.find_ffmpeg_bin", return_value="ffmpeg"), \
-                 patch("smart_download.services.subtitle_processor.burn_subtitle_into_video", return_value=True) as mock_burn, \
-                 patch("smart_download.services.subtitle_processor.embed_subtitle_into_mp4") as mock_embed:
+            with patch("faqih_downloader.services.subtitle_processor.download_subtitle_as_srt", return_value=srt_path), \
+                 patch("faqih_downloader.services.subtitle_processor.find_ffmpeg_bin", return_value="ffmpeg"), \
+                 patch("faqih_downloader.services.subtitle_processor.burn_subtitle_into_video", return_value=True) as mock_burn, \
+                 patch("faqih_downloader.services.subtitle_processor.embed_subtitle_into_mp4") as mock_embed:
                 handle_subtitles_post_download(stream_info, v_path)
                 mock_burn.assert_called_once_with(v_path, srt_path, "ffmpeg", on_log=None)
                 mock_embed.assert_not_called()
@@ -603,10 +603,10 @@ Hello world from <i>smart</i> download!
             with open(v_path, "wb") as f: f.write(b"fake_video")
             with open(srt_path, "wb") as sf: sf.write(b"fake_srt")
 
-            with patch("smart_download.services.subtitle_processor.download_subtitle_as_srt", return_value=srt_path), \
-                 patch("smart_download.services.subtitle_processor.find_ffmpeg_bin", return_value="ffmpeg"), \
-                 patch("smart_download.services.subtitle_processor.burn_subtitle_into_video", return_value=False) as mock_burn, \
-                 patch("smart_download.services.subtitle_processor.embed_subtitle_into_mp4", return_value=True) as mock_embed:
+            with patch("faqih_downloader.services.subtitle_processor.download_subtitle_as_srt", return_value=srt_path), \
+                 patch("faqih_downloader.services.subtitle_processor.find_ffmpeg_bin", return_value="ffmpeg"), \
+                 patch("faqih_downloader.services.subtitle_processor.burn_subtitle_into_video", return_value=False) as mock_burn, \
+                 patch("faqih_downloader.services.subtitle_processor.embed_subtitle_into_mp4", return_value=True) as mock_embed:
                 handle_subtitles_post_download(stream_info, v_path, on_log=logs.append)
                 mock_burn.assert_called_once()
                 mock_embed.assert_called_once_with(v_path, srt_path, "ar", "ffmpeg", on_log=logs.append)
@@ -661,7 +661,7 @@ Hello world from <i>smart</i> download!
         except Exception:
             return
         try:
-            from smart_download.services.youtube_tracks import build_audio_subtitle_row
+            from faqih_downloader.services.youtube_tracks import build_audio_subtitle_row
             audio = [{"track_id": "original", "language": "en", "label": "Original", "url": "u1", "is_original": True}]
             subs = [
                 {"sub_id": "none", "language": "none", "label": "None", "url": "", "is_auto": False},
@@ -722,7 +722,7 @@ Hello world from <i>smart</i> download!
             ext="mp4", filesize_approx=5000, is_progressive=True, video_url="http://vid"
         )
         option.subtitle_embed_mode = None  # Explicitly None
-        with patch("smart_download.config.get_setting", return_value="hard_burn"):
+        with patch("faqih_downloader.config.get_setting", return_value="hard_burn"):
             stream_info = self.builder.build_stream_info(info, option)
             self.assertEqual(stream_info.subtitle_embed_mode, "hard_burn")
 

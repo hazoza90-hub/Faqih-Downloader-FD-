@@ -16,11 +16,11 @@ if PROJECT_ROOT not in sys.path:
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
-from smart_download.utils.file_ops import (
+from faqih_downloader.utils.file_ops import (
     generate_unique_destination_path,
     apply_media_filename_tags,
 )
-from smart_download.core.history import DownloadHistoryManager
+from faqih_downloader.core.history import DownloadHistoryManager
 
 
 class TestConcurrentRedownloadAndTags(unittest.TestCase):
@@ -177,7 +177,7 @@ class TestConcurrentRedownloadAndTags(unittest.TestCase):
         Verifies enqueue_download alias exists on DownloadControllerMixin
         and queues downloads with unique destination paths when engine is active.
         """
-        from smart_download.ui.controllers.download_controller import DownloadControllerMixin
+        from faqih_downloader.ui.controllers.download_controller import DownloadControllerMixin
         from unittest.mock import MagicMock
 
         class MockApp(DownloadControllerMixin):
@@ -209,7 +209,7 @@ class TestConcurrentRedownloadAndTags(unittest.TestCase):
         Verifies queue progression when engine/coordinator finishes Download #1
         while Download #2 is queued (Download #2 transitions to 'In Progress' and is not re-queued).
         """
-        from smart_download.ui.controllers.download_controller import DownloadControllerMixin
+        from faqih_downloader.ui.controllers.download_controller import DownloadControllerMixin
         from unittest.mock import MagicMock
 
         class MockApp(DownloadControllerMixin):
@@ -273,8 +273,8 @@ class TestConcurrentRedownloadAndTags(unittest.TestCase):
         while Download #2 is queued as a media stream task via _launch_stream_coordinator.
         Download #2 must transition from 'Queued' to 'In Progress' and NOT be re-queued.
         """
-        from smart_download.ui.controllers.download_controller import DownloadControllerMixin
-        from smart_download.ui.controllers.youtube_download_controller import YouTubeDownloadControllerMixin
+        from faqih_downloader.ui.controllers.download_controller import DownloadControllerMixin
+        from faqih_downloader.ui.controllers.youtube_download_controller import YouTubeDownloadControllerMixin
         from unittest.mock import MagicMock, patch
 
         class MockMediaApp(DownloadControllerMixin, YouTubeDownloadControllerMixin):
@@ -313,7 +313,7 @@ class TestConcurrentRedownloadAndTags(unittest.TestCase):
         mock_info2.audio_size = 1000
         dest2 = os.path.join(self.tmp_dir, "Video 2 [1080p].mp4")
 
-        with patch("smart_download.ui.controllers.youtube_download_controller.StreamDownloadCoordinator") as mock_coord_cls:
+        with patch("faqih_downloader.ui.controllers.youtube_download_controller.StreamDownloadCoordinator") as mock_coord_cls:
             mock_coord_instance = MagicMock()
             mock_coord_instance.is_running = True
             mock_coord_cls.return_value = mock_coord_instance
@@ -343,7 +343,7 @@ class TestConcurrentRedownloadAndTags(unittest.TestCase):
         Verifies that calling _on_start_download with a media URL while an engine is running
         routes to _start_youtube_download and does NOT bypass it to enqueue direct download.
         """
-        from smart_download.ui.controllers.download_controller import DownloadControllerMixin
+        from faqih_downloader.ui.controllers.download_controller import DownloadControllerMixin
         from unittest.mock import MagicMock
 
         class MockApp(DownloadControllerMixin):
@@ -388,8 +388,8 @@ class TestConcurrentRedownloadAndTags(unittest.TestCase):
         Verifies _show_cached_quality_modal clones VideoFormatOption instances and generates
         unique (1) destination when the same media option is opened concurrently.
         """
-        from smart_download.ui.panels.media_options_bar import MediaOptionsBarMixin
-        from smart_download.services.youtube_models import VideoFormatOption
+        from faqih_downloader.ui.panels.media_options_bar import MediaOptionsBarMixin
+        from faqih_downloader.services.youtube_models import VideoFormatOption
         from unittest.mock import MagicMock, patch
 
         class MockWindow(MediaOptionsBarMixin):
@@ -429,7 +429,7 @@ class TestConcurrentRedownloadAndTags(unittest.TestCase):
             modal_instances.append(m)
             return m
 
-        with patch("smart_download.ui.panels.media_options_bar.QualitySelectionModal", side_effect=mock_modal):
+        with patch("faqih_downloader.ui.panels.media_options_bar.QualitySelectionModal", side_effect=mock_modal):
             win._show_cached_quality_modal(ctx)
             self.assertEqual(len(modal_instances), 1)
             first_opts = modal_instances[0].kwargs["options"]
@@ -458,7 +458,7 @@ class TestConcurrentRedownloadAndTags(unittest.TestCase):
         Verifies download_subtitle_as_srt falls back to extracting browser cookies
         when direct fetch returns HTTP 429.
         """
-        from smart_download.services.subtitle_processor import download_subtitle_as_srt
+        from faqih_downloader.services.subtitle_processor import download_subtitle_as_srt
         from unittest.mock import MagicMock, patch
 
         sub_track = {
@@ -486,7 +486,7 @@ class TestConcurrentRedownloadAndTags(unittest.TestCase):
         mock_cookiejar = MagicMock()
 
         with patch("requests.get", side_effect=mock_requests_get), \
-             patch("smart_download.services.subtitle_processor.detect_installed_cookie_browsers", return_value=["chrome"]), \
+             patch("faqih_downloader.services.subtitle_processor.detect_installed_cookie_browsers", return_value=["chrome"]), \
              patch("yt_dlp.cookies.extract_cookies_from_browser", return_value=mock_cookiejar):
             srt_path = download_subtitle_as_srt(sub_track, video_file)
             self.assertIsNotNone(srt_path)

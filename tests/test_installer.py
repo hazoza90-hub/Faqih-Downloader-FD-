@@ -248,10 +248,10 @@ class TestWindowsInstallerLogic(unittest.TestCase):
 
             with patch.object(installer, "get_desktop_dir", return_value=tmp_desktop), \
                  patch.object(installer, "get_start_menu_programs_dir", return_value=tmp_start), \
-                 patch("smart_download.installer.installer_ops.terminate_running_app"), \
-                 patch("smart_download.installer.installer_ops.register_startup_entries"), \
-                 patch("smart_download.installer.installer_ops.unregister_startup_entries"), \
-                 patch("smart_download.installer.installer_ops.register_uninstall_entry"):
+                 patch("faqih_downloader.installer.installer_ops.terminate_running_app"), \
+                 patch("faqih_downloader.installer.installer_ops.register_startup_entries"), \
+                 patch("faqih_downloader.installer.installer_ops.unregister_startup_entries"), \
+                 patch("faqih_downloader.installer.installer_ops.register_uninstall_entry"):
                 res = installer.install_application(
                     target_dir=tmp_target,
                     create_desktop=True,
@@ -276,11 +276,11 @@ class TestWindowsInstallerLogic(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             install_target = os.path.join(tmp_dir, "InstalledTurbo")
 
-            with patch("smart_download.installer.installer_ops.terminate_running_app"), \
-                 patch("smart_download.installer.installer_ops.register_startup_entries"), \
-                 patch("smart_download.installer.installer_ops.unregister_startup_entries"), \
-                 patch("smart_download.installer.installer_ops.register_uninstall_entry"), \
-                 patch("smart_download.installer.installer_ops.unregister_uninstall_entry"):
+            with patch("faqih_downloader.installer.installer_ops.terminate_running_app"), \
+                 patch("faqih_downloader.installer.installer_ops.register_startup_entries"), \
+                 patch("faqih_downloader.installer.installer_ops.unregister_startup_entries"), \
+                 patch("faqih_downloader.installer.installer_ops.register_uninstall_entry"), \
+                 patch("faqih_downloader.installer.installer_ops.unregister_uninstall_entry"):
                 # Execute install into test folder
                 res = installer.install_application(
                     target_dir=install_target,
@@ -323,10 +323,10 @@ class TestWindowsInstallerLogic(unittest.TestCase):
 
             self.assertTrue(os.path.isfile(legacy1))
 
-            with patch("smart_download.installer.installer_ops.terminate_running_app"), \
-                 patch("smart_download.installer.installer_ops.register_startup_entries"), \
-                 patch("smart_download.installer.installer_ops.unregister_startup_entries"), \
-                 patch("smart_download.installer.installer_ops.register_uninstall_entry"):
+            with patch("faqih_downloader.installer.installer_ops.terminate_running_app"), \
+                 patch("faqih_downloader.installer.installer_ops.register_startup_entries"), \
+                 patch("faqih_downloader.installer.installer_ops.unregister_startup_entries"), \
+                 patch("faqih_downloader.installer.installer_ops.register_uninstall_entry"):
                 res = installer.install_application(
                     target_dir=install_target,
                     create_desktop=False,
@@ -374,9 +374,9 @@ class TestWindowsInstallerLogic(unittest.TestCase):
 
                 with patch.object(installer, "get_startup_dir", return_value=tmp_startup), \
                      patch("subprocess.run", side_effect=mock_subprocess_run), \
-                     patch("smart_download.installer.installer_ops.terminate_running_app"), \
-                     patch("smart_download.installer.installer_ops.register_uninstall_entry"), \
-                     patch("smart_download.installer.installer_ops.unregister_uninstall_entry"):
+                     patch("faqih_downloader.installer.installer_ops.terminate_running_app"), \
+                     patch("faqih_downloader.installer.installer_ops.register_uninstall_entry"), \
+                     patch("faqih_downloader.installer.installer_ops.unregister_uninstall_entry"):
 
                     res = installer.install_application(
                         target_dir=tmp_target,
@@ -467,9 +467,9 @@ class TestWindowsInstallerLogic(unittest.TestCase):
                     f.write(b"FAKE_LNK")
 
                 with patch.object(installer, "get_startup_dir", return_value=tmp_startup), \
-                     patch("smart_download.installer.installer_ops.terminate_running_app"), \
-                     patch("smart_download.installer.installer_ops.register_uninstall_entry"), \
-                     patch("smart_download.installer.installer_ops.unregister_uninstall_entry"):
+                     patch("faqih_downloader.installer.installer_ops.terminate_running_app"), \
+                     patch("faqih_downloader.installer.installer_ops.register_uninstall_entry"), \
+                     patch("faqih_downloader.installer.installer_ops.unregister_uninstall_entry"):
                     res = installer.install_application(
                         target_dir=tmp_target,
                         create_desktop=False,
@@ -531,7 +531,7 @@ class TestWindowsInstallerLogic(unittest.TestCase):
                 self.assertTrue(os.path.isfile(hm_copy), "host_manifest.py must be present in payload")
                 with open(reg_copy, "r", encoding="utf-8") as f:
                     content = f.read()
-                self.assertNotIn("from smart_download.services.browser.registry import *", content, "Payload register_browser.py must not be the root shim")
+                self.assertNotIn("from faqih_downloader.services.browser.registry import *", content, "Payload register_browser.py must not be the root shim")
                 self.assertIn("compute_unpacked_extension_id", content, "Payload must contain full registry logic")
 
                 # Verify register_browser.py in payload executes standalone without relative import errors
@@ -547,10 +547,10 @@ class TestWindowsInstallerLogic(unittest.TestCase):
                 with open(os.path.join(tmp_target, name), "w") as f:
                     f.write("stale")
 
-            with patch("smart_download.installer.installer_ops.terminate_running_app"), \
-                 patch("smart_download.installer.installer_ops.register_startup_entries"), \
-                 patch("smart_download.installer.installer_ops.unregister_startup_entries"), \
-                 patch("smart_download.installer.installer_ops.register_uninstall_entry", return_value=True) as mock_reg_uninst:
+            with patch("faqih_downloader.installer.installer_ops.terminate_running_app"), \
+                 patch("faqih_downloader.installer.installer_ops.register_startup_entries"), \
+                 patch("faqih_downloader.installer.installer_ops.unregister_startup_entries"), \
+                 patch("faqih_downloader.installer.installer_ops.register_uninstall_entry", return_value=True) as mock_reg_uninst:
                 res = installer.install_application(
                     target_dir=tmp_target,
                     create_desktop=False,
@@ -576,10 +576,10 @@ class TestWindowsInstallerLogic(unittest.TestCase):
 
     def test_handle_uninstall_cli_silent(self):
         """Verifies handle_uninstall_cli with --silent calls uninstall_application and exits cleanly."""
-        from smart_download.installer.uninstaller_runner import handle_uninstall_cli
+        from faqih_downloader.installer.uninstaller_runner import handle_uninstall_cli
 
         with tempfile.TemporaryDirectory() as tmp_target:
-            with patch("smart_download.installer.uninstaller_runner.uninstall_application", return_value={"success": True}) as mock_uninst, \
+            with patch("faqih_downloader.installer.uninstaller_runner.uninstall_application", return_value={"success": True}) as mock_uninst, \
                  patch("sys.exit", side_effect=SystemExit(0)) as mock_exit:
                 with self.assertRaises(SystemExit):
                     handle_uninstall_cli(["--uninstall", "--silent", "--dir", tmp_target])
@@ -588,7 +588,7 @@ class TestWindowsInstallerLogic(unittest.TestCase):
 
     def test_handle_uninstall_cli_frozen_clones_to_temp(self):
         """Verifies handle_uninstall_cli when frozen inside target clones executable to temp and spawns with --uninstall-gui."""
-        from smart_download.installer.uninstaller_runner import handle_uninstall_cli
+        from faqih_downloader.installer.uninstaller_runner import handle_uninstall_cli
 
         with tempfile.TemporaryDirectory() as tmp_target:
             fake_exe = os.path.join(tmp_target, "FaqihDownloader.exe")
@@ -611,7 +611,7 @@ class TestWindowsInstallerLogic(unittest.TestCase):
 
     def test_terminate_running_app_excludes_current_pid(self):
         """Verifies terminate_running_app includes 'PID ne <current_pid>' in taskkill arguments."""
-        from smart_download.installer.installer_ops import terminate_running_app
+        from faqih_downloader.installer.installer_ops import terminate_running_app
 
         with patch("sys.platform", "win32"), \
              patch("subprocess.run") as mock_run, \
@@ -626,7 +626,7 @@ class TestWindowsInstallerLogic(unittest.TestCase):
 
     def test_handle_uninstall_cli_frozen_case_insensitive_path(self):
         """Verifies handle_uninstall_cli handles Windows drive letter case mismatch between executable and target_dir."""
-        from smart_download.installer.uninstaller_runner import handle_uninstall_cli
+        from faqih_downloader.installer.uninstaller_runner import handle_uninstall_cli
 
         with tempfile.TemporaryDirectory() as tmp_target:
             target_norm = os.path.abspath(tmp_target)
@@ -650,7 +650,7 @@ class TestWindowsInstallerLogic(unittest.TestCase):
 
     def test_handle_uninstall_cli_temp_lock_fallback(self):
         """Verifies handle_uninstall_cli falls back to PID-specific temp file when default temp uninstaller is locked."""
-        from smart_download.installer.uninstaller_runner import handle_uninstall_cli
+        from faqih_downloader.installer.uninstaller_runner import handle_uninstall_cli
 
         with tempfile.TemporaryDirectory() as tmp_target:
             fake_exe = os.path.join(tmp_target, "FaqihDownloader.exe")
@@ -677,7 +677,7 @@ class TestWindowsInstallerLogic(unittest.TestCase):
 
     def test_handle_uninstall_cli_frozen_silent_clones_to_temp(self):
         """Verifies handle_uninstall_cli when frozen and --silent clones executable to temp and spawns with --uninstall-worker."""
-        from smart_download.installer.uninstaller_runner import handle_uninstall_cli
+        from faqih_downloader.installer.uninstaller_runner import handle_uninstall_cli
 
         with tempfile.TemporaryDirectory() as tmp_target:
             fake_exe = os.path.join(tmp_target, "FaqihDownloader.exe")
@@ -701,11 +701,11 @@ class TestWindowsInstallerLogic(unittest.TestCase):
 
     def test_handle_uninstall_cli_worker_mode(self):
         """Verifies handle_uninstall_cli in worker mode runs uninstall_application, schedules cleanup and exits."""
-        from smart_download.installer.uninstaller_runner import handle_uninstall_cli
+        from faqih_downloader.installer.uninstaller_runner import handle_uninstall_cli
 
         with tempfile.TemporaryDirectory() as tmp_target:
-            with patch("smart_download.installer.uninstaller_runner.uninstall_application", return_value={"success": True}) as mock_uninst, \
-                 patch("smart_download.installer.uninstaller_runner._schedule_temp_uninstaller_cleanup") as mock_cleanup, \
+            with patch("faqih_downloader.installer.uninstaller_runner.uninstall_application", return_value={"success": True}) as mock_uninst, \
+                 patch("faqih_downloader.installer.uninstaller_runner._schedule_temp_uninstaller_cleanup") as mock_cleanup, \
                  patch("sys.exit", side_effect=SystemExit(0)) as mock_exit:
                 with self.assertRaises(SystemExit):
                     handle_uninstall_cli(["--uninstall-worker", "--silent", "--dir", tmp_target])
@@ -715,7 +715,7 @@ class TestWindowsInstallerLogic(unittest.TestCase):
 
     def test_handle_uninstall_cli_dir_argument_syntax(self):
         """Verifies handle_uninstall_cli correctly parses --dir=<path> and POSIX paths starting with '/'."""
-        from smart_download.installer.uninstaller_runner import handle_uninstall_cli
+        from faqih_downloader.installer.uninstaller_runner import handle_uninstall_cli
 
         test_cases = [
             (["--uninstall", "--silent", "--dir=/tmp/my_app"], os.path.abspath("/tmp/my_app")),
@@ -724,29 +724,29 @@ class TestWindowsInstallerLogic(unittest.TestCase):
             (["--uninstall", "--silent", "--dir", "/tmp/my_app"], os.path.abspath("/tmp/my_app")),
         ]
         for cmd_args, expected_dir in test_cases:
-            with patch("smart_download.installer.uninstaller_runner.uninstall_application", return_value={"success": True}) as mock_uninst, \
+            with patch("faqih_downloader.installer.uninstaller_runner.uninstall_application", return_value={"success": True}) as mock_uninst, \
                  patch("sys.exit", side_effect=SystemExit(0)):
                 with self.assertRaises(SystemExit):
                     handle_uninstall_cli(cmd_args)
                 mock_uninst.assert_called_once_with(target_dir=expected_dir)
 
         # Flag followed by another flag (--silent) should not accept the flag as dir
-        with patch("smart_download.installer.uninstaller_runner.uninstall_application", return_value={"success": True}) as mock_uninst, \
+        with patch("faqih_downloader.installer.uninstaller_runner.uninstall_application", return_value={"success": True}) as mock_uninst, \
              patch("sys.exit", side_effect=SystemExit(0)):
             with self.assertRaises(SystemExit):
                 handle_uninstall_cli(["--uninstall", "--dir", "--silent"])
-            from smart_download.installer.installer_ops import DEFAULT_INSTALL_DIR
+            from faqih_downloader.installer.installer_ops import DEFAULT_INSTALL_DIR
             mock_uninst.assert_called_once_with(target_dir=os.path.abspath(DEFAULT_INSTALL_DIR))
 
     def test_early_single_instance_guard_bypasses_all_uninstall_variants(self):
         """Verifies early_single_instance_guard bypasses mutex checks for all case/syntax variants of uninstall flags."""
-        from smart_download.services.single_instance import early_single_instance_guard
+        from faqih_downloader.services.single_instance import early_single_instance_guard
 
         variants = ["--uninstall", "--UNINSTALL", "/u", "/U", "-u", "-U", "/uninstall", "/UNINSTALL", "-uninstall", "--uninstall-worker"]
         for flag in variants:
             with patch("sys.argv", ["SmartDownload.exe", flag]), \
-                 patch("smart_download.services.single_instance.acquire_single_instance_mutex") as mock_acq, \
-                 patch("smart_download.services.single_instance.notify_running_instance") as mock_notify:
+                 patch("faqih_downloader.services.single_instance.acquire_single_instance_mutex") as mock_acq, \
+                 patch("faqih_downloader.services.single_instance.notify_running_instance") as mock_notify:
                 early_single_instance_guard()
                 mock_acq.assert_not_called()
                 mock_notify.assert_not_called()
@@ -754,7 +754,7 @@ class TestWindowsInstallerLogic(unittest.TestCase):
     def test_schedule_temp_uninstaller_cleanup_encodes_powershell_base64(self):
         """Verifies _schedule_temp_uninstaller_cleanup spawns PowerShell with base64 EncodedCommand targeting PID and self exe."""
         import base64
-        from smart_download.installer.uninstaller_runner import _schedule_temp_uninstaller_cleanup
+        from faqih_downloader.installer.uninstaller_runner import _schedule_temp_uninstaller_cleanup
 
         fake_temp_exe = os.path.join(tempfile.gettempdir(), "SmartDownload-Uninstaller.exe")
         with patch("sys.frozen", True, create=True), \
@@ -942,7 +942,7 @@ class TestWindowsInstallerLogic(unittest.TestCase):
 
     def test_installer_shim_bidirectional_monkeypatching(self):
         """Verifies _InstallerShim synchronizes monkeypatches bidirectionally between installer and ops/reg/gui."""
-        import smart_download.installer.installer_ops as ops
+        import faqih_downloader.installer.installer_ops as ops
 
         # Patching sub-module propagates to root installer shim
         with patch.object(ops, "find_payload_sources", return_value={"mock_test": True}):
@@ -956,7 +956,7 @@ class TestWindowsInstallerLogic(unittest.TestCase):
         """Verifies register_startup_entries uses HKCU Run as canonical, cleans duplicates, and skips redundant tasks."""
         if not sys.platform.startswith("win"):
             self.skipTest("Windows-only test")
-        from smart_download.installer.installer_registry import register_startup_entries
+        from faqih_downloader.installer.installer_registry import register_startup_entries
         from unittest.mock import MagicMock, patch
 
         mock_winreg = MagicMock()
@@ -965,9 +965,9 @@ class TestWindowsInstallerLogic(unittest.TestCase):
         mock_winreg.REG_SZ = 1
         mock_winreg.REG_BINARY = 3
 
-        with patch("smart_download.installer.installer_registry.HAS_WINREG", True), \
-             patch("smart_download.installer.installer_registry.winreg", mock_winreg), \
-             patch("smart_download.installer.installer_registry.get_startup_dir", return_value="C:\\FakeStartup"), \
+        with patch("faqih_downloader.installer.installer_registry.HAS_WINREG", True), \
+             patch("faqih_downloader.installer.installer_registry.winreg", mock_winreg), \
+             patch("faqih_downloader.installer.installer_registry.get_startup_dir", return_value="C:\\FakeStartup"), \
              patch("subprocess.run") as mock_subproc:
             res = register_startup_entries("C:\\FakePath\\SmartDownload.exe")
             self.assertTrue(res["run_key"])
@@ -981,7 +981,7 @@ class TestWindowsInstallerLogic(unittest.TestCase):
         """Verifies register_startup_entries falls back to Scheduled Task and Shortcut when HKCU Run fails."""
         if not sys.platform.startswith("win"):
             self.skipTest("Windows-only test")
-        from smart_download.installer.installer_registry import register_startup_entries
+        from faqih_downloader.installer.installer_registry import register_startup_entries
         from unittest.mock import MagicMock, patch
 
         mock_winreg = MagicMock()
@@ -991,8 +991,8 @@ class TestWindowsInstallerLogic(unittest.TestCase):
         mock_proc_ok.returncode = 0
 
         # Scenario 1: Run key fails, Scheduled Task succeeds
-        with patch("smart_download.installer.installer_registry.HAS_WINREG", True), \
-             patch("smart_download.installer.installer_registry.winreg", mock_winreg), \
+        with patch("faqih_downloader.installer.installer_registry.HAS_WINREG", True), \
+             patch("faqih_downloader.installer.installer_registry.winreg", mock_winreg), \
              patch("subprocess.run", return_value=mock_proc_ok) as mock_subproc:
             res = register_startup_entries("C:\\FakePath\\SmartDownload.exe")
             self.assertFalse(res["run_key"])
@@ -1002,11 +1002,11 @@ class TestWindowsInstallerLogic(unittest.TestCase):
         # Scenario 2: Run key fails AND Scheduled Task fails -> falls back to shortcut
         mock_proc_fail = MagicMock()
         mock_proc_fail.returncode = 1
-        with patch("smart_download.installer.installer_registry.HAS_WINREG", True), \
-             patch("smart_download.installer.installer_registry.winreg", mock_winreg), \
+        with patch("faqih_downloader.installer.installer_registry.HAS_WINREG", True), \
+             patch("faqih_downloader.installer.installer_registry.winreg", mock_winreg), \
              patch("subprocess.run", return_value=mock_proc_fail), \
-             patch("smart_download.installer.installer_registry.get_startup_dir", return_value="C:\\FakeStartup"), \
-             patch("smart_download.installer.installer_registry.create_windows_shortcut", return_value=True) as mock_shortcut:
+             patch("faqih_downloader.installer.installer_registry.get_startup_dir", return_value="C:\\FakeStartup"), \
+             patch("faqih_downloader.installer.installer_registry.create_windows_shortcut", return_value=True) as mock_shortcut:
             res = register_startup_entries("C:\\FakePath\\SmartDownload.exe")
             self.assertFalse(res["run_key"])
             self.assertFalse(res["scheduled_task"])
@@ -1078,7 +1078,7 @@ class TestStandaloneExeBuild(unittest.TestCase):
         from build_installer import clean_stale_shadow_modules
         pycache_dir = os.path.join(PROJECT_ROOT, "__pycache__")
         os.makedirs(pycache_dir, exist_ok=True)
-        dummy_pyc = os.path.join(pycache_dir, "smart_download.cpython-999.pyc")
+        dummy_pyc = os.path.join(pycache_dir, "faqih_downloader.cpython-999.pyc")
         with open(dummy_pyc, "w") as f:
             f.write("dummy")
         self.assertTrue(os.path.isfile(dummy_pyc))
@@ -1087,8 +1087,8 @@ class TestStandaloneExeBuild(unittest.TestCase):
 
     def test_install_application_purges_stale_core_plugin(self):
         """Verifies that install_application purges %APPDATA%\\SmartDownload\\core_plugin."""
-        from smart_download.installer import install_application
-        from smart_download.services.core_patch_updater import get_core_plugin_dir
+        from faqih_downloader.installer import install_application
+        from faqih_downloader.services.core_patch_updater import get_core_plugin_dir
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             dummy_plugin = os.path.join(tmp_dir, "core_plugin")
@@ -1098,11 +1098,11 @@ class TestStandaloneExeBuild(unittest.TestCase):
                 f.write("stale")
 
             target_install = os.path.join(tmp_dir, "install_target")
-            with patch("smart_download.services.core_patch_updater.get_core_plugin_dir", return_value=dummy_plugin), \
-                 patch("smart_download.installer.installer_ops.terminate_running_app"), \
-                 patch("smart_download.installer.installer_ops.register_startup_entries"), \
-                 patch("smart_download.installer.installer_ops.unregister_startup_entries"), \
-                 patch("smart_download.installer.installer_ops.register_uninstall_entry"):
+            with patch("faqih_downloader.services.core_patch_updater.get_core_plugin_dir", return_value=dummy_plugin), \
+                 patch("faqih_downloader.installer.installer_ops.terminate_running_app"), \
+                 patch("faqih_downloader.installer.installer_ops.register_startup_entries"), \
+                 patch("faqih_downloader.installer.installer_ops.unregister_startup_entries"), \
+                 patch("faqih_downloader.installer.installer_ops.register_uninstall_entry"):
                 install_application(
                     target_dir=target_install,
                     register_browser=False,
@@ -1118,7 +1118,7 @@ class TestStandaloneExeBuild(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             dummy_plugin = os.path.join(tmp_dir, "core_plugin")
             os.makedirs(dummy_plugin, exist_ok=True)
-            with patch("smart_download.services.core_patch_updater.get_core_plugin_dir", return_value=dummy_plugin):
+            with patch("faqih_downloader.services.core_patch_updater.get_core_plugin_dir", return_value=dummy_plugin):
                 purge_stale_core_plugin()
             self.assertFalse(os.path.exists(dummy_plugin), "purge_stale_core_plugin failed to remove directory")
 

@@ -14,11 +14,11 @@ import unittest
 import tkinter as tk
 from unittest.mock import MagicMock, patch
 
-from smart_download.locales.i18n import LocalizationManager, tr
-from smart_download.ui.main_window import ModernFramelessGUI
-from smart_download.ui.panels.kanban_panel import KanbanPanelMixin
-from smart_download.ui.components.led_matrix import LedEqualizerMatrix
-from smart_download.utils.window_effects import (
+from faqih_downloader.locales.i18n import LocalizationManager, tr
+from faqih_downloader.ui.main_window import ModernFramelessGUI
+from faqih_downloader.ui.panels.kanban_panel import KanbanPanelMixin
+from faqih_downloader.ui.components.led_matrix import LedEqualizerMatrix
+from faqih_downloader.utils.window_effects import (
     apply_acrylic_or_mica_effect,
     draw_rounded_rect,
     draw_glow_border,
@@ -66,7 +66,7 @@ class TestKanbanPipeline(unittest.TestCase):
         """Verifies zero hardcoded fake/demo filenames, URLs, or speeds exist in kanban_panel.py."""
         kanban_path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "src", "smart_download", "ui", "panels", "kanban_panel.py"
+            "src", "faqih_downloader", "ui", "panels", "kanban_panel.py"
         )
         with open(kanban_path, "r", encoding="utf-8") as f:
             code = f.read()
@@ -202,7 +202,7 @@ class TestKanbanPipeline(unittest.TestCase):
 
     def test_window_effects_and_rounded_drawing(self):
         """Verifies Acrylic/Mica backdrop helper, RoundedGlassCard, and rounded Canvas drawing run safely."""
-        from smart_download.utils.window_effects import RoundedGlassCard
+        from faqih_downloader.utils.window_effects import RoundedGlassCard
         res = apply_acrylic_or_mica_effect(self.root, alpha=0.93)
         self.assertTrue(isinstance(res, bool))
 
@@ -223,7 +223,7 @@ class TestKanbanPipeline(unittest.TestCase):
 
     def test_kanban_components_are_rounded_glass_cards(self):
         """Verifies cards, glowing column border, and url field are Canvas-based RoundedGlassCard instances."""
-        from smart_download.utils.window_effects import RoundedGlassCard
+        from faqih_downloader.utils.window_effects import RoundedGlassCard
         gui = ModernFramelessGUI(self.root, start_hidden=True)
         try:
             # Active column border is a RoundedGlassCard canvas
@@ -251,7 +251,7 @@ class TestKanbanPipeline(unittest.TestCase):
 
     def test_transparency_setting_and_stream_coordinator_resolution(self):
         """Verifies window_alpha setting and active stream filename resolution from coordinator destination_path."""
-        from smart_download.config import get_setting, set_setting
+        from faqih_downloader.config import get_setting, set_setting
         gui = ModernFramelessGUI(self.root, start_hidden=True)
         try:
             # Window alpha setting

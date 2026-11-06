@@ -13,35 +13,35 @@ if os.path.isdir(_src_dir) and _src_dir not in sys.path:
     sys.path.insert(0, _src_dir)
 
 # 1. UI Controllers
-from smart_download.ui.controllers.locale_controller import LocaleControllerMixin
-from smart_download.ui.controllers.speed_limiter_controller import SpeedLimiterControllerMixin
-from smart_download.ui.controllers.settings_controller import SettingsControllerMixin
-from smart_download.ui.controllers.youtube_download_controller import YouTubeDownloadControllerMixin
-from smart_download.ui.controllers.batch_download_controller import BatchDownloadControllerMixin
-from smart_download.ui.controllers.link_refresh_controller import LinkRefreshControllerMixin
-from smart_download.ui.controllers.media_download_controller import MediaDownloadControllerMixin
-from smart_download.ui.controllers.dialog_controller import DialogControllerMixin
-from smart_download.ui.controllers.lifecycle_controller import WindowLifecycleMixin
-from smart_download.ui.controllers.toast_controller import ToastControllerMixin
-from smart_download.ui.controllers.update_controller import UpdateControllerMixin
-from smart_download.ui.controllers.theme_controller import ThemeControllerMixin
-from smart_download.ui.controllers.dispatch_controller import DispatchControllerMixin
-from smart_download.ui.controllers.window_controller import WindowChromeMixin
+from faqih_downloader.ui.controllers.locale_controller import LocaleControllerMixin
+from faqih_downloader.ui.controllers.speed_limiter_controller import SpeedLimiterControllerMixin
+from faqih_downloader.ui.controllers.settings_controller import SettingsControllerMixin
+from faqih_downloader.ui.controllers.youtube_download_controller import YouTubeDownloadControllerMixin
+from faqih_downloader.ui.controllers.batch_download_controller import BatchDownloadControllerMixin
+from faqih_downloader.ui.controllers.link_refresh_controller import LinkRefreshControllerMixin
+from faqih_downloader.ui.controllers.media_download_controller import MediaDownloadControllerMixin
+from faqih_downloader.ui.controllers.dialog_controller import DialogControllerMixin
+from faqih_downloader.ui.controllers.lifecycle_controller import WindowLifecycleMixin
+from faqih_downloader.ui.controllers.toast_controller import ToastControllerMixin
+from faqih_downloader.ui.controllers.update_controller import UpdateControllerMixin
+from faqih_downloader.ui.controllers.theme_controller import ThemeControllerMixin
+from faqih_downloader.ui.controllers.dispatch_controller import DispatchControllerMixin
+from faqih_downloader.ui.controllers.window_controller import WindowChromeMixin
 
 # 2. UI Panels
-from smart_download.ui.panels.metrics_panel import MetricsPanelMixin
-from smart_download.ui.panels.chunks_panel import ChunksPanelMixin
-from smart_download.ui.panels.controls_panel import ControlsPanelMixin
-from smart_download.ui.panels.inputs_panel import InputsPanelMixin
+from faqih_downloader.ui.panels.metrics_panel import MetricsPanelMixin
+from faqih_downloader.ui.panels.chunks_panel import ChunksPanelMixin
+from faqih_downloader.ui.panels.controls_panel import ControlsPanelMixin
+from faqih_downloader.ui.panels.inputs_panel import InputsPanelMixin
 
 # 3. Core & Utils
-from smart_download.core.engine_resumer import EngineResumerMixin
-from smart_download.core.engine_workers import EngineWorkersMixin
-from smart_download.core.engine import TurboDownloadEngine
-from smart_download.utils.magic_detector import MagicBytesDetector
-from smart_download.utils.archive_utils import calculate_file_integrity, auto_unpack_archive
-from smart_download.utils.speed_utils import parse_speed_limit, format_speed
-from smart_download.utils.file_ops import (
+from faqih_downloader.core.engine_resumer import EngineResumerMixin
+from faqih_downloader.core.engine_workers import EngineWorkersMixin
+from faqih_downloader.core.engine import TurboDownloadEngine
+from faqih_downloader.utils.magic_detector import MagicBytesDetector
+from faqih_downloader.utils.archive_utils import calculate_file_integrity, auto_unpack_archive
+from faqih_downloader.utils.speed_utils import parse_speed_limit, format_speed
+from faqih_downloader.utils.file_ops import (
     CATEGORY_SUBFOLDERS,
     get_file_category_and_icon,
     resolve_categorized_path,
@@ -51,11 +51,11 @@ from smart_download.utils.file_ops import (
     calculate_file_integrity as ReExportedIntegrity,
     auto_unpack_archive as ReExportedUnpack,
 )
-from smart_download.utils.url_utils import (
+from faqih_downloader.utils.url_utils import (
     parse_speed_limit as ReExportedParseSpeed,
     format_speed as ReExportedFormatSpeed,
 )
-from smart_download.ui.main_window import ModernFramelessGUI
+from faqih_downloader.ui.main_window import ModernFramelessGUI
 import turbo_downloader as td
 
 

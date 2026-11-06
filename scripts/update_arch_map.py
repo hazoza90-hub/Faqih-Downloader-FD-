@@ -1,6 +1,6 @@
 """
 Architecture Map Auto-Generator and Verifier (scripts/update_arch_map.py).
-Scans src/smart_download/, root shims, and tests/ via Python's ast module,
+Scans src/faqih_downloader/, root shims, and tests/ via Python's ast module,
 verifies strict line limits (<550 lines), and synchronizes GEMINI.md and AGENTS.md.
 """
 import os
@@ -10,7 +10,7 @@ import json
 from typing import Dict, List, Tuple, Any, Optional
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SRC_DIR = os.path.join(PROJECT_ROOT, "src", "smart_download")
+SRC_DIR = os.path.join(PROJECT_ROOT, "src", "faqih_downloader")
 TESTS_DIR = os.path.join(PROJECT_ROOT, "tests")
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -24,395 +24,395 @@ MAX_LINES_PER_FILE = 550
 # Predefined contextual responsibilities and "when to edit" hints
 FILE_METADATA: Dict[str, Dict[str, str]] = {
     # Core package
-    "src/smart_download/__init__.py": {
+    "src/faqih_downloader/__init__.py": {
         "responsibility": "Package initialization and unified namespace re-exports for the core application.",
         "when_to_edit": "Edit when exposing new subpackages or top-level public APIs."
     },
-    "src/smart_download/config.py": {
+    "src/faqih_downloader/config.py": {
         "responsibility": "Configuration constants, path resolvers, and settings file I/O with caching.",
         "when_to_edit": "Edit when modifying app constants, version, default settings, or storage directories."
     },
-    "src/smart_download/i18n.py": {
+    "src/faqih_downloader/i18n.py": {
         "responsibility": "Backward-compatible i18n import shim redirecting to locales.i18n.",
         "when_to_edit": "Edit if re-exporting additional translation functions."
     },
-    "src/smart_download/main.py": {
+    "src/faqih_downloader/main.py": {
         "responsibility": "Main runtime GUI entry point initializing Tkinter and launching ModernFramelessGUI.",
         "when_to_edit": "Edit when altering CLI argument parsing at launch or main window instantiation."
     },
-    "src/smart_download/core/__init__.py": {
+    "src/faqih_downloader/core/__init__.py": {
         "responsibility": "Re-exports core download engine, chunking, and candidate resolution components.",
         "when_to_edit": "Edit when adding new core download engine modules."
     },
-    "src/smart_download/core/candidate_extractor.py": {
+    "src/faqih_downloader/core/candidate_extractor.py": {
         "responsibility": "HTML link extraction using regex patterns and HTML link candidate parsers.",
         "when_to_edit": "Edit when updating candidate download link parsing patterns from HTML documents."
     },
-    "src/smart_download/core/chunk.py": {
+    "src/faqih_downloader/core/chunk.py": {
         "responsibility": "DownloadChunk data class, per-chunk thread state, and permissive SSL context helper.",
         "when_to_edit": "Edit when changing per-chunk data structures or SSL verification policies."
     },
-    "src/smart_download/core/engine.py": {
+    "src/faqih_downloader/core/engine.py": {
         "responsibility": "TurboDownloadEngine coordinating multi-threaded chunked downloads and rate limiting.",
         "when_to_edit": "Edit when altering download orchestration, speed monitoring, or thread lifecycle."
     },
-    "src/smart_download/core/engine_persistence.py": {
+    "src/faqih_downloader/core/engine_persistence.py": {
         "responsibility": "State persistence mixin saving and resuming partial download progress via .sd_parts.",
         "when_to_edit": "Edit when changing chunk serialization or resume manifest structure."
     },
-    "src/smart_download/core/engine_resumer.py": {
+    "src/faqih_downloader/core/engine_resumer.py": {
         "responsibility": "Engine resumer mixin validating server HTTP range support and multi-chunk compatibility.",
         "when_to_edit": "Edit when modifying HTTP range probe logic or server capability checks."
     },
-    "src/smart_download/core/engine_workers.py": {
+    "src/faqih_downloader/core/engine_workers.py": {
         "responsibility": "Engine worker pool mixin managing download streams and dynamic midpoint splitting.",
         "when_to_edit": "Edit when modifying parallel worker thread loops or dynamic chunk splitting rules."
     },
-    "src/smart_download/core/history.py": {
+    "src/faqih_downloader/core/history.py": {
         "responsibility": "Persistent download history manager tracking completed and active download records.",
         "when_to_edit": "Edit when modifying history record schemas or history storage format."
     },
-    "src/smart_download/core/html_resolver.py": {
+    "src/faqih_downloader/core/html_resolver.py": {
         "responsibility": "Resolves real download candidates from web pages and validates link refreshes.",
         "when_to_edit": "Edit when improving download candidate probing or link refresh validation."
     },
-    "src/smart_download/core/rate_limiter.py": {
+    "src/faqih_downloader/core/rate_limiter.py": {
         "responsibility": "High-precision TokenBucketRateLimiter enforcing download bandwidth throttling.",
         "when_to_edit": "Edit when tuning speed limiter algorithms or bucket token replenishment."
     },
-    "src/smart_download/core/stream_coordinator.py": {
+    "src/faqih_downloader/core/stream_coordinator.py": {
         "responsibility": "StreamDownloadCoordinator managing streaming media downloads and FFmpeg audio/video merges.",
         "when_to_edit": "Edit when altering streaming downloads or post-processing merging steps."
     },
 
     # Installer package
-    "src/smart_download/installer/__init__.py": {
+    "src/faqih_downloader/installer/__init__.py": {
         "responsibility": "Installer package re-exports for setup wizard and ops.",
         "when_to_edit": "Edit when changing public installer API interfaces."
     },
-    "src/smart_download/installer/installer_gui.py": {
+    "src/faqih_downloader/installer/installer_gui.py": {
         "responsibility": "Modern themed Tkinter wizard UI for installing Smart Download.",
         "when_to_edit": "Edit when altering installer wizard steps, styling, or setup progress display."
     },
-    "src/smart_download/installer/installer_ops.py": {
+    "src/faqih_downloader/installer/installer_ops.py": {
         "responsibility": "File deployment, shortcut creation, and payload extraction for Windows installation.",
         "when_to_edit": "Edit when modifying installation payload extraction or uninstaller creation."
     },
-    "src/smart_download/installer/installer_registry.py": {
+    "src/faqih_downloader/installer/installer_registry.py": {
         "responsibility": "Windows Registry manipulation for Add/Remove Programs and startup entries.",
         "when_to_edit": "Edit when changing registry keys for uninstallers or file associations."
     },
 
     # Locales package
-    "src/smart_download/locales/__init__.py": {
+    "src/faqih_downloader/locales/__init__.py": {
         "responsibility": "Locales package re-exports.",
         "when_to_edit": "Edit when modifying locales package exports."
     },
-    "src/smart_download/locales/ar.json": {
+    "src/faqih_downloader/locales/ar.json": {
         "responsibility": "Complete Arabic application translations and right-to-left localized string dictionary.",
         "when_to_edit": "Edit when adding or updating Arabic translation strings."
     },
-    "src/smart_download/locales/en.json": {
+    "src/faqih_downloader/locales/en.json": {
         "responsibility": "Complete English application translations and UI text string dictionary.",
         "when_to_edit": "Edit when adding or updating English translation strings."
     },
-    "src/smart_download/locales/i18n.py": {
+    "src/faqih_downloader/locales/i18n.py": {
         "responsibility": "Thread-safe LocalizationManager singleton enabling dynamic language toggles.",
         "when_to_edit": "Edit when modifying translation loading or language notification callbacks."
     },
 
     # Services package
-    "src/smart_download/services/__init__.py": {
+    "src/faqih_downloader/services/__init__.py": {
         "responsibility": "Services package namespace re-exports.",
         "when_to_edit": "Edit when exposing new background or platform service modules."
     },
-    "src/smart_download/services/single_instance.py": {
+    "src/faqih_downloader/services/single_instance.py": {
         "responsibility": "Single application instance enforcement using Windows named mutex or loopback socket.",
         "when_to_edit": "Edit when altering inter-instance signaling or command line forwarding."
     },
-    "src/smart_download/services/startup_service.py": {
+    "src/faqih_downloader/services/startup_service.py": {
         "responsibility": "Zero-elevation Windows auto-start via Run key, Task Scheduler, and Startup folder.",
         "when_to_edit": "Edit when altering Windows background startup mechanisms or startup entry checks."
     },
-    "src/smart_download/services/updater_service.py": {
+    "src/faqih_downloader/services/updater_service.py": {
         "responsibility": "Application auto-update manager querying GitHub Releases and launching upgrade installers.",
         "when_to_edit": "Edit when modifying GitHub release querying or update downloading mechanisms."
     },
-    "src/smart_download/services/preview_stream_bridge.py": {
+    "src/faqih_downloader/services/preview_stream_bridge.py": {
         "responsibility": "Built-In In-Memory Preview & Control Bridge HTTP server and web API routing.",
         "when_to_edit": "Edit when modifying in-app preview HTTP bridge or web player controls."
     },
-    "src/smart_download/services/preview_stream_proxy.py": {
+    "src/faqih_downloader/services/preview_stream_proxy.py": {
         "responsibility": "Streaming media proxy and VTT subtitle compiler for real-time video previewing.",
         "when_to_edit": "Edit when changing upstream byte-range streaming proxy or VTT subtitle generation."
     },
-    "src/smart_download/services/core_patch_updater.py": {
+    "src/faqih_downloader/services/core_patch_updater.py": {
         "responsibility": "OTA hot-patch packager, atomic updater, and dynamic core loader (zero-rebuild workflow).",
         "when_to_edit": "Edit when modifying core patch packaging, plugin extraction, or dev source overriding."
     },
-    "src/smart_download/services/youtube_format_builder.py": {
+    "src/faqih_downloader/services/youtube_format_builder.py": {
         "responsibility": "Formats video resolution options, audio bitrates, and file size estimates from metadata.",
         "when_to_edit": "Edit when modifying YouTube/social media format extraction or presentation."
     },
-    "src/smart_download/services/youtube_models.py": {
+    "src/faqih_downloader/services/youtube_models.py": {
         "responsibility": "Data classes and URL regex patterns for YouTube and social media platforms.",
         "when_to_edit": "Edit when updating social media domain patterns or stream metadata models."
     },
-    "src/smart_download/services/youtube_resolver.py": {
+    "src/faqih_downloader/services/youtube_resolver.py": {
         "responsibility": "Backward-compatibility alias re-exporting YouTube and media resolver interfaces.",
         "when_to_edit": "Edit if re-exporting new streaming resolver functions."
     },
-    "src/smart_download/services/youtube_service.py": {
+    "src/faqih_downloader/services/youtube_service.py": {
         "responsibility": "High-level YouTubeResolver and MediaResolver coordinating yt-dlp and FFmpeg.",
         "when_to_edit": "Edit when changing media stream extraction, cookie passing, or FFmpeg merging."
     },
-    "src/smart_download/services/youtube_tracks.py": {
+    "src/faqih_downloader/services/youtube_tracks.py": {
         "responsibility": "YouTube audio dubbing and subtitle tracks extraction, language mapping, and UI track selectors.",
         "when_to_edit": "Edit when modifying audio dubbing languages, subtitle tracks parsing, or quality modal track selectors."
     },
-    "src/smart_download/services/subtitle_processor.py": {
+    "src/faqih_downloader/services/subtitle_processor.py": {
         "responsibility": "Subtitle processing, VTT-to-SRT conversion, FFmpeg soft-muxing, and frame burn-in delivery modes.",
         "when_to_edit": "Edit when modifying subtitle delivery modes (srt_only, soft_embed, hard_burn) or FFmpeg subtitle embedding."
     },
-    "src/smart_download/services/subtitle_downloader.py": {
+    "src/faqih_downloader/services/subtitle_downloader.py": {
         "responsibility": "Subtitle downloading, VTT/XML/JSON parsing, GTX translation, and SRT persistence.",
         "when_to_edit": "Edit when modifying subtitle fetching, timedtext parsing, or auto-translation fallbacks."
     },
-    "src/smart_download/services/ytdlp_updater.py": {
+    "src/faqih_downloader/services/ytdlp_updater.py": {
         "responsibility": "YtDlpAutoUpdater managing dynamic in-process yt-dlp package updates in %APPDATA%.",
         "when_to_edit": "Edit when changing yt-dlp PyPI/GitHub download logic or sys.meta_path finder hooks."
     },
-    "src/smart_download/services/browser/__init__.py": {
+    "src/faqih_downloader/services/browser/__init__.py": {
         "responsibility": "Browser integration package exports.",
         "when_to_edit": "Edit when modifying browser service exports."
     },
-    "src/smart_download/services/browser/bridge_server.py": {
+    "src/faqih_downloader/services/browser/bridge_server.py": {
         "responsibility": "Local HTTP bridge server receiving intercepted links from browser extensions.",
         "when_to_edit": "Edit when altering HTTP endpoints or ports for extension communication."
     },
-    "src/smart_download/services/browser/host_manifest.py": {
+    "src/faqih_downloader/services/browser/host_manifest.py": {
         "responsibility": "Generates native messaging host manifest JSON files for Chrome and Edge.",
         "when_to_edit": "Edit when updating extension IDs or native messaging manifest schemas."
     },
-    "src/smart_download/services/browser/native_host.py": {
+    "src/faqih_downloader/services/browser/native_host.py": {
         "responsibility": "Native messaging host stdio protocol handler reading 32-bit length-prefixed messages.",
         "when_to_edit": "Edit when modifying browser extension stdio communication."
     },
-    "src/smart_download/services/browser/registry.py": {
+    "src/faqih_downloader/services/browser/registry.py": {
         "responsibility": "Windows Registry manager configuring native messaging host entries for Chrome/Edge.",
         "when_to_edit": "Edit when changing registry paths or browser integration verification logic."
     },
 
     # UI package
-    "src/smart_download/ui/__init__.py": {
+    "src/faqih_downloader/ui/__init__.py": {
         "responsibility": "UI package exports.",
         "when_to_edit": "Edit when exposing new UI components or windows."
     },
-    "src/smart_download/ui/main_window.py": {
+    "src/faqih_downloader/ui/main_window.py": {
         "responsibility": "ModernFramelessGUI main application window aggregating all panel and controller mixins.",
         "when_to_edit": "Edit when adding or removing window-level mixins or altering root layout."
     },
-    "src/smart_download/ui/system_tray.py": {
+    "src/faqih_downloader/ui/system_tray.py": {
         "responsibility": "Windows system tray integration (pystray) with minimize/restore and context menus.",
         "when_to_edit": "Edit when modifying system tray icon behavior or menu options."
     },
-    "src/smart_download/ui/components/__init__.py": {
+    "src/faqih_downloader/ui/components/__init__.py": {
         "responsibility": "Reusable UI components package exports.",
         "when_to_edit": "Edit when exposing new UI components."
     },
-    "src/smart_download/ui/components/base_modal.py": {
+    "src/faqih_downloader/ui/components/base_modal.py": {
         "responsibility": "SafeModalDialog: non-blocking frameless themed modal dialog base class.",
         "when_to_edit": "Edit when modifying modal dialog styling, backdrop, or grab behavior."
     },
-    "src/smart_download/ui/components/tooltip.py": {
+    "src/faqih_downloader/ui/components/tooltip.py": {
         "responsibility": "Hover tooltip widget providing contextual explanations for buttons and controls.",
         "when_to_edit": "Edit when changing tooltip styling, delay timings, or positioning."
     },
 
     # UI Controllers
-    "src/smart_download/ui/controllers/__init__.py": {
+    "src/faqih_downloader/ui/controllers/__init__.py": {
         "responsibility": "Controllers package exports.",
         "when_to_edit": "Edit when adding new controller mixins."
     },
-    "src/smart_download/ui/controllers/batch_download_controller.py": {
+    "src/faqih_downloader/ui/controllers/batch_download_controller.py": {
         "responsibility": "BatchDownloadControllerMixin managing multiple download candidates selection and queueing.",
         "when_to_edit": "Edit when modifying batch link selection or sequential download triggers."
     },
-    "src/smart_download/ui/controllers/browser_controller.py": {
+    "src/faqih_downloader/ui/controllers/browser_controller.py": {
         "responsibility": "BrowserControllerMixin handling background extension registration and intercepted downloads.",
         "when_to_edit": "Edit when modifying intercepted browser link handling in the GUI."
     },
-    "src/smart_download/ui/controllers/clipboard_controller.py": {
+    "src/faqih_downloader/ui/controllers/clipboard_controller.py": {
         "responsibility": "ClipboardControllerMixin sniffing clipboard for valid download and media URLs.",
         "when_to_edit": "Edit when modifying clipboard polling intervals, URL regexes, or sniffing logic."
     },
-    "src/smart_download/ui/controllers/dialog_controller.py": {
+    "src/faqih_downloader/ui/controllers/dialog_controller.py": {
         "responsibility": "DialogControllerMixin providing thread-safe non-blocking modal dialogs.",
         "when_to_edit": "Edit when modifying safe error, warning, or confirmation dialog dispatching."
     },
-    "src/smart_download/ui/controllers/dispatch_controller.py": {
+    "src/faqih_downloader/ui/controllers/dispatch_controller.py": {
         "responsibility": "DispatchControllerMixin dispatching background thread tasks safely to Tkinter event loop.",
         "when_to_edit": "Edit when changing thread synchronization or GUI queue processing."
     },
-    "src/smart_download/ui/controllers/download_controller.py": {
+    "src/faqih_downloader/ui/controllers/download_controller.py": {
         "responsibility": "DownloadControllerMixin coordinating download start, engine creation, and queue execution.",
         "when_to_edit": "Edit when modifying download trigger flow or engine callback wiring."
     },
-    "src/smart_download/ui/controllers/lifecycle_controller.py": {
+    "src/faqih_downloader/ui/controllers/lifecycle_controller.py": {
         "responsibility": "WindowLifecycleMixin managing resource cleanup, tray minimization, and clean exit.",
         "when_to_edit": "Edit when modifying window close actions, thread cleanup, or tray exit."
     },
-    "src/smart_download/ui/controllers/link_refresh_controller.py": {
+    "src/faqih_downloader/ui/controllers/link_refresh_controller.py": {
         "responsibility": "LinkRefreshControllerMixin handling expired download link resumption and URL substitution.",
         "when_to_edit": "Edit when altering expired link substitution or refresh dialog triggers."
     },
-    "src/smart_download/ui/controllers/locale_controller.py": {
+    "src/faqih_downloader/ui/controllers/locale_controller.py": {
         "responsibility": "LocaleControllerMixin coordinating dynamic UI text re-translation upon language switch.",
         "when_to_edit": "Edit when adding dynamic language switch observers or RTL layout adjustments."
     },
-    "src/smart_download/ui/controllers/media_download_controller.py": {
+    "src/faqih_downloader/ui/controllers/media_download_controller.py": {
         "responsibility": "MediaDownloadControllerMixin composite mixin aggregating YouTube, batch, and refresh.",
         "when_to_edit": "Edit when altering composite media controller inheritance."
     },
-    "src/smart_download/ui/controllers/settings_controller.py": {
+    "src/faqih_downloader/ui/controllers/settings_controller.py": {
         "responsibility": "SettingsControllerMixin managing user preferences, cookies, and auto-categorization.",
         "when_to_edit": "Edit when adding new user preference toggles or cookies browser selection."
     },
-    "src/smart_download/ui/controllers/speed_limiter_controller.py": {
+    "src/faqih_downloader/ui/controllers/speed_limiter_controller.py": {
         "responsibility": "SpeedLimiterControllerMixin managing speed presets, slider events, and rate limits.",
         "when_to_edit": "Edit when modifying speed limiter presets or live slider adjustment handlers."
     },
-    "src/smart_download/ui/controllers/theme_controller.py": {
+    "src/faqih_downloader/ui/controllers/theme_controller.py": {
         "responsibility": "ThemeControllerMixin configuring dark theme color tokens and UI styling.",
         "when_to_edit": "Edit when changing application colors, fonts, or styling variables."
     },
-    "src/smart_download/ui/controllers/toast_controller.py": {
+    "src/faqih_downloader/ui/controllers/toast_controller.py": {
         "responsibility": "ToastControllerMixin presenting non-blocking corner toast notifications.",
         "when_to_edit": "Edit when modifying startup welcome toast or notification toast animations."
     },
-    "src/smart_download/ui/controllers/update_controller.py": {
+    "src/faqih_downloader/ui/controllers/update_controller.py": {
         "responsibility": "UpdateControllerMixin running background checks for app and yt-dlp updates.",
         "when_to_edit": "Edit when changing background update check frequency or update notification dialogs."
     },
-    "src/smart_download/ui/controllers/window_controller.py": {
+    "src/faqih_downloader/ui/controllers/window_controller.py": {
         "responsibility": "WindowChromeMixin managing custom frameless title bar dragging and window controls.",
         "when_to_edit": "Edit when modifying custom title bar widgets, drag handling, or window geometry."
     },
-    "src/smart_download/ui/controllers/youtube_download_controller.py": {
+    "src/faqih_downloader/ui/controllers/youtube_download_controller.py": {
         "responsibility": "YouTubeDownloadControllerMixin analyzing streaming media formats and quality selection.",
         "when_to_edit": "Edit when modifying YouTube/social media format inspection and dialog invocation."
     },
 
     # UI Modals
-    "src/smart_download/ui/modals/__init__.py": {
+    "src/faqih_downloader/ui/modals/__init__.py": {
         "responsibility": "Modals package exports.",
         "when_to_edit": "Edit when adding new modal dialog exports."
     },
-    "src/smart_download/ui/modals/browser_settings_modal.py": {
+    "src/faqih_downloader/ui/modals/browser_settings_modal.py": {
         "responsibility": "BrowserSettingsModalMixin displaying browser extension setup and diagnostic dialog.",
         "when_to_edit": "Edit when modifying browser extension configuration instructions or diagnostic steps."
     },
-    "src/smart_download/ui/modals/candidates_modal.py": {
+    "src/faqih_downloader/ui/modals/candidates_modal.py": {
         "responsibility": "MultipleCandidatesModal displaying detected web download candidates with filter badges.",
         "when_to_edit": "Edit when modifying candidate dialog multi-selection, search, or filtering controls."
     },
-    "src/smart_download/ui/modals/confirm_modal.py": {
+    "src/faqih_downloader/ui/modals/confirm_modal.py": {
         "responsibility": "DownloadConfirmationModal showing probed file details before starting download.",
         "when_to_edit": "Edit when changing pre-download confirmation dialog layout or field editing."
     },
-    "src/smart_download/ui/modals/confirm_modal_logic.py": {
+    "src/faqih_downloader/ui/modals/confirm_modal_logic.py": {
         "responsibility": "Logic helper probing download candidate metadata for the confirmation modal.",
         "when_to_edit": "Edit when modifying candidate probing threads or URL validation."
     },
-    "src/smart_download/ui/modals/fetching_toast.py": {
+    "src/faqih_downloader/ui/modals/fetching_toast.py": {
         "responsibility": "FetchingLinkToast displaying a loading spinner toast during link inspection.",
         "when_to_edit": "Edit when modifying link resolving loading animation or cancel triggers."
     },
-    "src/smart_download/ui/modals/quality_modal.py": {
+    "src/faqih_downloader/ui/modals/quality_modal.py": {
         "responsibility": "QualitySelectionModal presenting video resolutions and audio bitrates for media.",
         "when_to_edit": "Edit when modifying media format selection dialog, badges, or treeview."
     },
-    "src/smart_download/ui/modals/video_preview_modal.py": {
+    "src/faqih_downloader/ui/modals/video_preview_modal.py": {
         "responsibility": "VidMate-style in-app video preview modal with live WebVTT subtitles and chromeless player.",
         "when_to_edit": "Edit when modifying video preview playback, WebVTT subtitle overlay, or player window launcher."
     },
-    "src/smart_download/ui/modals/refresh_modal.py": {
+    "src/faqih_downloader/ui/modals/refresh_modal.py": {
         "responsibility": "RefreshLinkModal prompting for updated download link when a session expires.",
         "when_to_edit": "Edit when changing expired link substitution dialog styling or URL validation."
     },
-    "src/smart_download/ui/modals/toasts.py": {
+    "src/faqih_downloader/ui/modals/toasts.py": {
         "responsibility": "Re-exports toast notification classes for convenient imports.",
         "when_to_edit": "Edit when exposing additional toast classes."
     },
-    "src/smart_download/ui/modals/update_modal.py": {
+    "src/faqih_downloader/ui/modals/update_modal.py": {
         "responsibility": "AppUpdateModal displaying new release notes and one-click update actions.",
         "when_to_edit": "Edit when modifying application update presentation or release notes formatting."
     },
-    "src/smart_download/ui/modals/welcome_toast.py": {
+    "src/faqih_downloader/ui/modals/welcome_toast.py": {
         "responsibility": "StartupWelcomeToast displaying Windows startup greeting when running minimized.",
         "when_to_edit": "Edit when modifying startup toast layout or click-to-restore action."
     },
 
     # UI Panels
-    "src/smart_download/ui/panels/__init__.py": {
+    "src/faqih_downloader/ui/panels/__init__.py": {
         "responsibility": "Panels package exports.",
         "when_to_edit": "Edit when adding new panel mixin exports."
     },
-    "src/smart_download/ui/panels/chunks_panel.py": {
+    "src/faqih_downloader/ui/panels/chunks_panel.py": {
         "responsibility": "ChunksPanelMixin rendering segmented dynamic chunk visualizer and status table.",
         "when_to_edit": "Edit when modifying segmented chunk canvas graphics or chunk details treeview."
     },
-    "src/smart_download/ui/panels/controls_panel.py": {
+    "src/faqih_downloader/ui/panels/controls_panel.py": {
         "responsibility": "ControlsPanelMixin rendering thread selector, speed limiter controls, and action buttons.",
         "when_to_edit": "Edit when changing start/pause/cancel action buttons or limiter controls."
     },
-    "src/smart_download/ui/panels/history_panel.py": {
+    "src/faqih_downloader/ui/panels/history_panel.py": {
         "responsibility": "HistoryPanelMixin managing download history table and right-click context menu.",
         "when_to_edit": "Edit when modifying history treeview columns or context menu actions."
     },
-    "src/smart_download/ui/panels/inputs_panel.py": {
+    "src/faqih_downloader/ui/panels/inputs_panel.py": {
         "responsibility": "InputsPanelMixin rendering URL and destination inputs with auto-categorization button.",
         "when_to_edit": "Edit when modifying URL entry, destination browse button, or auto-cat toggle."
     },
-    "src/smart_download/ui/panels/metrics_panel.py": {
+    "src/faqih_downloader/ui/panels/metrics_panel.py": {
         "responsibility": "MetricsPanelMixin rendering overall progress bar and real-time metric cards.",
         "when_to_edit": "Edit when modifying speed, size, ETA, or thread count metric cards."
     },
 
     # Utils package
-    "src/smart_download/utils/__init__.py": {
+    "src/faqih_downloader/utils/__init__.py": {
         "responsibility": "Utils package exports.",
         "when_to_edit": "Edit when exporting new utility helpers."
     },
-    "src/smart_download/utils/archive_utils.py": {
+    "src/faqih_downloader/utils/archive_utils.py": {
         "responsibility": "Archive auto-extraction and SHA-256 file integrity verification.",
         "when_to_edit": "Edit when supporting new archive formats or hash algorithms."
     },
-    "src/smart_download/utils/clipboard.py": {
+    "src/faqih_downloader/utils/clipboard.py": {
         "responsibility": "Cross-platform and Win32 direct clipboard text retrieval.",
         "when_to_edit": "Edit when improving clipboard access reliability on Windows."
     },
-    "src/smart_download/utils/dpi.py": {
+    "src/faqih_downloader/utils/dpi.py": {
         "responsibility": "Windows High-DPI awareness initialization and screen work area geometry.",
         "when_to_edit": "Edit when tuning DPI scaling factors or multi-monitor geometry detection."
     },
-    "src/smart_download/utils/file_ops.py": {
+    "src/faqih_downloader/utils/file_ops.py": {
         "responsibility": "File categorization into subfolders (Videos, Music, etc.) and file/folder launching.",
         "when_to_edit": "Edit when modifying category subfolder mappings or OS shell execute actions."
     },
-    "src/smart_download/utils/magic_detector.py": {
+    "src/faqih_downloader/utils/magic_detector.py": {
         "responsibility": "Binary magic bytes detector determining actual file types independent of URL extensions.",
         "when_to_edit": "Edit when adding new file signature definitions."
     },
-    "src/smart_download/utils/speed_utils.py": {
+    "src/faqih_downloader/utils/speed_utils.py": {
         "responsibility": "Speed string parsing (e.g. '1.5 MB/s') and human-readable formatting.",
         "when_to_edit": "Edit when updating speed parsing regexes or unit formats."
     },
-    "src/smart_download/utils/tk_helpers.py": {
+    "src/faqih_downloader/utils/tk_helpers.py": {
         "responsibility": "Tkinter resource cleanup preventing photo reference and callback memory leaks.",
         "when_to_edit": "Edit when adding memory leak mitigations for Tkinter widgets."
     },
-    "src/smart_download/utils/url_utils.py": {
+    "src/faqih_downloader/utils/url_utils.py": {
         "responsibility": "URL parsing, filename derivation, and Content-Disposition header extraction.",
         "when_to_edit": "Edit when improving filename derivation from complex redirect URLs."
     },
@@ -664,7 +664,7 @@ def generate_architecture_markdown(records: List[Dict[str, Any]]) -> str:
     lines.append("   - Do NOT run the full test suite after small edits unless requested.")
     lines.append("")
     lines.append("3. **Strict Single Responsibility Principle (<550 lines per file)**:")
-    lines.append("   - Every file in `src/smart_download/` must remain under **550 physical lines**.")
+    lines.append("   - Every file in `src/faqih_downloader/` must remain under **550 physical lines**.")
     lines.append("   - If adding logic causes a file to approach 550 lines, decompose it into a specialized mixin or helper module.")
     lines.append("")
     lines.append("4. **Zero-Rebuild Core Hot-Patch Workflow**:")
@@ -684,7 +684,7 @@ def generate_architecture_markdown(records: List[Dict[str, Any]]) -> str:
     lines.append("## 2. 🏛️ Class Inheritance & Connection Graph")
     lines.append("")
     lines.append("### A. ModernFramelessGUI Mixin Inheritance Hierarchy")
-    lines.append("`ModernFramelessGUI` in `src/smart_download/ui/main_window.py` is composed of 22 specialized mixins:")
+    lines.append("`ModernFramelessGUI` in `src/faqih_downloader/ui/main_window.py` is composed of 22 specialized mixins:")
     lines.append("")
     lines.append("```text")
     lines.append("ModernFramelessGUI (tk.Tk root)")
@@ -811,7 +811,7 @@ def main():
     # 1. Verify SRP limit
     over_limit: List[Tuple[str, int]] = []
     for r in records:
-        if r["path"].startswith("src/smart_download/") and r["line_count"] > MAX_LINES_PER_FILE:
+        if r["path"].startswith("src/faqih_downloader/") and r["line_count"] > MAX_LINES_PER_FILE:
             over_limit.append((r["path"], r["line_count"]))
 
     if over_limit:
@@ -820,7 +820,7 @@ def main():
             print(f"   - {p}: {count} lines")
         sys.exit(1)
 
-    print(f"✅ Verified {len(records)} files. All src/smart_download/ files satisfy SRP (<{MAX_LINES_PER_FILE} lines).")
+    print(f"✅ Verified {len(records)} files. All src/faqih_downloader/ files satisfy SRP (<{MAX_LINES_PER_FILE} lines).")
 
     new_content = generate_architecture_markdown(records)
 

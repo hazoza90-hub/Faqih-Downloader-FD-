@@ -48,8 +48,8 @@ if exist "%SCRIPT_DIR%..\native_messaging_host.py" (
     python "%SCRIPT_DIR%..\native_messaging_host.py" %*
     goto :EOF
 )
-if exist "%SCRIPT_DIR%..\src\smart_download\services\browser\native_host.py" (
-    python "%SCRIPT_DIR%..\src\smart_download\services\browser\native_host.py" %*
+if exist "%SCRIPT_DIR%..\src\faqih_downloader\services\browser\native_host.py" (
+    python "%SCRIPT_DIR%..\src\faqih_downloader\services\browser\native_host.py" %*
     goto :EOF
 )
 
@@ -64,8 +64,8 @@ if %ERRORLEVEL% equ 0 (
         py -3 "%SCRIPT_DIR%..\native_messaging_host.py" %*
         goto :EOF
     )
-    if exist "%SCRIPT_DIR%..\src\smart_download\services\browser\native_host.py" (
-        py -3 "%SCRIPT_DIR%..\src\smart_download\services\browser\native_host.py" %*
+    if exist "%SCRIPT_DIR%..\src\faqih_downloader\services\browser\native_host.py" (
+        py -3 "%SCRIPT_DIR%..\src\faqih_downloader\services\browser\native_host.py" %*
         goto :EOF
     )
 )

@@ -11,7 +11,7 @@ from PyInstaller.utils.hooks import collect_submodules, collect_data_files
 yt_hidden = collect_submodules('yt_dlp')
 yt_datas = collect_data_files('yt_dlp')
 pystray_hidden = collect_submodules('pystray')
-sd_hidden = collect_submodules('smart_download')
+sd_hidden = collect_submodules('faqih_downloader')
 
 extra_binaries = []
 
@@ -26,13 +26,15 @@ a = Analysis(
         ('assets/app_icon.png', 'assets'),
         ('assets/app_icon.ico', '.'),
         ('assets/app_icon.png', '.'),
-        ('src/smart_download/locales', 'smart_download/locales'),
+        ('src/faqih_downloader/locales', 'faqih_downloader/locales'),
+        ('src/faqih_downloader/locales', 'smart_download/locales'),
     ] + yt_datas,
     hiddenimports=[
+        'faqih_downloader',
+        'faqih_downloader.services.media_extractor',
+        'faqih_downloader.services.preview_stream_bridge',
+        'faqih_downloader.ui.modals.preview_html_builder',
         'smart_download',
-        'smart_download.services.media_extractor',
-        'smart_download.services.preview_stream_bridge',
-        'smart_download.ui.modals.preview_html_builder',
         'updater',
         'youtube_resolver',
         'turbo_downloader',

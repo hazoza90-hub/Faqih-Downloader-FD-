@@ -23,20 +23,20 @@ if _root_dir not in sys.path:
 if _src_dir not in sys.path:
     sys.path.insert(0, _src_dir)
 
-from smart_download.core.html_resolver import (
+from faqih_downloader.core.html_resolver import (
     resolve_real_download_url,
     clear_probe_cache,
     _PROBE_CACHE,
     _PROBE_CACHE_LOCK
 )
-from smart_download.core.engine import TurboDownloadEngine
-from smart_download.core.stream_coordinator import StreamDownloadCoordinator
-from smart_download.services.youtube_models import (
+from faqih_downloader.core.engine import TurboDownloadEngine
+from faqih_downloader.core.stream_coordinator import StreamDownloadCoordinator
+from faqih_downloader.services.youtube_models import (
     is_media_url,
     is_ytdlp_extractor_supported,
     YouTubeStreamInfo
 )
-import smart_download.services.youtube_models as ym
+import faqih_downloader.services.youtube_models as ym
 
 
 class TestStage6PerformanceOptimizations(unittest.TestCase):
@@ -186,7 +186,7 @@ class TestStage6PerformanceOptimizations(unittest.TestCase):
             expected_sha = hashlib.sha256(full_data).hexdigest()
             expected_crc = f"{zlib.crc32(full_data) & 0xFFFFFFFF:08x}"
 
-            from smart_download.core.chunk import DownloadChunk
+            from faqih_downloader.core.chunk import DownloadChunk
             c0 = DownloadChunk(0, 0, 512 * 1024 - 1, 512 * 1024, "completed", os.path.join(engine.temp_dir, "test.dat.part_0"))
             c1 = DownloadChunk(1, 512 * 1024, 1024 * 1024 - 1, 512 * 1024, "completed", os.path.join(engine.temp_dir, "test.dat.part_1"))
             with open(c0.part_filepath, "wb") as f: f.write(chunk_data_0)
@@ -229,7 +229,7 @@ class TestStage6PerformanceOptimizations(unittest.TestCase):
 
     def test_ui_coalescing_pending_guards(self):
         """Verifies UI coalescing flags exist and guard against event queue flooding."""
-        from smart_download.ui.controllers.download_controller import DownloadControllerMixin
+        from faqih_downloader.ui.controllers.download_controller import DownloadControllerMixin
 
         class DummyUI(DownloadControllerMixin):
             def __init__(self):

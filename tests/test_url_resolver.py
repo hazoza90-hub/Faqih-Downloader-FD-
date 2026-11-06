@@ -696,7 +696,7 @@ class TestSpeedFormatting(unittest.TestCase):
     """Verifies format_speed across units, edge cases, clamping, and error handling."""
 
     def test_format_speed_clamping_and_zero(self):
-        from smart_download.utils import format_speed
+        from faqih_downloader.utils import format_speed
         self.assertEqual(format_speed(0), "0 B/s")
         self.assertEqual(format_speed(-1), "0 B/s")
         self.assertEqual(format_speed(-999999), "0 B/s")
@@ -704,7 +704,7 @@ class TestSpeedFormatting(unittest.TestCase):
         self.assertEqual(format_speed(-10, allow_unlimited=True), "Unlimited")
 
     def test_format_speed_units_bytes_kb_mb_gb(self):
-        from smart_download.utils import format_speed
+        from faqih_downloader.utils import format_speed
         self.assertEqual(format_speed(500), "500 B/s")
         self.assertEqual(format_speed(1024), "1.0 KB/s")
         self.assertEqual(format_speed(1536), "1.5 KB/s")
@@ -714,7 +714,7 @@ class TestSpeedFormatting(unittest.TestCase):
         self.assertEqual(format_speed(2.5 * 1073741824), "2.50 GB/s")
 
     def test_format_speed_invalid_and_non_numeric_types(self):
-        from smart_download.utils import format_speed
+        from faqih_downloader.utils import format_speed
         self.assertEqual(format_speed(None), "0 B/s")
         self.assertEqual(format_speed("invalid"), "0 B/s")
         self.assertEqual(format_speed(""), "0 B/s")

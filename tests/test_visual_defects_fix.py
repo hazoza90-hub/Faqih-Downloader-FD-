@@ -12,9 +12,9 @@ from tkinter import ttk
 import json
 import os
 
-from smart_download.locales.i18n import LocalizationManager, tr, set_current_language
-from smart_download.ui.main_window import ModernFramelessGUI
-from smart_download.utils.speed_utils import parse_speed_limit
+from faqih_downloader.locales.i18n import LocalizationManager, tr, set_current_language
+from faqih_downloader.ui.main_window import ModernFramelessGUI
+from faqih_downloader.utils.speed_utils import parse_speed_limit
 
 
 class TestVisualDefectsFix(unittest.TestCase):
@@ -161,7 +161,7 @@ class TestVisualDefectsFix(unittest.TestCase):
             "ctx_remove_history",
             "ctx_copy_download_url",
         ]
-        for lang, path in [("ar", "src/smart_download/locales/ar.json"), ("en", "src/smart_download/locales/en.json")]:
+        for lang, path in [("ar", "src/faqih_downloader/locales/ar.json"), ("en", "src/faqih_downloader/locales/en.json")]:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             for k, val in data.items():
@@ -274,8 +274,8 @@ class TestVisualDefectsFix(unittest.TestCase):
         """Verifies tk_helpers and controls_panel gracefully handle headless tk=None environments."""
         import sys
         import subprocess
-        import smart_download.utils.tk_helpers as tkh
-        import smart_download.ui.panels.controls_panel as cp
+        import faqih_downloader.utils.tk_helpers as tkh
+        import faqih_downloader.ui.panels.controls_panel as cp
         self.assertTrue(hasattr(tkh, "_safe_winfo_exists"))
         self.assertTrue(issubclass(cp._StateButton, (tk.Button, object)))
 
@@ -283,8 +283,8 @@ class TestVisualDefectsFix(unittest.TestCase):
             sys.executable,
             "-c",
             "import sys; sys.modules['tkinter'] = None; import turbo_downloader; "
-            "from smart_download.utils import tk_helpers; from smart_download.ui.panels import controls_panel; "
-            "from smart_download.ui import modals; from smart_download.ui import main_window; "
+            "from faqih_downloader.utils import tk_helpers; from faqih_downloader.ui.panels import controls_panel; "
+            "from faqih_downloader.ui import modals; from faqih_downloader.ui import main_window; "
             "assert controls_panel._BaseButton is object; assert tk_helpers._ORIG_MISC_DESTROY is None; "
             "print('HEADLESS_OK')"
         ]

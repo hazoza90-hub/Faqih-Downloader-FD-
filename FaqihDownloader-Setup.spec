@@ -10,9 +10,9 @@ from PyInstaller.utils.hooks import collect_submodules
 
 payload_dir = os.path.abspath('installer_payload')
 sd_hidden = (
-    collect_submodules('smart_download.installer')
-    + collect_submodules('smart_download.services.browser')
-    + collect_submodules('smart_download.locales')
+    collect_submodules('faqih_downloader.installer')
+    + collect_submodules('faqih_downloader.services.browser')
+    + collect_submodules('faqih_downloader.locales')
 )
 
 # Do NOT bundle ffmpeg into extra_binaries because it is already bundled in payload/ffmpeg.exe
@@ -30,11 +30,12 @@ a = Analysis(
         ('assets/app_icon.png', '.'),
     ],
     hiddenimports=[
+        'faqih_downloader',
+        'faqih_downloader.config',
+        'faqih_downloader.i18n',
+        'faqih_downloader.utils.file_ops',
+        'faqih_downloader.utils.window_effects',
         'smart_download',
-        'smart_download.config',
-        'smart_download.i18n',
-        'smart_download.utils.file_ops',
-        'smart_download.utils.window_effects',
         'win32com',
         'win32com.client',
         'register_browser',

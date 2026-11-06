@@ -13,15 +13,15 @@ import unittest
 import tkinter as tk
 from unittest.mock import patch
 
-from smart_download.ui.main_window import ModernFramelessGUI
-from smart_download.ui.modals.quality_modal import QualitySelectionModal
-from smart_download.ui.modals.confirm_modal import DownloadConfirmationModal
-from smart_download.ui.modals.refresh_modal import RefreshLinkModal
-from smart_download.ui.modals.update_modal import AppUpdateModal
-from smart_download.ui.modals.candidates_modal import MultipleCandidatesModal
-from smart_download.ui.components.base_modal import SafeModalDialog
-from smart_download.services.youtube_models import VideoFormatOption
-from smart_download.services.youtube_tracks import extract_audio_tracks, extract_subtitle_tracks
+from faqih_downloader.ui.main_window import ModernFramelessGUI
+from faqih_downloader.ui.modals.quality_modal import QualitySelectionModal
+from faqih_downloader.ui.modals.confirm_modal import DownloadConfirmationModal
+from faqih_downloader.ui.modals.refresh_modal import RefreshLinkModal
+from faqih_downloader.ui.modals.update_modal import AppUpdateModal
+from faqih_downloader.ui.modals.candidates_modal import MultipleCandidatesModal
+from faqih_downloader.ui.components.base_modal import SafeModalDialog
+from faqih_downloader.services.youtube_models import VideoFormatOption
+from faqih_downloader.services.youtube_tracks import extract_audio_tracks, extract_subtitle_tracks
 
 
 class TestStage82LiveUX(unittest.TestCase):
@@ -78,7 +78,7 @@ class TestStage82LiveUX(unittest.TestCase):
         self.assertIsNone(getattr(self.gui, "_fetching_toast", None), "Fetching toast must be destroyed/cleared")
 
         # Simulate clipboard polling 3 times with same URL in clipboard
-        with patch("smart_download.ui.controllers.clipboard_controller.get_clipboard_text", return_value=url):
+        with patch("faqih_downloader.ui.controllers.clipboard_controller.get_clipboard_text", return_value=url):
             for _ in range(3):
                 self.gui._check_clipboard_now(force=False)
                 self.root.update()
@@ -139,7 +139,7 @@ class TestStage82LiveUX(unittest.TestCase):
         self.assertIsNone(getattr(self.gui, "_quality_modal", None), "Quality modal reference must be None")
 
         # Now simulate 3 clipboard ticks with the same URL still in Windows clipboard
-        with patch("smart_download.ui.controllers.clipboard_controller.get_clipboard_text", return_value=url):
+        with patch("faqih_downloader.ui.controllers.clipboard_controller.get_clipboard_text", return_value=url):
             for _ in range(3):
                 self.gui._check_clipboard_now(force=False)
                 self.root.update()
@@ -291,7 +291,7 @@ class TestStage82LiveUX(unittest.TestCase):
             time.sleep(0.2)
             return {"url": u, "candidates": [{"url": "https://example.com/file.zip"}], "is_html": True, "resolved": True}
 
-        with patch("smart_download.ui.controllers.clipboard_controller.resolve_real_download_url", side_effect=mock_slow_resolve):
+        with patch("faqih_downloader.ui.controllers.clipboard_controller.resolve_real_download_url", side_effect=mock_slow_resolve):
             self.gui._resolve_real_url_async(url, on_resolved=lambda info: resolved_called.append(info), show_toast=True)
             self.root.update()
 
@@ -332,7 +332,7 @@ class TestStage82LiveUX(unittest.TestCase):
         detected = []
         self.gui._on_clipboard_url_detected = lambda u: detected.append(u)
 
-        with patch("smart_download.ui.controllers.clipboard_controller.get_clipboard_text", return_value=url):
+        with patch("faqih_downloader.ui.controllers.clipboard_controller.get_clipboard_text", return_value=url):
             self.gui.clear_last_clipboard_url(url)
             self.gui._check_clipboard_now(force=False)
             self.root.update()
@@ -401,7 +401,7 @@ class TestStage82LiveUX(unittest.TestCase):
         # With candidates modal open, check clipboard polling does not trigger
         detected = []
         self.gui._on_clipboard_url_detected = lambda u: detected.append(u)
-        with patch("smart_download.ui.controllers.clipboard_controller.get_clipboard_text", return_value="https://example.com/other.zip"):
+        with patch("faqih_downloader.ui.controllers.clipboard_controller.get_clipboard_text", return_value="https://example.com/other.zip"):
             self.gui._check_clipboard_now(force=False)
             self.root.update()
         self.assertEqual(len(detected), 0, "Active candidates modal must guard clipboard polling")

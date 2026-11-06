@@ -16,27 +16,27 @@ import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
-from smart_download.services.subtitle_processor import (
+from faqih_downloader.services.subtitle_processor import (
     convert_vtt_to_srt,
     download_subtitle_as_srt,
     burn_subtitle_into_video,
     _parse_timestamp_or_seconds,
     _format_srt_timestamp,
 )
-from smart_download.services.youtube_tracks import (
+from faqih_downloader.services.youtube_tracks import (
     _normalize_sub_url_and_ext,
     extract_audio_tracks,
     extract_subtitle_tracks,
 )
-from smart_download.services.youtube_models import (
+from faqih_downloader.services.youtube_models import (
     VideoFormatOption,
     YouTubeStreamInfo,
 )
-from smart_download.core.stream_coordinator import StreamDownloadCoordinator
-from smart_download.ui.panels.media_options_bar import MediaOptionsBarMixin
-from smart_download.ui.panels.history_panel import HistoryPanelMixin
-from smart_download.ui.controllers.youtube_download_controller import YouTubeDownloadControllerMixin
-from smart_download.ui.controllers.download_controller import DownloadControllerMixin
+from faqih_downloader.core.stream_coordinator import StreamDownloadCoordinator
+from faqih_downloader.ui.panels.media_options_bar import MediaOptionsBarMixin
+from faqih_downloader.ui.panels.history_panel import HistoryPanelMixin
+from faqih_downloader.ui.controllers.youtube_download_controller import YouTubeDownloadControllerMixin
+from faqih_downloader.ui.controllers.download_controller import DownloadControllerMixin
 
 
 class TestSubtitleConversionStage9(unittest.TestCase):
@@ -259,7 +259,7 @@ class TestStreamCoordinatorMultiThreading(unittest.TestCase):
         self.assertEqual(last_eta, "Merging...")
 
     def test_chunk_snapshot_offsets_chunk_ids(self):
-        from smart_download.core.chunk import DownloadChunk
+        from faqih_downloader.core.chunk import DownloadChunk
         stream_info = YouTubeStreamInfo(
             video_id="vid123",
             title="Test Video",
@@ -292,7 +292,7 @@ class TestStreamCoordinatorMultiThreading(unittest.TestCase):
         self.assertEqual(snapshots[1].chunk_id, 1)
 
     def test_chunk_snapshot_no_duplicate_ids_with_dynamic_split(self):
-        from smart_download.core.chunk import DownloadChunk
+        from faqih_downloader.core.chunk import DownloadChunk
         stream_info = YouTubeStreamInfo(
             video_id="vid123", title="Test", clean_filename="t", is_progressive=False,
             video_url="https://example.com/video", audio_url="https://example.com/audio"
@@ -484,7 +484,7 @@ class TestFetchingToastSafety(unittest.TestCase):
     @patch("tkinter.Toplevel.geometry")
     @patch("tkinter.Toplevel.overrideredirect")
     def test_fetching_toast_topmost_and_safety_timer(self, mock_override, mock_geom, mock_after, mock_attrs):
-        from smart_download.ui.modals.fetching_toast import FetchingLinkToast
+        from faqih_downloader.ui.modals.fetching_toast import FetchingLinkToast
 
         mock_parent = MagicMock()
         mock_parent.winfo_exists.return_value = False
@@ -508,7 +508,7 @@ class TestSubtitleAutoSelection(unittest.TestCase):
     """Verifies subtitle auto-selection when user actively touches mode vs No Subtitles default."""
 
     def test_no_subtitles_respected_when_mode_not_touched(self):
-        from smart_download.ui.modals.quality_modal import QualitySelectionModal
+        from faqih_downloader.ui.modals.quality_modal import QualitySelectionModal
 
         sub_tracks = [
             {"track_idx": 0, "name": "None", "code": "none"},
@@ -540,7 +540,7 @@ class TestSubtitleAutoSelection(unittest.TestCase):
         self.assertEqual(opt.subtitle_embed_mode, "hard_burn")
 
     def test_auto_select_track_when_user_touched_mode(self):
-        from smart_download.ui.modals.quality_modal import QualitySelectionModal
+        from faqih_downloader.ui.modals.quality_modal import QualitySelectionModal
 
         sub_tracks = [
             {"track_idx": 0, "name": "None", "code": "none"},

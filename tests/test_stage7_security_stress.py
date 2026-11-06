@@ -35,24 +35,24 @@ try:
 except Exception:
     tk = None  # type: ignore
 
-from smart_download.utils.archive_utils import (
+from faqih_downloader.utils.archive_utils import (
     auto_unpack_archive,
     _safe_extract_zip,
     _safe_extract_tar
 )
-from smart_download.utils.url_utils import (
+from faqih_downloader.utils.url_utils import (
     clean_download_filename,
     parse_filename_from_cd_header,
     WINDOWS_RESERVED_NAMES
 )
-from smart_download.services.browser.bridge_server import (
+from faqih_downloader.services.browser.bridge_server import (
     BrowserBridgeServer,
     BrowserBridgeHandler
 )
-from smart_download.core.html_resolver import resolve_real_download_url
-from smart_download.core.engine import TurboDownloadEngine
-from smart_download.ui.controllers.dispatch_controller import DispatchControllerMixin
-from smart_download.ui.controllers.download_controller import DownloadControllerMixin
+from faqih_downloader.core.html_resolver import resolve_real_download_url
+from faqih_downloader.core.engine import TurboDownloadEngine
+from faqih_downloader.ui.controllers.dispatch_controller import DispatchControllerMixin
+from faqih_downloader.ui.controllers.download_controller import DownloadControllerMixin
 
 
 class TestZipTarSlipSecurity(unittest.TestCase):

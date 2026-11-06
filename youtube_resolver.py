@@ -1,6 +1,6 @@
 """
 Backward compatibility entry-point for youtube_resolver.
-Logic has moved to smart_download.services.youtube_service.
+Logic has moved to faqih_downloader.services.youtube_service.
 """
 import sys
 import os
@@ -10,8 +10,8 @@ _src_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "src")
 if os.path.isdir(_src_dir) and _src_dir not in sys.path:
     sys.path.insert(0, _src_dir)
 
-from smart_download.services.youtube_service import *
-from smart_download.services.youtube_service import (
+from faqih_downloader.services.youtube_service import *
+from faqih_downloader.services.youtube_service import (
     is_youtube_url,
     is_social_media_url,
     is_media_url,
@@ -47,7 +47,7 @@ class _YouTubeResolverShim(types.ModuleType):
         try:
             _SYNC_ACTIVE = True
             for mod in list(sys.modules.values()):
-                if mod is not None and getattr(mod, "__name__", "").startswith("smart_download"):
+                if mod is not None and getattr(mod, "__name__", "").startswith("faqih_downloader"):
                     if hasattr(mod, name):
                         try:
                             setattr(mod, name, value)

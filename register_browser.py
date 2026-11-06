@@ -1,6 +1,6 @@
 """
 Backward compatibility entry-point for register_browser.
-Logic has moved to smart_download.services.browser.registry.
+Logic has moved to faqih_downloader.services.browser.registry.
 """
 import sys
 import os
@@ -9,8 +9,8 @@ _src_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "src")
 if os.path.isdir(_src_dir) and _src_dir not in sys.path:
     sys.path.insert(0, _src_dir)
 
-from smart_download.services.browser.registry import *
-from smart_download.services.browser.registry import (
+from faqih_downloader.services.browser.registry import *
+from faqih_downloader.services.browser.registry import (
     register_native_host,
     unregister_native_host,
     check_and_register_browser,
@@ -32,6 +32,6 @@ from smart_download.services.browser.registry import (
 )
 
 if __name__ == "__main__":
-    import smart_download.services.browser.registry as _r
+    import faqih_downloader.services.browser.registry as _r
     if hasattr(_r, "main"):
         _r.main()

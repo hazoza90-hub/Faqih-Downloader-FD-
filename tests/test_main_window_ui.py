@@ -834,7 +834,7 @@ class TestBackgroundStartupNotificationAndTray(unittest.TestCase):
 
     def test_update_ui_language_with_active_speed_limit(self):
         """Verifies _update_ui_language formats active speed limit without NameError."""
-        from smart_download.locales.i18n import set_current_language
+        from faqih_downloader.locales.i18n import set_current_language
         set_current_language("en")
         gui = ModernFramelessGUI(self.root, start_hidden=True)
         try:

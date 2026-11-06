@@ -3,7 +3,7 @@
 🚀 SMART DOWNLOAD (SD) — Windows Standalone Installer & Uninstaller Entrypoint
 ========================================================================================
 Clean <120-line entry point and backward compatibility shim.
-Core installation logic resides in smart_download.installer.
+Core installation logic resides in faqih_downloader.installer.
 ========================================================================================
 """
 import os
@@ -23,7 +23,7 @@ _src_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "src")
 if os.path.isdir(_src_dir) and _src_dir not in sys.path:
     sys.path.insert(0, _src_dir)
 
-from smart_download.installer import (
+from faqih_downloader.installer import (
     APP_NAME, APP_ID, APP_VERSION, APP_PUBLISHER, APP_URL,
     LEGACY_APP_ID, LEGACY_UNINSTALL_REG_KEY, UNINSTALL_REG_KEY,
     STARTUP_REG_KEY, STARTUP_REG_KEY_NAME, LEGACY_STARTUP_REG_KEY_NAME,
@@ -40,9 +40,9 @@ from smart_download.installer import (
     perform_installation, InstallerGUI, InstallerWizardGUI,
     handle_uninstall_cli,
 )
-import smart_download.installer.installer_ops as _installer_ops
-import smart_download.installer.installer_registry as _installer_reg
-import smart_download.installer.installer_gui as _installer_gui
+import faqih_downloader.installer.installer_ops as _installer_ops
+import faqih_downloader.installer.installer_registry as _installer_reg
+import faqih_downloader.installer.installer_gui as _installer_gui
 
 class _InstallerShim(types.ModuleType):
     """Synchronizes monkeypatches across installer modules for backward test compatibility."""

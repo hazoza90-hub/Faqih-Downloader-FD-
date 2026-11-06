@@ -81,10 +81,10 @@ class TestCoreHotPatchAndZeroRebuildWorkflow(unittest.TestCase):
             with zipfile.ZipFile(out_zip, "r") as zf:
                 names = zf.namelist()
                 self.assertIn("core_version.json", names)
-                self.assertIn("smart_download/__init__.py", names)
-                self.assertIn("smart_download/config.py", names)
-                self.assertIn("smart_download/locales/ar.json", names)
-                self.assertIn("smart_download/locales/en.json", names)
+                self.assertIn("faqih_downloader/__init__.py", names)
+                self.assertIn("faqih_downloader/config.py", names)
+                self.assertIn("faqih_downloader/locales/ar.json", names)
+                self.assertIn("faqih_downloader/locales/en.json", names)
 
                 manifest_raw = zf.read("core_version.json").decode("utf-8")
                 manifest = json.loads(manifest_raw)
@@ -113,8 +113,8 @@ class TestCoreHotPatchAndZeroRebuildWorkflow(unittest.TestCase):
             self.assertFalse(updater.is_plugin_valid())
             self.assertIsNone(updater.get_plugin_version())
 
-            # Add core_version.json and smart_download package files
-            pkg_dir = os.path.join(tmp_dir, "smart_download")
+            # Add core_version.json and faqih_downloader package files
+            pkg_dir = os.path.join(tmp_dir, "faqih_downloader")
             os.makedirs(pkg_dir, exist_ok=True)
             with open(os.path.join(pkg_dir, "__init__.py"), "w", encoding="utf-8") as f:
                 f.write('"""test init"""\n')
@@ -258,7 +258,7 @@ class TestCoreHotPatchAndZeroRebuildWorkflow(unittest.TestCase):
     def test_external_core_finder_and_dev_source_loader(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             dev_root = os.path.join(tmp_dir, "dev_src")
-            pkg_dir = os.path.join(dev_root, "smart_download")
+            pkg_dir = os.path.join(dev_root, "faqih_downloader")
             os.makedirs(pkg_dir, exist_ok=True)
             with open(os.path.join(pkg_dir, "__init__.py"), "w", encoding="utf-8") as f:
                 f.write('"""dev init"""\n')
@@ -267,12 +267,12 @@ class TestCoreHotPatchAndZeroRebuildWorkflow(unittest.TestCase):
 
             finder = _ExternalCoreFinder(dev_root)
             self.assertIsNone(finder.find_spec("unrelated_package"))
-            spec = finder.find_spec("smart_download")
+            spec = finder.find_spec("faqih_downloader")
             self.assertIsNotNone(spec)
-            self.assertEqual(spec.name, "smart_download")
+            self.assertEqual(spec.name, "faqih_downloader")
 
             # Test finder resilient against frozen bundle path pollution
-            sub_spec_frozen = finder.find_spec("smart_download.config", path=["C:\\frozen\\smart_download"])
+            sub_spec_frozen = finder.find_spec("faqih_downloader.config", path=["C:\\frozen\\faqih_downloader"])
             self.assertIsNotNone(sub_spec_frozen)
             self.assertEqual(sub_spec_frozen.origin, os.path.abspath(os.path.join(pkg_dir, "config.py")))
 
@@ -280,7 +280,7 @@ class TestCoreHotPatchAndZeroRebuildWorkflow(unittest.TestCase):
             orig_dev_src = os.environ.get("SD_DEV_SRC")
             orig_sys_path = list(sys.path)
             orig_meta_path = list(sys.meta_path)
-            orig_modules = {k: v for k, v in sys.modules.items() if k == "smart_download" or k.startswith("smart_download.")}
+            orig_modules = {k: v for k, v in sys.modules.items() if k == "faqih_downloader" or k.startswith("faqih_downloader.")}
             try:
                 os.environ["SD_DEV_SRC"] = dev_root
                 mode = init_core_loader(force=True)
@@ -289,7 +289,7 @@ class TestCoreHotPatchAndZeroRebuildWorkflow(unittest.TestCase):
                 self.assertIsInstance(sys.meta_path[0], _ExternalCoreFinder)
 
                 # CRITICAL: Verify imported module actually reflects dev version!
-                from smart_download import config
+                from faqih_downloader import config
                 self.assertEqual(config.APP_VERSION, "2.9.9")
                 self.assertEqual(os.path.abspath(config.__file__), os.path.abspath(os.path.join(pkg_dir, "config.py")))
             finally:
@@ -300,18 +300,18 @@ class TestCoreHotPatchAndZeroRebuildWorkflow(unittest.TestCase):
                 sys.path[:] = orig_sys_path
                 sys.meta_path[:] = orig_meta_path
                 for k in list(sys.modules.keys()):
-                    if k == "smart_download" or k.startswith("smart_download."):
+                    if k == "faqih_downloader" or k.startswith("faqih_downloader."):
                         sys.modules.pop(k, None)
                 sys.modules.update(orig_modules)
 
     def test_init_core_loader_plugin_mode(self):
         orig_sys_path = list(sys.path)
         orig_meta_path = list(sys.meta_path)
-        orig_modules = {k: v for k, v in sys.modules.items() if k == "smart_download" or k.startswith("smart_download.")}
+        orig_modules = {k: v for k, v in sys.modules.items() if k == "faqih_downloader" or k.startswith("faqih_downloader.")}
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             plugin_root = os.path.join(tmp_dir, "core_plugin")
-            pkg_dir = os.path.join(plugin_root, "smart_download")
+            pkg_dir = os.path.join(plugin_root, "faqih_downloader")
             os.makedirs(pkg_dir, exist_ok=True)
             with open(os.path.join(pkg_dir, "__init__.py"), "w", encoding="utf-8") as f:
                 f.write('"""plugin init"""\n')
@@ -321,19 +321,19 @@ class TestCoreHotPatchAndZeroRebuildWorkflow(unittest.TestCase):
                 json.dump({"version": "3.5.0"}, f)
 
             try:
-                with patch("smart_download.services.core_patch_updater.get_core_plugin_dir", return_value=plugin_root):
+                with patch("faqih_downloader.services.core_patch_updater.get_core_plugin_dir", return_value=plugin_root):
                     mode = init_core_loader(force=True)
                     self.assertEqual(mode, "plugin")
                     self.assertEqual(os.path.abspath(sys.path[0]), os.path.abspath(plugin_root))
                     self.assertIsInstance(sys.meta_path[0], _ExternalCoreFinder)
 
-                    from smart_download import config
+                    from faqih_downloader import config
                     self.assertEqual(config.APP_VERSION, "3.5.0")
             finally:
                 sys.path[:] = orig_sys_path
                 sys.meta_path[:] = orig_meta_path
                 for k in list(sys.modules.keys()):
-                    if k == "smart_download" or k.startswith("smart_download."):
+                    if k == "faqih_downloader" or k.startswith("faqih_downloader."):
                         sys.modules.pop(k, None)
                 sys.modules.update(orig_modules)
 
@@ -342,11 +342,11 @@ class TestCoreHotPatchAndZeroRebuildWorkflow(unittest.TestCase):
         """Verifies that frozen SmartDownload.exe only activates plugin if strictly newer than APP_VERSION."""
         orig_sys_path = list(sys.path)
         orig_meta_path = list(sys.meta_path)
-        orig_modules = {k: v for k, v in sys.modules.items() if k == "smart_download" or k.startswith("smart_download.")}
+        orig_modules = {k: v for k, v in sys.modules.items() if k == "faqih_downloader" or k.startswith("faqih_downloader.")}
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             plugin_root = os.path.join(tmp_dir, "core_plugin")
-            pkg_dir = os.path.join(plugin_root, "smart_download")
+            pkg_dir = os.path.join(plugin_root, "faqih_downloader")
             os.makedirs(pkg_dir, exist_ok=True)
             with open(os.path.join(pkg_dir, "__init__.py"), "w", encoding="utf-8") as f:
                 f.write('"""plugin init"""\n')
@@ -358,40 +358,40 @@ class TestCoreHotPatchAndZeroRebuildWorkflow(unittest.TestCase):
 
             try:
                 # 1. Same version + frozen + force=False -> MUST NOT activate (returns None)
-                with patch("smart_download.services.core_patch_updater.get_core_plugin_dir", return_value=plugin_root), \
+                with patch("faqih_downloader.services.core_patch_updater.get_core_plugin_dir", return_value=plugin_root), \
                      patch("sys.frozen", True, create=True):
                     mode = init_core_loader(force=False)
                     self.assertIsNone(mode)
 
                 # 2. Same version + force=True -> Activates (for tests)
-                with patch("smart_download.services.core_patch_updater.get_core_plugin_dir", return_value=plugin_root):
+                with patch("faqih_downloader.services.core_patch_updater.get_core_plugin_dir", return_value=plugin_root):
                     mode = init_core_loader(force=True)
                     self.assertEqual(mode, "plugin")
 
                 # Clean up imported modules from previous test
                 for k in list(sys.modules.keys()):
-                    if k == "smart_download" or k.startswith("smart_download."):
+                    if k == "faqih_downloader" or k.startswith("faqih_downloader."):
                         sys.modules.pop(k, None)
                 sys.modules.update(orig_modules)
 
                 # 3. Strictly newer version + frozen + force=False -> MUST activate ("plugin")
                 with open(ver_file, "w", encoding="utf-8") as f:
                     json.dump({"version": "99.0.0"}, f)
-                with patch("smart_download.services.core_patch_updater.get_core_plugin_dir", return_value=plugin_root), \
+                with patch("faqih_downloader.services.core_patch_updater.get_core_plugin_dir", return_value=plugin_root), \
                      patch("sys.frozen", True, create=True):
                     mode = init_core_loader(force=False)
                     self.assertEqual(mode, "plugin")
 
                 # Clean up imported modules from previous test
                 for k in list(sys.modules.keys()):
-                    if k == "smart_download" or k.startswith("smart_download."):
+                    if k == "faqih_downloader" or k.startswith("faqih_downloader."):
                         sys.modules.pop(k, None)
                 sys.modules.update(orig_modules)
 
                 # 4. Older version + force=True or force=False -> MUST NOT activate (returns None)
                 with open(ver_file, "w", encoding="utf-8") as f:
                     json.dump({"version": "1.0.0"}, f)
-                with patch("smart_download.services.core_patch_updater.get_core_plugin_dir", return_value=plugin_root), \
+                with patch("faqih_downloader.services.core_patch_updater.get_core_plugin_dir", return_value=plugin_root), \
                      patch("sys.frozen", True, create=True):
                     self.assertIsNone(init_core_loader(force=False))
                     self.assertIsNone(init_core_loader(force=True))
@@ -405,12 +405,12 @@ class TestCoreHotPatchAndZeroRebuildWorkflow(unittest.TestCase):
                 sys.path[:] = orig_sys_path
                 sys.meta_path[:] = orig_meta_path
                 for k in list(sys.modules.keys()):
-                    if k == "smart_download" or k.startswith("smart_download."):
+                    if k == "faqih_downloader" or k.startswith("faqih_downloader."):
                         sys.modules.pop(k, None)
                 sys.modules.update(orig_modules)
 
     def test_services_package_namespace_reexports(self):
-        import smart_download.services as sds
+        import faqih_downloader.services as sds
         self.assertTrue(hasattr(sds, "CoreHotPatchUpdater"))
         self.assertTrue(hasattr(sds, "build_core_patch_zip"))
         self.assertTrue(hasattr(sds, "init_core_loader"))

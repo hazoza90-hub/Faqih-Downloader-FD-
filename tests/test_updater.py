@@ -96,7 +96,7 @@ class TestVersionComparisonAndUnification(unittest.TestCase):
         self.assertFalse(is_newer_version("2.0.0", "2.0.0-"))
 
     def test_is_trusted_update_url(self):
-        from smart_download.services.updater_service import _is_trusted_update_url
+        from faqih_downloader.services.updater_service import _is_trusted_update_url
 
         # Trusted official production hosts
         self.assertTrue(_is_trusted_update_url("https://github.com/hazoza90-hub/Faqih-Downloader-FD-/releases/v2.0.2"))
@@ -170,7 +170,7 @@ class TestVersionComparisonAndUnification(unittest.TestCase):
             if os.path.isfile(dist_ext_manifest):
                 with open(dist_ext_manifest, "r", encoding="utf-8") as f:
                     ext_data = json.load(f)
-                from smart_download.services.updater_service import APP_VERSION
+                from faqih_downloader.services.updater_service import APP_VERSION
                 self.assertEqual(ext_data.get("version"), APP_VERSION)
                 self.assertEqual(ext_data.get("name"), "Faqih Downloader (FD) Integration")
 

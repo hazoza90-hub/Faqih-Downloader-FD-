@@ -22,8 +22,8 @@ SRC_DIR = os.path.join(BASE_DIR, "src")
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
-from smart_download.ui.main_window import ModernFramelessGUI
-from smart_download.services.youtube_models import VideoFormatOption, YouTubeStreamInfo
+from faqih_downloader.ui.main_window import ModernFramelessGUI
+from faqih_downloader.services.youtube_models import VideoFormatOption, YouTubeStreamInfo
 
 
 def run_visible_desktop_verification():
@@ -66,7 +66,7 @@ def run_visible_desktop_verification():
     app.card_eta.configure(text="00:00:04")
     app.card_threads.configure(text="4 / 4 Threads")
 
-    from smart_download.core.chunk import DownloadChunk
+    from faqih_downloader.core.chunk import DownloadChunk
     chunks_4 = [
         DownloadChunk(0, 0, 1000, 600, "active", "p0"),
         DownloadChunk(1, 1001, 2000, 450, "active", "p1"),

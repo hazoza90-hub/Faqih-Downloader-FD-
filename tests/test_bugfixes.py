@@ -10,20 +10,20 @@ import tempfile
 import unittest
 from unittest.mock import patch, MagicMock
 
-from smart_download.services.subtitle_downloader import (
+from faqih_downloader.services.subtitle_downloader import (
     _strip_tlang_param,
     _translate_srt_cues_via_gtx,
     _parse_timedtext_to_cues,
     _format_cues_to_srt,
     download_subtitle_as_srt,
 )
-from smart_download.services.subtitle_processor import (
+from faqih_downloader.services.subtitle_processor import (
     burn_subtitle_into_video,
     handle_subtitles_post_download,
     strip_burn_tag_from_filename,
 )
-from smart_download.services.youtube_models import find_ffmpeg_bin
-from smart_download.ui.modals.video_preview_modal import (
+from faqih_downloader.services.youtube_models import find_ffmpeg_bin
+from faqih_downloader.ui.modals.video_preview_modal import (
     generate_preview_html,
     _convert_srt_to_vtt_data_uri,
     _find_progressive_mp4_url,
@@ -104,7 +104,7 @@ class TestSubtitleProcessorAndGTXFallback(unittest.TestCase):
                 [["مرحبا من النص الأصلي", "Hello from base timedtext", None, None]]
             ]).encode("utf-8")
 
-            with patch("smart_download.services.subtitle_downloader._fetch_url_direct", side_effect=mock_fetch):
+            with patch("faqih_downloader.services.subtitle_downloader._fetch_url_direct", side_effect=mock_fetch):
                 with patch("urllib.request.urlopen", return_value=mock_gtx_resp):
                     srt_path = download_subtitle_as_srt(sub_track, video_file)
                     self.assertIsNotNone(srt_path)
@@ -178,7 +178,7 @@ class TestSubtitleProcessorAndGTXFallback(unittest.TestCase):
             stream_info.subtitle_embed_mode = "hard_burn"
 
             # Mock download_subtitle_as_srt to return None (download failure)
-            with patch("smart_download.services.subtitle_processor.download_subtitle_as_srt", return_value=None):
+            with patch("faqih_downloader.services.subtitle_processor.download_subtitle_as_srt", return_value=None):
                 handle_subtitles_post_download(stream_info, tagged_path)
                 # The file on disk should have had [Sub] stripped
                 self.assertFalse(os.path.exists(tagged_path))
@@ -210,10 +210,10 @@ class TestSubtitleProcessorAndGTXFallback(unittest.TestCase):
                 embed_calls.append(v_path)
                 return True
 
-            with patch("smart_download.services.subtitle_processor.download_subtitle_as_srt", return_value=srt_path), \
-                 patch("smart_download.services.subtitle_processor.find_ffmpeg_bin", return_value="ffmpeg"), \
-                 patch("smart_download.services.subtitle_processor.burn_subtitle_into_video", return_value=False), \
-                 patch("smart_download.services.subtitle_processor.embed_subtitle_into_mp4", side_effect=mock_embed):
+            with patch("faqih_downloader.services.subtitle_processor.download_subtitle_as_srt", return_value=srt_path), \
+                 patch("faqih_downloader.services.subtitle_processor.find_ffmpeg_bin", return_value="ffmpeg"), \
+                 patch("faqih_downloader.services.subtitle_processor.burn_subtitle_into_video", return_value=False), \
+                 patch("faqih_downloader.services.subtitle_processor.embed_subtitle_into_mp4", side_effect=mock_embed):
                 handle_subtitles_post_download(stream_info, tagged_path)
 
                 self.assertEqual(len(embed_calls), 1)
@@ -290,7 +290,7 @@ class TestVideoPreviewModal(unittest.TestCase):
 
     def test_open_video_preview_launches_browser(self):
         """Verifies open_video_preview writes HTML and invokes chromeless browser."""
-        with patch("smart_download.ui.modals.video_preview_modal._find_chromeless_browser", return_value="msedge.exe"):
+        with patch("faqih_downloader.ui.modals.video_preview_modal._find_chromeless_browser", return_value="msedge.exe"):
             with patch("subprocess.Popen") as mock_popen:
                 html_path = open_video_preview(
                     parent=None,
@@ -311,8 +311,8 @@ class TestVideoPreviewModal(unittest.TestCase):
 
     def test_quality_modal_preview_passes_selected_subtitle_track(self):
         """Verifies QualitySelectionModal._on_preview_video passes selected_subtitle_track to open_video_preview."""
-        from smart_download.ui.modals.quality_modal import QualitySelectionModal
-        from smart_download.services.youtube_models import VideoFormatOption
+        from faqih_downloader.ui.modals.quality_modal import QualitySelectionModal
+        from faqih_downloader.services.youtube_models import VideoFormatOption
         import tkinter as tk
 
         try:
@@ -351,7 +351,7 @@ class TestVideoPreviewModal(unittest.TestCase):
             if modal.cb_sub:
                 modal.cb_sub.current(1)
 
-            with patch("smart_download.ui.modals.video_preview_modal.open_video_preview") as mock_preview:
+            with patch("faqih_downloader.ui.modals.video_preview_modal.open_video_preview") as mock_preview:
                 modal._on_preview_video()
                 mock_preview.assert_called_once()
                 call_kwargs = mock_preview.call_args[1]
@@ -364,7 +364,7 @@ class TestVideoPreviewModal(unittest.TestCase):
 
     def test_extract_subtitle_tracks_synthesizes_ar_auto(self):
         """Verifies extract_subtitle_tracks creates ar_auto fallback with base_url when Arabic is missing."""
-        from smart_download.services.youtube_tracks import extract_subtitle_tracks
+        from faqih_downloader.services.youtube_tracks import extract_subtitle_tracks
 
         info = {
             "webpage_url": "https://www.youtube.com/watch?v=123",
@@ -409,18 +409,18 @@ class TestPreviewStreamBridgeAndUnifiedVidMatePlayer(unittest.TestCase):
     """
 
     def setUp(self):
-        from smart_download.services.preview_stream_bridge import start_preview_bridge, get_preview_bridge_port
+        from faqih_downloader.services.preview_stream_bridge import start_preview_bridge, get_preview_bridge_port
         self.port = get_preview_bridge_port()
         self.base_url = f"http://127.0.0.1:{self.port}"
 
     def test_preview_stream_bridge_endpoints(self):
         """Verifies /player, /subtitle.vtt, /api/update_filename, and /api/action over 127.0.0.1."""
-        from smart_download.services.preview_stream_bridge import (
+        from faqih_downloader.services.preview_stream_bridge import (
             register_preview_session,
             get_preview_session,
             unregister_preview_session,
         )
-        from smart_download.services.youtube_models import VideoFormatOption
+        from faqih_downloader.services.youtube_models import VideoFormatOption
         import urllib.request
         import json
 
@@ -481,7 +481,7 @@ class TestPreviewStreamBridgeAndUnifiedVidMatePlayer(unittest.TestCase):
                     f.write("1\n00:00:01,000 --> 00:00:03,000\nمرحبا بكم في المعاينة\n")
                 return srt_path
 
-            with patch("smart_download.services.preview_stream_bridge.download_subtitle_as_srt", side_effect=mock_sub_download):
+            with patch("faqih_downloader.services.preview_stream_bridge.download_subtitle_as_srt", side_effect=mock_sub_download):
                 with urllib.request.urlopen(sub_url, timeout=5) as resp:
                     self.assertEqual(resp.getcode(), 200)
                     self.assertIn("text/vtt", resp.headers.get("Content-Type", ""))
@@ -547,8 +547,8 @@ class TestPreviewStreamBridgeAndUnifiedVidMatePlayer(unittest.TestCase):
 
     def test_preview_stream_bridge_header_forwarding_proxy(self):
         """Verifies Range requests and HTTP headers (User-Agent, Referer, Cookie) are forwarded upstream."""
-        from smart_download.services.preview_stream_bridge import register_preview_session, unregister_preview_session
-        from smart_download.services.youtube_models import VideoFormatOption
+        from faqih_downloader.services.preview_stream_bridge import register_preview_session, unregister_preview_session
+        from faqih_downloader.services.youtube_models import VideoFormatOption
         import urllib.request
 
         opt = VideoFormatOption(
@@ -614,8 +614,8 @@ class TestPreviewStreamBridgeAndUnifiedVidMatePlayer(unittest.TestCase):
 
     def test_generate_preview_html_audio_dubbing_sync_and_settings(self):
         """Verifies generate_preview_html renders dub audio element, sync JS, badges, and settings panel."""
-        from smart_download.ui.modals.preview_html_builder import generate_preview_html
-        from smart_download.services.youtube_models import VideoFormatOption
+        from faqih_downloader.ui.modals.preview_html_builder import generate_preview_html
+        from faqih_downloader.services.youtube_models import VideoFormatOption
 
         opt1 = VideoFormatOption(
             format_id="137", resolution_label="1080p (Full HD)", height=1080,
@@ -680,8 +680,8 @@ class TestPreviewStreamBridgeAndUnifiedVidMatePlayer(unittest.TestCase):
 
     def test_quality_modal_embedded_preview_banner(self):
         """Verifies QualitySelectionModal renders the compact embedded Preview Header Banner and preview button."""
-        from smart_download.ui.modals.quality_modal import QualitySelectionModal
-        from smart_download.services.youtube_models import VideoFormatOption
+        from faqih_downloader.ui.modals.quality_modal import QualitySelectionModal
+        from faqih_downloader.services.youtube_models import VideoFormatOption
         import tkinter as tk
 
         try:
@@ -719,7 +719,7 @@ class TestPreviewStreamBridgeAndUnifiedVidMatePlayer(unittest.TestCase):
             self.assertTrue(hasattr(modal, "btn_preview_video"))
 
             # Test preview launch passes options and callbacks
-            with patch("smart_download.ui.modals.video_preview_modal.open_video_preview") as mock_prev:
+            with patch("faqih_downloader.ui.modals.video_preview_modal.open_video_preview") as mock_prev:
                 modal._on_preview_video()
                 mock_prev.assert_called_once()
                 kwargs = mock_prev.call_args[1]
@@ -734,7 +734,7 @@ class TestPreviewStreamBridgeAndUnifiedVidMatePlayer(unittest.TestCase):
 
     def test_preview_stream_audio_dubbing_proxy(self):
         """Verifies /stream_audio proxies dubbed audio chunks with upstream headers and Range."""
-        from smart_download.services.preview_stream_bridge import register_preview_session, unregister_preview_session
+        from faqih_downloader.services.preview_stream_bridge import register_preview_session, unregister_preview_session
         import urllib.request
 
         audio_track = {
@@ -788,8 +788,8 @@ class TestPreviewStreamBridgeAndUnifiedVidMatePlayer(unittest.TestCase):
 
     def test_player_preselection_and_volume_controls(self):
         """Verifies GET /player renders pre-selected audio/sub/mode options and header volume controls."""
-        from smart_download.services.preview_stream_bridge import register_preview_session, unregister_preview_session
-        from smart_download.services.youtube_models import VideoFormatOption
+        from faqih_downloader.services.preview_stream_bridge import register_preview_session, unregister_preview_session
+        from faqih_downloader.services.youtube_models import VideoFormatOption
         import urllib.request
 
         opt = VideoFormatOption(
@@ -848,7 +848,7 @@ class TestPart1To4CriticalBugfixes(unittest.TestCase):
                 "url": "https://example.com/subs.vtt",
             }
             vtt_sample = "WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nHello World\n"
-            with patch("smart_download.services.subtitle_downloader._fetch_url_direct", return_value=vtt_sample):
+            with patch("faqih_downloader.services.subtitle_downloader._fetch_url_direct", return_value=vtt_sample):
                 srt_path = download_subtitle_as_srt(sub_track, video_path)
 
             self.assertIsNotNone(srt_path)
@@ -862,7 +862,7 @@ class TestPart1To4CriticalBugfixes(unittest.TestCase):
 
     def test_handle_subtitles_post_download_cleanup_srt_files(self):
         """Verifies srt cleanup on hard_burn and soft_embed success, and retention on failure or srt_only."""
-        from smart_download.services.subtitle_processor import handle_subtitles_post_download
+        from faqih_downloader.services.subtitle_processor import handle_subtitles_post_download
 
         # Case 1: hard_burn succeeds -> srt deleted
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -875,9 +875,9 @@ class TestPart1To4CriticalBugfixes(unittest.TestCase):
             st_info.subtitle_track = {"sub_id": "ar", "language": "ar", "url": "https://example.com/sub.vtt"}
             st_info.subtitle_embed_mode = "hard_burn"
 
-            with patch("smart_download.services.subtitle_processor.download_subtitle_as_srt", return_value=s_path), \
-                 patch("smart_download.services.subtitle_processor.find_ffmpeg_bin", return_value="ffmpeg"), \
-                 patch("smart_download.services.subtitle_processor.burn_subtitle_into_video", return_value=True):
+            with patch("faqih_downloader.services.subtitle_processor.download_subtitle_as_srt", return_value=s_path), \
+                 patch("faqih_downloader.services.subtitle_processor.find_ffmpeg_bin", return_value="ffmpeg"), \
+                 patch("faqih_downloader.services.subtitle_processor.burn_subtitle_into_video", return_value=True):
                 handle_subtitles_post_download(st_info, v_path)
                 self.assertFalse(os.path.exists(s_path))
 
@@ -892,9 +892,9 @@ class TestPart1To4CriticalBugfixes(unittest.TestCase):
             st_info.subtitle_track = {"sub_id": "ar", "language": "ar", "url": "https://example.com/sub.vtt"}
             st_info.subtitle_embed_mode = "soft_embed"
 
-            with patch("smart_download.services.subtitle_processor.download_subtitle_as_srt", return_value=s_path), \
-                 patch("smart_download.services.subtitle_processor.find_ffmpeg_bin", return_value="ffmpeg"), \
-                 patch("smart_download.services.subtitle_processor.embed_subtitle_into_mp4", return_value=True):
+            with patch("faqih_downloader.services.subtitle_processor.download_subtitle_as_srt", return_value=s_path), \
+                 patch("faqih_downloader.services.subtitle_processor.find_ffmpeg_bin", return_value="ffmpeg"), \
+                 patch("faqih_downloader.services.subtitle_processor.embed_subtitle_into_mp4", return_value=True):
                 handle_subtitles_post_download(st_info, v_path)
                 self.assertFalse(os.path.exists(s_path))
 
@@ -909,7 +909,7 @@ class TestPart1To4CriticalBugfixes(unittest.TestCase):
             st_info.subtitle_track = {"sub_id": "ar", "language": "ar", "url": "https://example.com/sub.vtt"}
             st_info.subtitle_embed_mode = "srt_only"
 
-            with patch("smart_download.services.subtitle_processor.download_subtitle_as_srt", return_value=s_path):
+            with patch("faqih_downloader.services.subtitle_processor.download_subtitle_as_srt", return_value=s_path):
                 handle_subtitles_post_download(st_info, v_path)
                 self.assertTrue(os.path.exists(s_path))
 
@@ -924,10 +924,10 @@ class TestPart1To4CriticalBugfixes(unittest.TestCase):
             st_info.subtitle_track = {"sub_id": "ar", "language": "ar", "url": "https://example.com/sub.vtt"}
             st_info.subtitle_embed_mode = "hard_burn"
 
-            with patch("smart_download.services.subtitle_processor.download_subtitle_as_srt", return_value=s_path), \
-                 patch("smart_download.services.subtitle_processor.find_ffmpeg_bin", return_value="ffmpeg"), \
-                 patch("smart_download.services.subtitle_processor.burn_subtitle_into_video", return_value=False), \
-                 patch("smart_download.services.subtitle_processor.embed_subtitle_into_mp4", return_value=False):
+            with patch("faqih_downloader.services.subtitle_processor.download_subtitle_as_srt", return_value=s_path), \
+                 patch("faqih_downloader.services.subtitle_processor.find_ffmpeg_bin", return_value="ffmpeg"), \
+                 patch("faqih_downloader.services.subtitle_processor.burn_subtitle_into_video", return_value=False), \
+                 patch("faqih_downloader.services.subtitle_processor.embed_subtitle_into_mp4", return_value=False):
                 handle_subtitles_post_download(st_info, v_path)
                 self.assertTrue(os.path.exists(s_path))
 
@@ -973,10 +973,10 @@ class TestPart1To4CriticalBugfixes(unittest.TestCase):
 
     def test_api_sync_state_updates_modal_in_real_time(self):
         """Verifies POST /api/sync_state updates QualitySelectionModal widgets on the Tkinter event loop."""
-        from smart_download.services.preview_stream_bridge import (
+        from faqih_downloader.services.preview_stream_bridge import (
             register_preview_session, unregister_preview_session, get_preview_bridge_port
         )
-        from smart_download.services.youtube_models import VideoFormatOption
+        from faqih_downloader.services.youtube_models import VideoFormatOption
         import urllib.request
 
         port = get_preview_bridge_port()
@@ -1061,7 +1061,7 @@ class TestPart1To4CriticalBugfixes(unittest.TestCase):
 
     def test_preview_html_action_submitted_and_bridge_base(self):
         """Verifies generate_preview_html contains actionSubmitted flag and absolute bridgeBase."""
-        from smart_download.ui.modals.preview_html_builder import generate_preview_html
+        from faqih_downloader.ui.modals.preview_html_builder import generate_preview_html
 
         html_out = generate_preview_html(
             url="https://www.youtube.com/watch?v=html_test",
@@ -1088,8 +1088,8 @@ class TestPart1To4CriticalBugfixes(unittest.TestCase):
 
     def test_youtube_format_builder_dubbed_audio_merging(self):
         """Verifies build_stream_info copies option and forces is_progressive=False for dubbed audio."""
-        from smart_download.services.youtube_service import YouTubeResolver
-        from smart_download.services.youtube_models import VideoFormatOption
+        from faqih_downloader.services.youtube_service import YouTubeResolver
+        from faqih_downloader.services.youtube_models import VideoFormatOption
 
         resolver = YouTubeResolver()
         opt = VideoFormatOption(
@@ -1111,7 +1111,7 @@ class TestPart1To4CriticalBugfixes(unittest.TestCase):
 
     def test_speed_limiter_startup_settings_loaded(self):
         """Verifies that ControlsPanelMixin initializes with saved speed_limit_preset and custom_speed_limit_kbps."""
-        from smart_download.ui.panels.controls_panel import ControlsPanelMixin
+        from faqih_downloader.ui.panels.controls_panel import ControlsPanelMixin
 
         class DummyControls(ControlsPanelMixin):
             def __init__(self):
@@ -1143,7 +1143,7 @@ class TestPart1To4CriticalBugfixes(unittest.TestCase):
         root = tk.Tk()
         root.withdraw()
         try:
-            with patch("smart_download.ui.panels.controls_panel.get_setting") as mock_get:
+            with patch("faqih_downloader.ui.panels.controls_panel.get_setting") as mock_get:
                 mock_get.side_effect = lambda k, d=None: {
                     "max_connections": 8,
                     "speed_limit_preset": "2.0 MB/s",
@@ -1162,15 +1162,15 @@ class TestPart1To4CriticalBugfixes(unittest.TestCase):
 
     def test_last_download_dir_preserved_and_category_stripped(self):
         """Verifies get_base_downloads_dir returns last_download_dir and browsing strips category subfolder."""
-        from smart_download.config import get_base_downloads_dir
-        from smart_download.utils.file_ops import CATEGORY_SUBFOLDERS
+        from faqih_downloader.config import get_base_downloads_dir
+        from faqih_downloader.utils.file_ops import CATEGORY_SUBFOLDERS
         import tempfile
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             custom_dir = os.path.join(tmp_dir, "CustomDownloads")
             os.makedirs(custom_dir, exist_ok=True)
 
-            with patch("smart_download.config.get_setting", return_value=custom_dir):
+            with patch("faqih_downloader.config.get_setting", return_value=custom_dir):
                 self.assertEqual(get_base_downloads_dir(), custom_dir)
 
             # Test category subfolder stripping
@@ -1181,15 +1181,15 @@ class TestPart1To4CriticalBugfixes(unittest.TestCase):
             self.assertEqual(stripped, custom_dir)
 
             # Test resolve_final_dest uses get_base_downloads_dir
-            from smart_download.ui.modals.quality_modal_helpers import resolve_final_dest
-            with patch("smart_download.ui.modals.quality_modal_helpers.get_base_downloads_dir", return_value=custom_dir):
+            from faqih_downloader.ui.modals.quality_modal_helpers import resolve_final_dest
+            with patch("faqih_downloader.ui.modals.quality_modal_helpers.get_base_downloads_dir", return_value=custom_dir):
                 dest_res = resolve_final_dest(None, "", "my_video", None, None, None)
                 self.assertTrue(dest_res.startswith(custom_dir))
 
     def test_preview_video_target_respects_selected_quality(self):
         """Verifies _resolve_video_target respects target_h of selected option."""
-        from smart_download.services.preview_stream_bridge import PreviewBridgeRequestHandler, PreviewSession
-        from smart_download.services.youtube_models import VideoFormatOption
+        from faqih_downloader.services.preview_stream_bridge import PreviewBridgeRequestHandler, PreviewSession
+        from faqih_downloader.services.youtube_models import VideoFormatOption
 
         handler = PreviewBridgeRequestHandler.__new__(PreviewBridgeRequestHandler)
 
@@ -1257,7 +1257,7 @@ class TestPart1To4CriticalBugfixes(unittest.TestCase):
 
     def test_startup_enabled_sync_on_startup(self):
         """Verifies startup_enabled synchronizes registry when True in settings."""
-        from smart_download.ui.controllers.settings_controller import SettingsControllerMixin
+        from faqih_downloader.ui.controllers.settings_controller import SettingsControllerMixin
 
         class DummySettings(SettingsControllerMixin):
             def __init__(self):
@@ -1270,17 +1270,17 @@ class TestPart1To4CriticalBugfixes(unittest.TestCase):
                 self.btn_startup.winfo_exists.return_value = True
 
         panel = DummySettings()
-        with patch("smart_download.ui.controllers.settings_controller.get_setting", return_value=True):
-            with patch("smart_download.ui.controllers.settings_controller.is_startup_enabled", side_effect=[False, True]):
-                with patch("smart_download.ui.controllers.settings_controller.enable_startup") as mock_enable:
+        with patch("faqih_downloader.ui.controllers.settings_controller.get_setting", return_value=True):
+            with patch("faqih_downloader.ui.controllers.settings_controller.is_startup_enabled", side_effect=[False, True]):
+                with patch("faqih_downloader.ui.controllers.settings_controller.enable_startup") as mock_enable:
                     panel._update_startup_btn()
                     mock_enable.assert_called_once_with(minimized=True)
                     self.assertTrue(panel._startup_enabled)
 
     def test_resolve_preferred_option_index(self):
         """Verifies resolve_preferred_option_index honors user settings for audio-only, exact match, and closest match."""
-        from smart_download.ui.modals.quality_modal_helpers import resolve_preferred_option_index
-        from smart_download.services.youtube_models import VideoFormatOption
+        from faqih_downloader.ui.modals.quality_modal_helpers import resolve_preferred_option_index
+        from faqih_downloader.services.youtube_models import VideoFormatOption
 
         opt_1080 = VideoFormatOption(format_id="1", resolution_label="1080p", height=1080, ext="mp4", filesize_approx=1000)
         opt_720 = VideoFormatOption(format_id="2", resolution_label="720p", height=720, ext="mp4", filesize_approx=1000)
@@ -1292,25 +1292,25 @@ class TestPart1To4CriticalBugfixes(unittest.TestCase):
         self.assertEqual(resolve_preferred_option_index([]), 0)
 
         # pref_h == -1 (Audio only)
-        with patch("smart_download.config.get_setting", return_value=-1):
+        with patch("faqih_downloader.config.get_setting", return_value=-1):
             self.assertEqual(resolve_preferred_option_index(options), 3)
 
         # pref_h == 720 (Exact match)
-        with patch("smart_download.config.get_setting", return_value=720):
+        with patch("faqih_downloader.config.get_setting", return_value=720):
             self.assertEqual(resolve_preferred_option_index(options), 1)
 
         # pref_h == 480 (Closest non-audio match: |360-480|=120 vs |720-480|=240 => 360p)
-        with patch("smart_download.config.get_setting", return_value=480):
+        with patch("faqih_downloader.config.get_setting", return_value=480):
             self.assertEqual(resolve_preferred_option_index(options), 2)
 
         # pref_h == 0 (Default highest quality)
-        with patch("smart_download.config.get_setting", return_value=0):
+        with patch("faqih_downloader.config.get_setting", return_value=0):
             self.assertEqual(resolve_preferred_option_index(options), 0)
 
     def test_preview_html_autoscroll_and_separate_audio(self):
         """Verifies Preview HTML contains autoscroll and optNeedsSeparateAudio array."""
-        from smart_download.ui.modals.preview_html_builder import generate_preview_html
-        from smart_download.services.youtube_models import VideoFormatOption
+        from faqih_downloader.ui.modals.preview_html_builder import generate_preview_html
+        from faqih_downloader.services.youtube_models import VideoFormatOption
 
         opt_prog = VideoFormatOption(format_id="18", resolution_label="360p", height=360, ext="mp4", filesize_approx=1000, is_progressive=True, video_url="http://x/prog.mp4")
         opt_dash = VideoFormatOption(format_id="137", resolution_label="1080p", height=1080, ext="mp4", filesize_approx=1000, is_progressive=False, video_url="http://x/1080.mp4", audio_url="http://x/aud.m4a")
@@ -1330,8 +1330,8 @@ class TestPart1To4CriticalBugfixes(unittest.TestCase):
     def test_quality_modal_preferred_height_dest_update(self):
         """Verifies QualitySelectionModal auto-selects preferred height and updates destination tag."""
         import tkinter as tk
-        from smart_download.ui.modals.quality_modal import QualitySelectionModal
-        from smart_download.services.youtube_models import VideoFormatOption
+        from faqih_downloader.ui.modals.quality_modal import QualitySelectionModal
+        from faqih_downloader.services.youtube_models import VideoFormatOption
 
         root = tk.Tk()
         root.withdraw()
@@ -1346,7 +1346,7 @@ class TestPart1To4CriticalBugfixes(unittest.TestCase):
                 "c_success": "#10b981", "c_text_bright": "#f8fafc", "c_text_muted": "#94a3b8", "c_input_bg": "#0f172a"
             }
 
-            with patch("smart_download.config.get_setting", return_value=360):
+            with patch("faqih_downloader.config.get_setting", return_value=360):
                 modal = QualitySelectionModal(
                     parent=root,
                     video_title="Test Video",
@@ -1363,7 +1363,7 @@ class TestPart1To4CriticalBugfixes(unittest.TestCase):
                 modal.destroy()
 
             # Verify opt_0 also formats untagged destination path
-            with patch("smart_download.config.get_setting", return_value=1080):
+            with patch("faqih_downloader.config.get_setting", return_value=1080):
                 modal0 = QualitySelectionModal(
                     parent=root,
                     video_title="Test Video",
@@ -1382,9 +1382,9 @@ class TestPart1To4CriticalBugfixes(unittest.TestCase):
 
     def test_resolve_preferred_option_index_string_and_audio_only(self):
         """Verifies resolve_preferred_option_index handles string '720p' and audio-only target in preview bridge."""
-        from smart_download.ui.modals.quality_modal_helpers import resolve_preferred_option_index
-        from smart_download.services.youtube_models import VideoFormatOption
-        from smart_download.services.preview_stream_bridge import PreviewSession, PreviewBridgeRequestHandler
+        from faqih_downloader.ui.modals.quality_modal_helpers import resolve_preferred_option_index
+        from faqih_downloader.services.youtube_models import VideoFormatOption
+        from faqih_downloader.services.preview_stream_bridge import PreviewSession, PreviewBridgeRequestHandler
 
         opt_1080 = VideoFormatOption(format_id="1", resolution_label="1080p", height=1080, ext="mp4", filesize_approx=1000)
         opt_720 = VideoFormatOption(format_id="2", resolution_label="720p", height=720, ext="mp4", filesize_approx=1000)
@@ -1392,7 +1392,7 @@ class TestPart1To4CriticalBugfixes(unittest.TestCase):
         options = [opt_1080, opt_720, opt_audio]
 
         # String "720p"
-        with patch("smart_download.config.get_setting", return_value="720p"):
+        with patch("faqih_downloader.config.get_setting", return_value="720p"):
             self.assertEqual(resolve_preferred_option_index(options), 1)
 
         # Audio-only resolution in bridge
@@ -1404,14 +1404,14 @@ class TestPart1To4CriticalBugfixes(unittest.TestCase):
 
     def test_open_main_media_preview_subs_defined(self):
         """Verifies _open_main_media_preview calls open_video_preview with subtitle_tracks without raising NameError."""
-        from smart_download.ui.panels.media_options_bar import MediaOptionsBarMixin
+        from faqih_downloader.ui.panels.media_options_bar import MediaOptionsBarMixin
         bar = MediaOptionsBarMixin()
         bar.cb_main_sub = MagicMock()
         bar.cb_main_sub.current.return_value = 0
         subs = [{"sub_id": "en", "label": "English"}]
         bar._main_subtitle_tracks = subs
 
-        with patch("smart_download.ui.modals.video_preview_modal.open_video_preview") as mock_open:
+        with patch("faqih_downloader.ui.modals.video_preview_modal.open_video_preview") as mock_open:
             bar._open_main_media_preview()
             mock_open.assert_called_once()
             _, kwargs = mock_open.call_args
@@ -1420,8 +1420,8 @@ class TestPart1To4CriticalBugfixes(unittest.TestCase):
 
     def test_preview_html_dub_audio_resume_logic(self):
         """Verifies dubAudioEl resume logic on timeupdate and during quality/audio changes."""
-        from smart_download.ui.modals.preview_html_builder import generate_preview_html
-        from smart_download.services.youtube_models import VideoFormatOption
+        from faqih_downloader.ui.modals.preview_html_builder import generate_preview_html
+        from faqih_downloader.services.youtube_models import VideoFormatOption
 
         opt1 = VideoFormatOption(
             format_id="137",
@@ -1452,14 +1452,14 @@ class TestPart1To4CriticalBugfixes(unittest.TestCase):
 
     def test_open_main_media_preview_subs_from_context(self):
         """Verifies _open_main_media_preview falls back to ctx['subtitle_tracks'] when _main_subtitle_tracks is not set on self."""
-        from smart_download.ui.panels.media_options_bar import MediaOptionsBarMixin
+        from faqih_downloader.ui.panels.media_options_bar import MediaOptionsBarMixin
         bar = MediaOptionsBarMixin()
         bar.cb_main_sub = MagicMock()
         bar.cb_main_sub.current.return_value = 0
         subs = [{"sub_id": "ar", "label": "Arabic"}]
         bar._pending_media_context = {"subtitle_tracks": subs}
 
-        with patch("smart_download.ui.modals.video_preview_modal.open_video_preview") as mock_open:
+        with patch("faqih_downloader.ui.modals.video_preview_modal.open_video_preview") as mock_open:
             bar._open_main_media_preview()
             mock_open.assert_called_once()
             _, kwargs = mock_open.call_args
@@ -1469,7 +1469,7 @@ class TestPart1To4CriticalBugfixes(unittest.TestCase):
     def test_state_button_behavior(self):
         """Verifies _StateButton switches bg/fg based on state and preserves standard configure queries."""
         import tkinter as tk
-        from smart_download.ui.panels.controls_panel import _StateButton
+        from faqih_downloader.ui.panels.controls_panel import _StateButton
         root = tk.Tk()
         root.withdraw()
         try:
@@ -1491,8 +1491,8 @@ class TestPart1To4CriticalBugfixes(unittest.TestCase):
     def test_canvas_draw_fallbacks(self):
         """Verifies _draw_main_progress and _draw_chunk_segments fallback to safe dimensions when canvas unmapped."""
         import tkinter as tk
-        from smart_download.ui.panels.metrics_panel import MetricsPanelMixin
-        from smart_download.ui.panels.chunks_panel import ChunksPanelMixin
+        from faqih_downloader.ui.panels.metrics_panel import MetricsPanelMixin
+        from faqih_downloader.ui.panels.chunks_panel import ChunksPanelMixin
         root = tk.Tk()
         root.withdraw()
         try:
@@ -1555,8 +1555,8 @@ class TestPart1To4CriticalBugfixes(unittest.TestCase):
     def test_chunk_canvas_redraws_on_language_change(self):
         """Verifies _draw_chunk_segments redraws on language switch without getting blocked by cached signature."""
         import tkinter as tk
-        from smart_download.ui.panels.chunks_panel import ChunksPanelMixin
-        from smart_download.i18n import set_current_language
+        from faqih_downloader.ui.panels.chunks_panel import ChunksPanelMixin
+        from faqih_downloader.i18n import set_current_language
         root = tk.Tk()
         root.withdraw()
         try:
@@ -1601,7 +1601,7 @@ class TestWindowMaximizeAndTikTokDirectFixes(unittest.TestCase):
     def test_window_maximize_and_restore(self):
         """Verifies toggle_maximize toggles _is_maximized and updates geometry / btn_max text between '□' and '❐'."""
         import tkinter as tk
-        from smart_download.ui.controllers.window_controller import WindowChromeMixin
+        from faqih_downloader.ui.controllers.window_controller import WindowChromeMixin
 
         root = tk.Tk()
         root.withdraw()
@@ -1656,7 +1656,7 @@ class TestWindowMaximizeAndTikTokDirectFixes(unittest.TestCase):
     def test_window_drag_unmaximize_and_resize_release(self):
         """Verifies title dragging while maximized smoothly unmaximizes without jumping, and resize release persists normal geometry."""
         import tkinter as tk
-        from smart_download.ui.controllers.window_controller import WindowChromeMixin
+        from faqih_downloader.ui.controllers.window_controller import WindowChromeMixin
 
         root = tk.Tk()
         root.withdraw()
@@ -1713,7 +1713,7 @@ class TestWindowMaximizeAndTikTokDirectFixes(unittest.TestCase):
     def test_tiktok_direct_rehydration_with_gzip_and_attribute_order(self):
         """Verifies _extract_tiktok_direct handles gzip compressed responses and script tags where type precedes id."""
         import gzip
-        from smart_download.services.youtube_service import YouTubeResolver
+        from faqih_downloader.services.youtube_service import YouTubeResolver
         resolver = YouTubeResolver()
 
         rehydration_json = {
@@ -1754,7 +1754,7 @@ class TestWindowMaximizeAndTikTokDirectFixes(unittest.TestCase):
 
     def test_youtube_download_controller_exception_dispatch(self):
         """Verifies _start_youtube_download exception handler properly dispatches err_msg without NameError."""
-        from smart_download.ui.controllers.youtube_download_controller import YouTubeDownloadControllerMixin
+        from faqih_downloader.ui.controllers.youtube_download_controller import YouTubeDownloadControllerMixin
 
         class DummyYTController(YouTubeDownloadControllerMixin):
             def __init__(self):
@@ -1794,7 +1794,7 @@ class TestWindowMaximizeAndTikTokDirectFixes(unittest.TestCase):
 
     def test_tiktok_direct_rehydration_extraction(self):
         """Verifies _extract_tiktok_direct parses __UNIVERSAL_DATA_FOR_REHYDRATION__ HTML payload and produces formats with Referer and Cookie."""
-        from smart_download.services.youtube_service import YouTubeResolver
+        from faqih_downloader.services.youtube_service import YouTubeResolver
         resolver = YouTubeResolver()
 
         rehydration_json = {
@@ -1879,7 +1879,7 @@ class TestWindowMaximizeAndTikTokDirectFixes(unittest.TestCase):
 
     def test_extract_format_options_tiktok_fallback(self):
         """Verifies extract_format_options falls back to _extract_tiktok_direct when yt-dlp fails."""
-        from smart_download.services.youtube_service import YouTubeResolver
+        from faqih_downloader.services.youtube_service import YouTubeResolver
         resolver = YouTubeResolver()
 
         mock_tt_info = {
@@ -1922,7 +1922,7 @@ class TestWindowMaximizeAndTikTokDirectFixes(unittest.TestCase):
 
     def test_extract_tiktok_via_tikwm_success(self):
         """Verifies _extract_tiktok_via_tikwm parses TikWM API response properly."""
-        from smart_download.services.youtube_service import YouTubeResolver
+        from faqih_downloader.services.youtube_service import YouTubeResolver
         resolver = YouTubeResolver()
 
         mock_payload = {
@@ -1961,7 +1961,7 @@ class TestWindowMaximizeAndTikTokDirectFixes(unittest.TestCase):
 
     def test_extract_tiktok_direct_waf_fallback_to_tikwm(self):
         """Verifies _extract_tiktok_direct falls back to TikWM when HTML scraping returns no formats (WAF challenge)."""
-        from smart_download.services.youtube_service import YouTubeResolver
+        from faqih_downloader.services.youtube_service import YouTubeResolver
         resolver = YouTubeResolver()
 
         waf_challenge_html = b"<html><head><title>TikTok Security Check</title></head><body><script>Slardar challenge</script></body></html>"
@@ -2013,8 +2013,8 @@ class TestWindowMaximizeAndTikTokDirectFixes(unittest.TestCase):
         Verifies YouTubeResolver.extract_format_options('https://vt.tiktok.com/ZSgG75rWv/')
         survives yt-dlp Unexpected response error and WAF challenge, succeeding via TikWM.
         """
-        from smart_download.services.youtube_service import YouTubeResolver
-        from smart_download.services.youtube_models import VideoFormatOption
+        from faqih_downloader.services.youtube_service import YouTubeResolver
+        from faqih_downloader.services.youtube_models import VideoFormatOption
         resolver = YouTubeResolver()
 
         mock_payload = {
@@ -2060,7 +2060,7 @@ class TestWindowMaximizeAndTikTokDirectFixes(unittest.TestCase):
 
     def test_tree_chunks_proportional_column_scaling_maximized(self):
         """Verifies _on_tree_chunks_configure scales columns proportionally at width=1880."""
-        from smart_download.ui.panels.chunks_panel import ChunksPanelMixin
+        from faqih_downloader.ui.panels.chunks_panel import ChunksPanelMixin
 
         class DummyChunksPanel(ChunksPanelMixin):
             def __init__(self):
@@ -2090,7 +2090,7 @@ class TestWindowMaximizeAndTikTokDirectFixes(unittest.TestCase):
 
     def test_tree_history_proportional_column_scaling_maximized(self):
         """Verifies _on_tree_history_configure scales columns proportionally at width=1880."""
-        from smart_download.ui.panels.chunks_panel import ChunksPanelMixin
+        from faqih_downloader.ui.panels.chunks_panel import ChunksPanelMixin
 
         class DummyHistoryPanel(ChunksPanelMixin):
             def __init__(self):
@@ -2114,7 +2114,7 @@ class TestWindowMaximizeAndTikTokDirectFixes(unittest.TestCase):
     def test_safe_modal_dialog_frameless_and_bmp_symbols(self):
         """Verifies SafeModalDialog sets overrideredirect(True) and uses BMP symbols."""
         import tkinter as tk
-        from smart_download.ui.components.base_modal import SafeModalDialog
+        from faqih_downloader.ui.components.base_modal import SafeModalDialog
 
         root = tk.Tk()
         root.withdraw()
@@ -2137,7 +2137,7 @@ class TestWindowMaximizeAndTikTokDirectFixes(unittest.TestCase):
     def test_safe_modal_dialog_cancels_after_job_on_destroy(self):
         """Verifies SafeModalDialog tracks and cancels _topmost_after_id on destroy without Tcl background errors."""
         import tkinter as tk
-        from smart_download.ui.components.base_modal import SafeModalDialog
+        from faqih_downloader.ui.components.base_modal import SafeModalDialog
 
         root = tk.Tk()
         root.withdraw()
@@ -2159,7 +2159,7 @@ class TestWindowMaximizeAndTikTokDirectFixes(unittest.TestCase):
 
     def test_extract_tiktok_direct_returns_none_when_both_fail(self):
         """Verifies _extract_tiktok_direct returns None when HTML scraping and TikWM both fail."""
-        from smart_download.services.youtube_service import YouTubeResolver
+        from faqih_downloader.services.youtube_service import YouTubeResolver
         resolver = YouTubeResolver()
 
         with patch("urllib.request.build_opener", side_effect=Exception("Network error")):
@@ -2169,7 +2169,7 @@ class TestWindowMaximizeAndTikTokDirectFixes(unittest.TestCase):
 
     def test_extract_tiktok_via_tikwm_handles_relative_urls_and_fallback_title(self):
         """Verifies _extract_tiktok_via_tikwm resolves relative URLs and cleans up replacement-character titles."""
-        from smart_download.services.youtube_service import YouTubeResolver
+        from faqih_downloader.services.youtube_service import YouTubeResolver
         resolver = YouTubeResolver()
 
         mock_payload = {
@@ -2210,7 +2210,7 @@ class TestGeometryAndSanitizationAndTikTokDeduplication(unittest.TestCase):
     """
 
     def test_format_geometry_negative_coordinates(self):
-        from smart_download.ui.controllers.window_controller import WindowChromeMixin, WindowControllerMixin
+        from faqih_downloader.ui.controllers.window_controller import WindowChromeMixin, WindowControllerMixin
 
         self.assertIs(WindowControllerMixin, WindowChromeMixin)
         geo1 = WindowChromeMixin._format_geometry(800, 600, -150, 200)
@@ -2230,7 +2230,7 @@ class TestGeometryAndSanitizationAndTikTokDeduplication(unittest.TestCase):
         self.assertNotIn("+-", geo4)
 
     def test_window_drag_motion_and_resize_drag_negative_coords(self):
-        from smart_download.ui.controllers.window_controller import WindowChromeMixin
+        from faqih_downloader.ui.controllers.window_controller import WindowChromeMixin
 
         class DummyWindow(WindowChromeMixin):
             def __init__(self):
@@ -2266,7 +2266,7 @@ class TestGeometryAndSanitizationAndTikTokDeduplication(unittest.TestCase):
         self.assertNotIn("+-", call_arg)
 
     def test_safe_modal_dialog_negative_coords(self):
-        from smart_download.ui.components.base_modal import SafeModalDialog
+        from faqih_downloader.ui.components.base_modal import SafeModalDialog
         import tkinter as tk
 
         try:
@@ -2298,7 +2298,7 @@ class TestGeometryAndSanitizationAndTikTokDeduplication(unittest.TestCase):
             except Exception: pass
 
     def test_sanitize_filename_strips_non_bmp_and_replacement_chars(self):
-        from smart_download.services.youtube_models import sanitize_filename
+        from faqih_downloader.services.youtube_models import sanitize_filename
 
         raw_name = "Viral \U0001f680 Video \U0001f3a5 #1 \ufffd Top! \U0001f525"
         sanitized = sanitize_filename(raw_name)
@@ -2307,7 +2307,7 @@ class TestGeometryAndSanitizationAndTikTokDeduplication(unittest.TestCase):
         self.assertEqual(sanitized, "Viral Video #1 Top!")
 
     def test_extract_format_options_tiktok_deduplicates_direct_call(self):
-        from smart_download.services.youtube_service import YouTubeResolver
+        from faqih_downloader.services.youtube_service import YouTubeResolver
         import yt_dlp
 
         resolver = YouTubeResolver()
@@ -2326,7 +2326,7 @@ class TestGeometryAndSanitizationAndTikTokDeduplication(unittest.TestCase):
         self.assertEqual(call_counts["direct"], 1)
 
     def test_extract_tiktok_via_tikwm_duration_fallback_to_music_info(self):
-        from smart_download.services.youtube_service import YouTubeResolver
+        from faqih_downloader.services.youtube_service import YouTubeResolver
         resolver = YouTubeResolver()
 
         mock_payload = {
@@ -2351,7 +2351,7 @@ class TestGeometryAndSanitizationAndTikTokDeduplication(unittest.TestCase):
             self.assertEqual(info["duration"], 58)
 
     def test_extract_tiktok_via_tikwm_malformed_music_info(self):
-        from smart_download.services.youtube_service import YouTubeResolver
+        from faqih_downloader.services.youtube_service import YouTubeResolver
         resolver = YouTubeResolver()
 
         mock_payload = {
@@ -2376,7 +2376,7 @@ class TestGeometryAndSanitizationAndTikTokDeduplication(unittest.TestCase):
             self.assertEqual(info["duration"], 0)
 
     def test_quality_modal_drag_motion_negative_coords(self):
-        from smart_download.ui.modals.quality_modal import QualitySelectionModal
+        from faqih_downloader.ui.modals.quality_modal import QualitySelectionModal
 
         modal = MagicMock()
         modal._drag_offset_x = 200
@@ -2390,7 +2390,7 @@ class TestGeometryAndSanitizationAndTikTokDeduplication(unittest.TestCase):
         self.assertNotIn("+-", modal.geometry.call_args[0][0])
 
     def test_confirm_modal_progress_negative_coords(self):
-        from smart_download.ui.modals.confirm_modal_logic import ConfirmModalLogicMixin
+        from faqih_downloader.ui.modals.confirm_modal_logic import ConfirmModalLogicMixin
 
         class DummyModal(ConfirmModalLogicMixin):
             def __init__(self):
@@ -2418,7 +2418,7 @@ class TestGeometryAndSanitizationAndTikTokDeduplication(unittest.TestCase):
         self.assertTrue(geo_str.endswith("-800-200"))
 
     def test_toast_controller_negative_coords_and_bmp_icon(self):
-        from smart_download.ui.controllers.toast_controller import ToastControllerMixin
+        from faqih_downloader.ui.controllers.toast_controller import ToastControllerMixin
         import tkinter as tk
 
         class DummyToastHost(ToastControllerMixin):
@@ -2445,7 +2445,7 @@ class TestGeometryAndSanitizationAndTikTokDeduplication(unittest.TestCase):
             self.assertIn("⚡", label_texts)
 
     def test_locales_have_no_supplementary_characters(self):
-        locales_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src", "smart_download", "locales")
+        locales_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src", "faqih_downloader", "locales")
         for filename in ["en.json", "ar.json"]:
             path = os.path.join(locales_dir, filename)
             with open(path, encoding="utf-8") as f:
@@ -2458,7 +2458,7 @@ class TestClipboardPlatformFilteringAndSettings(unittest.TestCase):
     """Verifies per-platform sniffer filtering, settings persistence, and UI integration."""
 
     def test_get_url_sniffer_platform_key(self):
-        from smart_download.ui.controllers.clipboard_controller import get_url_sniffer_platform_key
+        from faqih_downloader.ui.controllers.clipboard_controller import get_url_sniffer_platform_key
 
         # YouTube URLs
         self.assertEqual(get_url_sniffer_platform_key("https://www.youtube.com/watch?v=dQw4w9WgXcQ"), "youtube")
@@ -2492,8 +2492,8 @@ class TestClipboardPlatformFilteringAndSettings(unittest.TestCase):
         self.assertEqual(get_url_sniffer_platform_key(None), "direct_files")
 
     def test_is_clipboard_url_allowed(self):
-        from smart_download.ui.controllers.clipboard_controller import ClipboardControllerMixin
-        from smart_download.config import DEFAULT_SNIFFER_PLATFORMS
+        from faqih_downloader.ui.controllers.clipboard_controller import ClipboardControllerMixin
+        from faqih_downloader.config import DEFAULT_SNIFFER_PLATFORMS
 
         class DummyHost(ClipboardControllerMixin):
             def __init__(self):
@@ -2525,8 +2525,8 @@ class TestClipboardPlatformFilteringAndSettings(unittest.TestCase):
         self.assertFalse(host.is_clipboard_url_allowed(direct_url))
 
     def test_check_clipboard_ignores_disabled_platforms(self):
-        from smart_download.ui.controllers.clipboard_controller import ClipboardControllerMixin
-        from smart_download.config import DEFAULT_SNIFFER_PLATFORMS
+        from faqih_downloader.ui.controllers.clipboard_controller import ClipboardControllerMixin
+        from faqih_downloader.config import DEFAULT_SNIFFER_PLATFORMS
 
         class DummyClipboardApp(ClipboardControllerMixin):
             def __init__(self):
@@ -2550,31 +2550,31 @@ class TestClipboardPlatformFilteringAndSettings(unittest.TestCase):
         app = DummyClipboardApp()
 
         # 1. Copied YouTube link (disabled)
-        with patch("smart_download.ui.controllers.clipboard_controller.get_clipboard_text", return_value="https://www.youtube.com/watch?v=dQw4w9WgXcQ"):
+        with patch("faqih_downloader.ui.controllers.clipboard_controller.get_clipboard_text", return_value="https://www.youtube.com/watch?v=dQw4w9WgXcQ"):
             app._check_clipboard_now(force=True)
             self.assertEqual(len(app.detected_calls), 0)
             self.assertTrue(any("Ignored" in m and "youtube" in m.lower() for m in app.logs))
 
         # 2. Copied TikTok link (disabled)
-        with patch("smart_download.ui.controllers.clipboard_controller.get_clipboard_text", return_value="https://vt.tiktok.com/ZS123456/"):
+        with patch("faqih_downloader.ui.controllers.clipboard_controller.get_clipboard_text", return_value="https://vt.tiktok.com/ZS123456/"):
             app._check_clipboard_now(force=True)
             self.assertEqual(len(app.detected_calls), 0)
             self.assertTrue(any("Ignored" in m and "tiktok" in m.lower() for m in app.logs))
 
         # 3. Copied Instagram link (enabled by default)
-        with patch("smart_download.ui.controllers.clipboard_controller.get_clipboard_text", return_value="https://www.instagram.com/reel/C123456/"):
+        with patch("faqih_downloader.ui.controllers.clipboard_controller.get_clipboard_text", return_value="https://www.instagram.com/reel/C123456/"):
             app._check_clipboard_now(force=True)
             self.assertEqual(len(app.detected_calls), 1)
             self.assertEqual(app.detected_calls[-1], "https://www.instagram.com/reel/C123456/")
 
         # 4. Copied Direct File link (enabled by default)
-        with patch("smart_download.ui.controllers.clipboard_controller.get_clipboard_text", return_value="https://example.com/download/archive.zip"):
+        with patch("faqih_downloader.ui.controllers.clipboard_controller.get_clipboard_text", return_value="https://example.com/download/archive.zip"):
             app._check_clipboard_now(force=True)
             self.assertEqual(len(app.detected_calls), 2)
             self.assertEqual(app.detected_calls[-1], "https://example.com/download/archive.zip")
 
     def test_locales_key_symmetry_and_bmp(self):
-        locales_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src", "smart_download", "locales")
+        locales_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src", "faqih_downloader", "locales")
         en_path = os.path.join(locales_dir, "en.json")
         ar_path = os.path.join(locales_dir, "ar.json")
         with open(en_path, encoding="utf-8") as f:
@@ -2605,8 +2605,8 @@ class TestClipboardPlatformFilteringAndSettings(unittest.TestCase):
 
     def test_settings_modal_tabs_and_toggles(self):
         import tkinter as tk
-        from smart_download.ui.modals.settings_modal import SettingsModal
-        from smart_download.config import DEFAULT_SNIFFER_PLATFORMS
+        from faqih_downloader.ui.modals.settings_modal import SettingsModal
+        from faqih_downloader.config import DEFAULT_SNIFFER_PLATFORMS
 
         root = tk.Tk()
         root.withdraw()
@@ -2676,9 +2676,9 @@ class TestClipboardPlatformFilteringAndSettings(unittest.TestCase):
 
     def test_settings_button_in_title_bar_and_locale_refresh(self):
         import tkinter as tk
-        from smart_download.ui.controllers.window_controller import WindowChromeMixin
-        from smart_download.ui.controllers.locale_controller import LocaleControllerMixin
-        from smart_download.i18n import LocalizationManager
+        from faqih_downloader.ui.controllers.window_controller import WindowChromeMixin
+        from faqih_downloader.ui.controllers.locale_controller import LocaleControllerMixin
+        from faqih_downloader.i18n import LocalizationManager
 
         root = tk.Tk()
         root.withdraw()
@@ -2719,7 +2719,7 @@ class TestClipboardPlatformFilteringAndSettings(unittest.TestCase):
             except Exception: pass
 
     def test_config_sniffer_platforms_defaults_and_merge(self):
-        from smart_download.config import load_settings, save_settings, DEFAULT_SNIFFER_PLATFORMS, _clear_settings_cache
+        from faqih_downloader.config import load_settings, save_settings, DEFAULT_SNIFFER_PLATFORMS, _clear_settings_cache
 
         _clear_settings_cache()
         s = load_settings()
@@ -2736,7 +2736,7 @@ class TestClipboardPlatformFilteringAndSettings(unittest.TestCase):
         self.assertTrue(reloaded["sniffer_platforms"]["direct_files"])
 
     def test_youtube_url_variants_and_threads_subplatforms(self):
-        from smart_download.ui.controllers.clipboard_controller import get_url_sniffer_platform_key, ClipboardControllerMixin
+        from faqih_downloader.ui.controllers.clipboard_controller import get_url_sniffer_platform_key, ClipboardControllerMixin
 
         # All YouTube URL forms map to 'youtube'
         self.assertEqual(get_url_sniffer_platform_key("https://youtube.com"), "youtube")
@@ -2761,8 +2761,8 @@ class TestClipboardPlatformFilteringAndSettings(unittest.TestCase):
     def test_settings_modal_cookies_file_and_manual_save(self):
         import tkinter as tk
         import tempfile
-        from smart_download.ui.modals.settings_modal import SettingsModal
-        from smart_download.config import set_setting, get_setting
+        from faqih_downloader.ui.modals.settings_modal import SettingsModal
+        from faqih_downloader.config import set_setting, get_setting
 
         root = tk.Tk()
         root.withdraw()
@@ -2794,7 +2794,7 @@ class TestClipboardPlatformFilteringAndSettings(unittest.TestCase):
 
     def test_settings_modal_elevation_focus_and_timer_cleanup(self):
         import tkinter as tk
-        from smart_download.ui.modals.settings_modal import SettingsModal
+        from faqih_downloader.ui.modals.settings_modal import SettingsModal
 
         root = tk.Tk()
         root.withdraw()
@@ -2836,7 +2836,7 @@ class TestClipboardPlatformFilteringAndSettings(unittest.TestCase):
 
     def test_settings_modal_sync_dir_to_parent_app(self):
         import tkinter as tk
-        from smart_download.ui.modals.settings_modal import SettingsModal
+        from faqih_downloader.ui.modals.settings_modal import SettingsModal
 
         root = tk.Tk()
         root.withdraw()
@@ -2928,8 +2928,8 @@ class TestClipboardPlatformFilteringAndSettings(unittest.TestCase):
     def test_controls_panel_row_toggles_unmapped_and_settings_btn_packed(self):
         """Verifies row_toggles is unmapped from main window while btn_settings in title bar opens SettingsModal."""
         import tkinter as tk
-        from smart_download.ui.main_window import ModernFramelessGUI
-        from smart_download.ui.modals.settings_modal import SettingsModal
+        from faqih_downloader.ui.main_window import ModernFramelessGUI
+        from faqih_downloader.ui.modals.settings_modal import SettingsModal
 
         root = tk.Tk()
         root.withdraw()
@@ -2969,7 +2969,7 @@ class TestMainToolbarCleanup(unittest.TestCase):
 
     def test_copy_file_with_retry_handles_transient_permission_error(self):
         """Verifies _copy_file_with_retry recovers from transient PermissionError."""
-        from smart_download.installer.installer_ops import _copy_file_with_retry
+        from faqih_downloader.installer.installer_ops import _copy_file_with_retry
 
         call_count = 0
         def mock_copy2(src, dst):
@@ -2980,7 +2980,7 @@ class TestMainToolbarCleanup(unittest.TestCase):
             return dst
 
         with patch("shutil.copy2", side_effect=mock_copy2), \
-             patch("smart_download.installer.installer_ops.terminate_running_app") as mock_term, \
+             patch("faqih_downloader.installer.installer_ops.terminate_running_app") as mock_term, \
              patch("time.sleep"):
             _copy_file_with_retry("dummy_src.exe", "dummy_dst.exe", retries=5, delay=0.01)
             self.assertEqual(call_count, 3)
@@ -2988,10 +2988,10 @@ class TestMainToolbarCleanup(unittest.TestCase):
 
     def test_app_version_is_2_0_2(self):
         """Verifies APP_VERSION has been bumped to 2.0.2 across modules."""
-        from smart_download.config import APP_VERSION
-        from smart_download import __version__
-        from smart_download.installer.installer_registry import APP_VERSION as REG_VER
-        from smart_download.services.updater_service import APP_VERSION as UPD_VER
+        from faqih_downloader.config import APP_VERSION
+        from faqih_downloader import __version__
+        from faqih_downloader.installer.installer_registry import APP_VERSION as REG_VER
+        from faqih_downloader.services.updater_service import APP_VERSION as UPD_VER
 
         self.assertEqual(APP_VERSION, "2.0.2")
         self.assertEqual(__version__, "2.0.2")
@@ -3008,7 +3008,7 @@ class TestStartupAndWelcomeToastBugfixes(unittest.TestCase):
 
     def test_acquire_single_instance_mutex_behavior(self):
         """Verifies acquire_single_instance_mutex acquires, detects collision, and releases cleanly."""
-        from smart_download.services.single_instance import (
+        from faqih_downloader.services.single_instance import (
             acquire_single_instance_mutex,
             release_single_instance_mutex,
         )
@@ -3043,7 +3043,7 @@ class TestStartupAndWelcomeToastBugfixes(unittest.TestCase):
 
     def test_startup_approved_run_binary_writing(self):
         """Verifies writing 12-byte enabled binary flag b'\\x02' + b'\\x00' * 11 to StartupApproved keys."""
-        from smart_download.services.startup_service import (
+        from faqih_downloader.services.startup_service import (
             ENABLED_STARTUP_BINARY,
             STARTUP_APPROVED_RUN_KEY,
             STARTUP_APPROVED_FOLDER_KEY,
@@ -3061,12 +3061,12 @@ class TestStartupAndWelcomeToastBugfixes(unittest.TestCase):
         mock_winreg.HKEY_CURRENT_USER = 0x80000001
 
         with patch.dict("sys.modules", {"winreg": mock_winreg}):
-            with patch("smart_download.services.startup_service.winreg", mock_winreg), \
-                 patch("smart_download.services.startup_service.IS_WINDOWS", True), \
-                 patch("smart_download.services.startup_service.get_startup_command", return_value='"C:\\SmartDownload.exe" --minimized'), \
-                 patch("smart_download.services.startup_service._create_startup_shortcut"), \
+            with patch("faqih_downloader.services.startup_service.winreg", mock_winreg), \
+                 patch("faqih_downloader.services.startup_service.IS_WINDOWS", True), \
+                 patch("faqih_downloader.services.startup_service.get_startup_command", return_value='"C:\\SmartDownload.exe" --minimized'), \
+                 patch("faqih_downloader.services.startup_service._create_startup_shortcut"), \
                  patch("subprocess.run"):
-                from smart_download.services.startup_service import enable_startup
+                from faqih_downloader.services.startup_service import enable_startup
                 res = enable_startup(minimized=True)
                 self.assertTrue(res)
 
@@ -3082,7 +3082,7 @@ class TestStartupAndWelcomeToastBugfixes(unittest.TestCase):
 
     def test_startup_service_fallbacks_when_registry_fails(self):
         """Verifies enable_startup falls back to Scheduled Task or Startup shortcut when HKCU Run fails."""
-        from smart_download.services.startup_service import enable_startup
+        from faqih_downloader.services.startup_service import enable_startup
 
         mock_winreg = MagicMock()
         mock_winreg.CreateKey.side_effect = PermissionError("Access denied")
@@ -3090,9 +3090,9 @@ class TestStartupAndWelcomeToastBugfixes(unittest.TestCase):
         # Case 1: Registry fails, Scheduled Task succeeds
         mock_subproc_ok = MagicMock()
         mock_subproc_ok.returncode = 0
-        with patch("smart_download.services.startup_service.winreg", mock_winreg), \
-             patch("smart_download.services.startup_service.IS_WINDOWS", True), \
-             patch("smart_download.services.startup_service.get_startup_command", return_value='"C:\\SmartDownload.exe" --minimized'), \
+        with patch("faqih_downloader.services.startup_service.winreg", mock_winreg), \
+             patch("faqih_downloader.services.startup_service.IS_WINDOWS", True), \
+             patch("faqih_downloader.services.startup_service.get_startup_command", return_value='"C:\\SmartDownload.exe" --minimized'), \
              patch("os.path.isfile", return_value=True), \
              patch("subprocess.run", return_value=mock_subproc_ok):
             self.assertTrue(enable_startup(minimized=True))
@@ -3100,34 +3100,34 @@ class TestStartupAndWelcomeToastBugfixes(unittest.TestCase):
         # Case 2: Registry fails AND Scheduled Task fails -> falls back to shortcut
         mock_subproc_fail = MagicMock()
         mock_subproc_fail.returncode = 1
-        with patch("smart_download.services.startup_service.winreg", mock_winreg), \
-             patch("smart_download.services.startup_service.IS_WINDOWS", True), \
-             patch("smart_download.services.startup_service.get_startup_command", return_value='"C:\\SmartDownload.exe" --minimized'), \
+        with patch("faqih_downloader.services.startup_service.winreg", mock_winreg), \
+             patch("faqih_downloader.services.startup_service.IS_WINDOWS", True), \
+             patch("faqih_downloader.services.startup_service.get_startup_command", return_value='"C:\\SmartDownload.exe" --minimized'), \
              patch("os.path.isfile", return_value=True), \
              patch("subprocess.run", return_value=mock_subproc_fail), \
-             patch("smart_download.services.startup_service._create_startup_shortcut", return_value=True) as mock_lnk:
+             patch("faqih_downloader.services.startup_service._create_startup_shortcut", return_value=True) as mock_lnk:
             self.assertTrue(enable_startup(minimized=True))
             mock_lnk.assert_called_once()
 
         # Case 3: All fail -> returns False
-        with patch("smart_download.services.startup_service.winreg", mock_winreg), \
-             patch("smart_download.services.startup_service.IS_WINDOWS", True), \
-             patch("smart_download.services.startup_service.get_startup_command", return_value='"C:\\SmartDownload.exe" --minimized'), \
+        with patch("faqih_downloader.services.startup_service.winreg", mock_winreg), \
+             patch("faqih_downloader.services.startup_service.IS_WINDOWS", True), \
+             patch("faqih_downloader.services.startup_service.get_startup_command", return_value='"C:\\SmartDownload.exe" --minimized'), \
              patch("os.path.isfile", return_value=True), \
              patch("subprocess.run", return_value=mock_subproc_fail), \
-             patch("smart_download.services.startup_service._create_startup_shortcut", return_value=False):
+             patch("faqih_downloader.services.startup_service._create_startup_shortcut", return_value=False):
             self.assertFalse(enable_startup(minimized=True))
 
     def test_is_startup_enabled_detects_fallback_shortcut(self):
         """Verifies is_startup_enabled detects .lnk in Startup folder when HKCU Run key is absent."""
-        from smart_download.services.startup_service import is_startup_enabled
+        from faqih_downloader.services.startup_service import is_startup_enabled
 
         mock_winreg = MagicMock()
         mock_winreg.OpenKey.side_effect = FileNotFoundError("No run key")
 
-        with patch("smart_download.services.startup_service.winreg", mock_winreg), \
-             patch("smart_download.services.startup_service.IS_WINDOWS", True), \
-             patch("smart_download.services.startup_service.get_startup_folder", return_value="C:\\FakeStartup"), \
+        with patch("faqih_downloader.services.startup_service.winreg", mock_winreg), \
+             patch("faqih_downloader.services.startup_service.IS_WINDOWS", True), \
+             patch("faqih_downloader.services.startup_service.get_startup_folder", return_value="C:\\FakeStartup"), \
              patch("os.path.isdir", return_value=True), \
              patch("os.path.isfile", side_effect=lambda p: p.endswith("Smart Download (SD).lnk")):
             self.assertTrue(is_startup_enabled())
@@ -3138,16 +3138,16 @@ class TestStartupAndWelcomeToastBugfixes(unittest.TestCase):
         is_startup_enabled() does NOT prematurely return False; it falls through to check the
         Startup folder .lnk and returns True when Smart Download (SD).lnk exists.
         """
-        from smart_download.services.startup_service import is_startup_enabled
+        from faqih_downloader.services.startup_service import is_startup_enabled
 
         mock_winreg = MagicMock()
         mock_key = MagicMock()
         mock_winreg.OpenKey.return_value.__enter__.return_value = mock_key
         mock_winreg.QueryValueEx.side_effect = FileNotFoundError("Registry value not present")
 
-        with patch("smart_download.services.startup_service.winreg", mock_winreg), \
-             patch("smart_download.services.startup_service.IS_WINDOWS", True), \
-             patch("smart_download.services.startup_service.get_startup_folder", return_value="C:\\FakeStartup"), \
+        with patch("faqih_downloader.services.startup_service.winreg", mock_winreg), \
+             patch("faqih_downloader.services.startup_service.IS_WINDOWS", True), \
+             patch("faqih_downloader.services.startup_service.get_startup_folder", return_value="C:\\FakeStartup"), \
              patch("os.path.isdir", return_value=True), \
              patch("os.path.isfile", side_effect=lambda p: p.endswith("Smart Download (SD).lnk")):
             self.assertTrue(is_startup_enabled())
@@ -3162,8 +3162,8 @@ class TestStartupAndWelcomeToastBugfixes(unittest.TestCase):
             "import sys, os; "
             "src = os.path.join(os.getcwd(), 'src'); "
             "sys.path.insert(0, src); "
-            "from smart_download.services.single_instance import early_single_instance_guard; "
-            "loaded = [m for m in sys.modules if m == 'smart_download.ui.main_window' or m == 'yt_dlp' or m.startswith('yt_dlp.') or m == 'tkinter']; "
+            "from faqih_downloader.services.single_instance import early_single_instance_guard; "
+            "loaded = [m for m in sys.modules if m == 'faqih_downloader.ui.main_window' or m == 'yt_dlp' or m.startswith('yt_dlp.') or m == 'tkinter']; "
             "print(','.join(loaded))"
         )
         res = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
@@ -3191,8 +3191,8 @@ class TestStartupAndWelcomeToastBugfixes(unittest.TestCase):
                 "import sys, os; "
                 "src = os.path.join(os.getcwd(), 'src'); "
                 "sys.path.insert(0, src); "
-                "from smart_download.services.single_instance import early_single_instance_guard; "
-                "loaded = [m for m in sys.modules if m == 'yt_dlp' or m.startswith('yt_dlp.') or m == 'smart_download.ui.main_window']; "
+                "from faqih_downloader.services.single_instance import early_single_instance_guard; "
+                "loaded = [m for m in sys.modules if m == 'yt_dlp' or m.startswith('yt_dlp.') or m == 'faqih_downloader.ui.main_window']; "
                 "print(','.join(loaded))"
             )
             env = dict(os.environ)
@@ -3208,21 +3208,21 @@ class TestStartupAndWelcomeToastBugfixes(unittest.TestCase):
         Verifies that __dir__() in smart_download and smart_download.utils returns
         unique entries without duplicates and properly includes lazy-loaded symbols.
         """
-        import smart_download
-        import smart_download.utils as sd_utils
+        import faqih_downloader
+        import faqih_downloader.utils as sd_utils
 
         # Verify initial dir() has no duplicates
-        dir_sd = dir(smart_download)
-        self.assertEqual(len(dir_sd), len(set(dir_sd)), f"Duplicates in dir(smart_download): {dir_sd}")
+        dir_sd = dir(faqih_downloader)
+        self.assertEqual(len(dir_sd), len(set(dir_sd)), f"Duplicates in dir(faqih_downloader): {dir_sd}")
         self.assertIn("ModernFramelessGUI", dir_sd)
         self.assertIn("main", dir_sd)
 
         # Access attributes
-        _ = smart_download.ModernFramelessGUI
-        _ = smart_download.main
+        _ = faqih_downloader.ModernFramelessGUI
+        _ = faqih_downloader.main
 
         # Verify post-access dir() has no duplicates
-        dir_sd_post = dir(smart_download)
+        dir_sd_post = dir(faqih_downloader)
         self.assertEqual(len(dir_sd_post), len(set(dir_sd_post)), f"Duplicates after access: {dir_sd_post}")
 
         # Verify smart_download.utils dir() includes lazy tk_helpers and has no duplicates
@@ -3236,7 +3236,7 @@ class TestStartupAndWelcomeToastBugfixes(unittest.TestCase):
         """
         Verifies that _get_yt_dlp() stays synchronized with sys.modules and honors test mocks.
         """
-        from smart_download.services.media_extractor import _get_yt_dlp, _reset_plugin_state
+        from faqih_downloader.services.media_extractor import _get_yt_dlp, _reset_plugin_state
 
         try:
             _reset_plugin_state()
@@ -3247,7 +3247,7 @@ class TestStartupAndWelcomeToastBugfixes(unittest.TestCase):
                 self.assertIs(_get_yt_dlp(), mock_yt)
 
             # 2. When sys.modules has no yt_dlp and a mock is assigned to media_extractor.yt_dlp directly
-            import smart_download.services.media_extractor as me
+            import faqih_downloader.services.media_extractor as me
             orig_yt = me.yt_dlp
             try:
                 me.yt_dlp = mock_yt
@@ -3269,7 +3269,7 @@ class TestStartupAndWelcomeToastBugfixes(unittest.TestCase):
         3. Calls parent_app.restore_window() when clicked.
         """
         import tkinter as tk
-        from smart_download.ui.modals.welcome_toast import StartupWelcomeToast
+        from faqih_downloader.ui.modals.welcome_toast import StartupWelcomeToast
 
         root = tk.Tk()
         root.withdraw()
@@ -3302,19 +3302,19 @@ class TestStartupAndWelcomeToastBugfixes(unittest.TestCase):
 
     def test_install_application_purges_stale_core_plugin_isolation(self):
         """Verifies install_application mocks terminate_running_app and registry operations during tests."""
-        from smart_download.installer import install_application
-        from smart_download.services.core_patch_updater import get_core_plugin_dir
+        from faqih_downloader.installer import install_application
+        from faqih_downloader.services.core_patch_updater import get_core_plugin_dir
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             dummy_plugin = os.path.join(tmp_dir, "core_plugin")
             os.makedirs(dummy_plugin, exist_ok=True)
             target_install = os.path.join(tmp_dir, "install_target")
 
-            with patch("smart_download.services.core_patch_updater.get_core_plugin_dir", return_value=dummy_plugin), \
-                 patch("smart_download.installer.installer_ops.terminate_running_app") as mock_term, \
-                 patch("smart_download.installer.installer_ops.register_startup_entries") as mock_reg_start, \
-                 patch("smart_download.installer.installer_ops.unregister_startup_entries") as mock_unreg_start, \
-                 patch("smart_download.installer.installer_ops.register_uninstall_entry") as mock_uninst:
+            with patch("faqih_downloader.services.core_patch_updater.get_core_plugin_dir", return_value=dummy_plugin), \
+                 patch("faqih_downloader.installer.installer_ops.terminate_running_app") as mock_term, \
+                 patch("faqih_downloader.installer.installer_ops.register_startup_entries") as mock_reg_start, \
+                 patch("faqih_downloader.installer.installer_ops.unregister_startup_entries") as mock_unreg_start, \
+                 patch("faqih_downloader.installer.installer_ops.register_uninstall_entry") as mock_uninst:
                 res = install_application(
                     target_dir=target_install,
                     register_browser=False,
@@ -3339,12 +3339,12 @@ class TestStartupAndWelcomeToastBugfixes(unittest.TestCase):
         import sys
         import os
         import importlib
-        from smart_download.services.single_instance import (
+        from faqih_downloader.services.single_instance import (
             acquire_single_instance_mutex,
             release_single_instance_mutex,
             is_single_instance_mutex_held,
         )
-        from smart_download.services.core_patch_updater import _purge_and_reimport_core
+        from faqih_downloader.services.core_patch_updater import _purge_and_reimport_core
 
         saved_modules = dict(sys.modules)
         release_single_instance_mutex()
@@ -3357,7 +3357,7 @@ class TestStartupAndWelcomeToastBugfixes(unittest.TestCase):
             core_root = os.path.join(repo_root, "src")
             self.assertTrue(_purge_and_reimport_core(core_root), "_purge_and_reimport_core should succeed")
 
-            reloaded_si = importlib.import_module("smart_download.services.single_instance")
+            reloaded_si = importlib.import_module("faqih_downloader.services.single_instance")
             self.assertTrue(
                 reloaded_si.is_single_instance_mutex_held(),
                 "Reloaded single_instance module should restore held status from sys"
@@ -3367,7 +3367,7 @@ class TestStartupAndWelcomeToastBugfixes(unittest.TestCase):
                 "Subsequent acquire on reloaded module should return True without self-collision"
             )
         finally:
-            from smart_download.services.single_instance import release_single_instance_mutex as clean_rel
+            from faqih_downloader.services.single_instance import release_single_instance_mutex as clean_rel
             clean_rel()
             sys.modules.clear()
             sys.modules.update(saved_modules)
@@ -3382,11 +3382,11 @@ class TestStartupAndWelcomeToastBugfixes(unittest.TestCase):
         responds on port 9242, early_single_instance_guard returns instead of sys.exit(0)
         when launching interactively.
         """
-        from smart_download.services.single_instance import early_single_instance_guard
+        from faqih_downloader.services.single_instance import early_single_instance_guard
 
-        with patch("smart_download.services.single_instance.acquire_single_instance_mutex", return_value=False), \
-             patch("smart_download.services.single_instance.notify_running_instance", return_value=False) as mock_notify, \
-             patch("smart_download.config.is_test_environment", return_value=False), \
+        with patch("faqih_downloader.services.single_instance.acquire_single_instance_mutex", return_value=False), \
+             patch("faqih_downloader.services.single_instance.notify_running_instance", return_value=False) as mock_notify, \
+             patch("faqih_downloader.config.is_test_environment", return_value=False), \
              patch("sys.argv", ["SmartDownload.exe"]), \
              patch("sys.exit") as mock_exit, \
              patch("time.sleep"):
@@ -3399,10 +3399,10 @@ class TestStartupAndWelcomeToastBugfixes(unittest.TestCase):
         Verifies that if acquire_single_instance_mutex returns False and launched with
         --background, early_single_instance_guard exits immediately with sys.exit(0).
         """
-        from smart_download.services.single_instance import early_single_instance_guard
+        from faqih_downloader.services.single_instance import early_single_instance_guard
 
-        with patch("smart_download.services.single_instance.acquire_single_instance_mutex", return_value=False), \
-             patch("smart_download.config.is_test_environment", return_value=False), \
+        with patch("faqih_downloader.services.single_instance.acquire_single_instance_mutex", return_value=False), \
+             patch("faqih_downloader.config.is_test_environment", return_value=False), \
              patch("sys.argv", ["SmartDownload.exe", "--background"]), \
              patch("sys.exit") as mock_exit:
             early_single_instance_guard()
@@ -3413,7 +3413,7 @@ class TestStartupAndWelcomeToastBugfixes(unittest.TestCase):
         Verifies that restore_window resets _start_hidden, invokes root.deiconify()
         and root.update_idletasks() before Win32 ShowWindow and SetForegroundWindow.
         """
-        from smart_download.ui.controllers.window_controller import WindowChromeMixin
+        from faqih_downloader.ui.controllers.window_controller import WindowChromeMixin
 
         call_order = []
         mock_root = MagicMock()
@@ -3430,7 +3430,7 @@ class TestStartupAndWelcomeToastBugfixes(unittest.TestCase):
                 self._normal_geometry = "900x600+100+100"
 
         host = Host()
-        with patch("smart_download.ui.controllers.window_controller.IS_WINDOWS", True), \
+        with patch("faqih_downloader.ui.controllers.window_controller.IS_WINDOWS", True), \
              patch("ctypes.windll.user32.GetParent", return_value=12345), \
              patch("ctypes.windll.user32.GetWindowLongW", return_value=0), \
              patch("ctypes.windll.user32.SetWindowLongW", side_effect=lambda *a: call_order.append("SetWindowLongW")), \
@@ -3465,7 +3465,7 @@ class TestStartupAndWelcomeToastBugfixes(unittest.TestCase):
         """
         import sys
         import uuid
-        from smart_download.services.single_instance import (
+        from faqih_downloader.services.single_instance import (
             acquire_single_instance_mutex,
             release_single_instance_mutex,
             is_single_instance_mutex_held,
@@ -3494,7 +3494,7 @@ class TestStartupAndWelcomeToastBugfixes(unittest.TestCase):
         by this process.
         """
         import uuid
-        from smart_download.services.single_instance import (
+        from faqih_downloader.services.single_instance import (
             acquire_single_instance_mutex,
             release_single_instance_mutex,
             is_single_instance_mutex_held,
@@ -3516,23 +3516,23 @@ class TestStartupAndWelcomeToastBugfixes(unittest.TestCase):
         """
         import sys
         from unittest.mock import patch
-        from smart_download.services.single_instance import early_single_instance_guard
-        from smart_download.ui.main_window import main
+        from faqih_downloader.services.single_instance import early_single_instance_guard
+        from faqih_downloader.ui.main_window import main
 
         guard_notify_calls = []
         main_notify_calls = []
 
-        with patch("smart_download.services.single_instance.acquire_single_instance_mutex", return_value=False), \
-             patch("smart_download.ui.main_window.acquire_single_instance_mutex", return_value=False), \
-             patch("smart_download.ui.main_window.is_single_instance_mutex_held", return_value=False), \
-             patch("smart_download.services.single_instance.notify_running_instance", side_effect=lambda *a, **k: [guard_notify_calls.append(1), False][1]), \
-             patch("smart_download.ui.main_window.notify_running_instance", side_effect=lambda *a, **k: [main_notify_calls.append(1), False][1]), \
-             patch("smart_download.ui.main_window.is_test_environment", return_value=False), \
-             patch("smart_download.config.is_test_environment", return_value=False), \
+        with patch("faqih_downloader.services.single_instance.acquire_single_instance_mutex", return_value=False), \
+             patch("faqih_downloader.ui.main_window.acquire_single_instance_mutex", return_value=False), \
+             patch("faqih_downloader.ui.main_window.is_single_instance_mutex_held", return_value=False), \
+             patch("faqih_downloader.services.single_instance.notify_running_instance", side_effect=lambda *a, **k: [guard_notify_calls.append(1), False][1]), \
+             patch("faqih_downloader.ui.main_window.notify_running_instance", side_effect=lambda *a, **k: [main_notify_calls.append(1), False][1]), \
+             patch("faqih_downloader.ui.main_window.is_test_environment", return_value=False), \
+             patch("faqih_downloader.config.is_test_environment", return_value=False), \
              patch("sys.argv", ["SmartDownload.exe"]), \
              patch("time.sleep"), \
              patch("tkinter.Tk"), \
-             patch("smart_download.ui.main_window.ModernFramelessGUI"):
+             patch("faqih_downloader.ui.main_window.ModernFramelessGUI"):
             early_single_instance_guard()
             self.assertEqual(len(guard_notify_calls), 8)
             self.assertTrue(getattr(sys, "_sd_early_guard_checked", False))
@@ -3547,18 +3547,18 @@ class TestStartupAndWelcomeToastBugfixes(unittest.TestCase):
         """
         import sys
         from unittest.mock import patch
-        from smart_download.ui.main_window import main
+        from faqih_downloader.ui.main_window import main
 
-        with patch("smart_download.ui.main_window.acquire_single_instance_mutex", return_value=False), \
-             patch("smart_download.ui.main_window.is_single_instance_mutex_held", return_value=False), \
-             patch("smart_download.ui.main_window.notify_running_instance", return_value=False) as mock_notify, \
-             patch("smart_download.ui.main_window.is_test_environment", return_value=False), \
-             patch("smart_download.config.is_test_environment", return_value=False), \
+        with patch("faqih_downloader.ui.main_window.acquire_single_instance_mutex", return_value=False), \
+             patch("faqih_downloader.ui.main_window.is_single_instance_mutex_held", return_value=False), \
+             patch("faqih_downloader.ui.main_window.notify_running_instance", return_value=False) as mock_notify, \
+             patch("faqih_downloader.ui.main_window.is_test_environment", return_value=False), \
+             patch("faqih_downloader.config.is_test_environment", return_value=False), \
              patch("sys.argv", ["SmartDownload.exe"]), \
              patch("sys.exit") as mock_exit, \
              patch("time.sleep"), \
              patch("tkinter.Tk"), \
-             patch("smart_download.ui.main_window.ModernFramelessGUI"):
+             patch("faqih_downloader.ui.main_window.ModernFramelessGUI"):
             sys._sd_early_guard_checked = False
             main()
             mock_exit.assert_not_called()
@@ -3566,7 +3566,7 @@ class TestStartupAndWelcomeToastBugfixes(unittest.TestCase):
 
     def test_enable_startup_disables_explorer_serialize_delay(self):
         """Verifies enable_startup sets StartupDelayInMSec=0 and WaitForIdleState=0 in Explorer\\Serialize."""
-        from smart_download.services.startup_service import enable_startup, EXPLORER_SERIALIZE_KEY
+        from faqih_downloader.services.startup_service import enable_startup, EXPLORER_SERIALIZE_KEY
 
         mock_winreg = MagicMock()
         mock_key = MagicMock()
@@ -3583,9 +3583,9 @@ class TestStartupAndWelcomeToastBugfixes(unittest.TestCase):
         mock_winreg.REG_SZ = 1
         mock_winreg.REG_BINARY = 3
 
-        with patch("smart_download.services.startup_service.winreg", mock_winreg), \
-             patch("smart_download.services.startup_service.IS_WINDOWS", True), \
-             patch("smart_download.services.startup_service.get_startup_command", return_value='"C:\\SmartDownload.exe" --minimized'), \
+        with patch("faqih_downloader.services.startup_service.winreg", mock_winreg), \
+             patch("faqih_downloader.services.startup_service.IS_WINDOWS", True), \
+             patch("faqih_downloader.services.startup_service.get_startup_command", return_value='"C:\\SmartDownload.exe" --minimized'), \
              patch("subprocess.run"):
             res = enable_startup(minimized=True)
             self.assertTrue(res)
@@ -3600,7 +3600,7 @@ class TestStartupAndWelcomeToastBugfixes(unittest.TestCase):
 
     def test_register_startup_entries_disables_explorer_serialize_delay(self):
         """Verifies register_startup_entries sets StartupDelayInMSec=0 and WaitForIdleState=0 in Explorer\\Serialize."""
-        from smart_download.installer.installer_registry import register_startup_entries, EXPLORER_SERIALIZE_KEY
+        from faqih_downloader.installer.installer_registry import register_startup_entries, EXPLORER_SERIALIZE_KEY
 
         mock_winreg = MagicMock()
         mock_key = MagicMock()
@@ -3617,9 +3617,9 @@ class TestStartupAndWelcomeToastBugfixes(unittest.TestCase):
         mock_winreg.REG_SZ = 1
         mock_winreg.REG_BINARY = 3
 
-        with patch("smart_download.installer.installer_registry.HAS_WINREG", True), \
-             patch("smart_download.installer.installer_registry.winreg", mock_winreg), \
-             patch("smart_download.installer.installer_registry.get_startup_dir", return_value="C:\\FakeStartup"), \
+        with patch("faqih_downloader.installer.installer_registry.HAS_WINREG", True), \
+             patch("faqih_downloader.installer.installer_registry.winreg", mock_winreg), \
+             patch("faqih_downloader.installer.installer_registry.get_startup_dir", return_value="C:\\FakeStartup"), \
              patch("subprocess.run"):
             res = register_startup_entries("C:\\FakePath\\SmartDownload.exe")
             self.assertTrue(res["run_key"])
@@ -3634,7 +3634,7 @@ class TestStartupAndWelcomeToastBugfixes(unittest.TestCase):
 
     def test_find_ffmpeg_bin_checks_executable_dir_and_dist(self):
         """Verifies find_ffmpeg_bin checks executable dir and dist folder."""
-        from smart_download.services.youtube_models import find_ffmpeg_bin
+        from faqih_downloader.services.youtube_models import find_ffmpeg_bin
 
         with tempfile.TemporaryDirectory() as tmpdir:
             dist_dir = os.path.join(tmpdir, "dist")
@@ -3651,7 +3651,7 @@ class TestStartupAndWelcomeToastBugfixes(unittest.TestCase):
 
     def test_find_ffmpeg_bin_checks_executable_dir_directly(self):
         """Verifies find_ffmpeg_bin checks executable adjacent directory directly."""
-        from smart_download.services.youtube_models import find_ffmpeg_bin
+        from faqih_downloader.services.youtube_models import find_ffmpeg_bin
 
         with tempfile.TemporaryDirectory() as tmpdir:
             fake_ffmpeg = os.path.join(tmpdir, "ffmpeg.exe" if sys.platform.startswith("win") else "ffmpeg")
@@ -3666,7 +3666,7 @@ class TestStartupAndWelcomeToastBugfixes(unittest.TestCase):
 
     def test_main_window_schedules_bg_notify_at_80ms_when_started_hidden(self):
         """Verifies ModernFramelessGUI schedules _show_background_startup_notification at 80ms when start_hidden=True."""
-        from smart_download.ui.main_window import ModernFramelessGUI
+        from faqih_downloader.ui.main_window import ModernFramelessGUI
 
         mock_root = MagicMock()
         mock_root.winfo_screenwidth.return_value = 1920
@@ -3680,9 +3680,9 @@ class TestStartupAndWelcomeToastBugfixes(unittest.TestCase):
         mock_root.after.side_effect = fake_after
 
         with patch.dict(os.environ, {"SD_DISABLE_STARTUP_TOAST": "0"}), \
-             patch("smart_download.ui.main_window.SystemTrayManager"), \
-             patch("smart_download.ui.main_window.BrowserBridgeServer"), \
-             patch("smart_download.ui.main_window.is_startup_enabled", return_value=True), \
+             patch("faqih_downloader.ui.main_window.SystemTrayManager"), \
+             patch("faqih_downloader.ui.main_window.BrowserBridgeServer"), \
+             patch("faqih_downloader.ui.main_window.is_startup_enabled", return_value=True), \
              patch.object(ModernFramelessGUI, "_setup_window"), \
              patch.object(ModernFramelessGUI, "_init_theme"), \
              patch.object(ModernFramelessGUI, "_build_ui"), \
@@ -3694,7 +3694,7 @@ class TestStartupAndWelcomeToastBugfixes(unittest.TestCase):
 
     def test_main_window_async_startup_registration_when_setting_enabled(self):
         """Verifies enable_startup is dispatched in a daemon thread when startup setting is enabled but not yet registered."""
-        from smart_download.ui.main_window import ModernFramelessGUI
+        from faqih_downloader.ui.main_window import ModernFramelessGUI
 
         mock_root = MagicMock()
         mock_root.winfo_screenwidth.return_value = 1920
@@ -3712,11 +3712,11 @@ class TestStartupAndWelcomeToastBugfixes(unittest.TestCase):
                 if self.target:
                     self.target()
 
-        with patch("smart_download.ui.main_window.SystemTrayManager"), \
-             patch("smart_download.ui.main_window.BrowserBridgeServer"), \
-             patch("smart_download.ui.main_window.is_startup_enabled", return_value=False), \
-             patch("smart_download.ui.main_window.get_setting", side_effect=lambda k, d=None: True if k == "startup_enabled" else d), \
-             patch("smart_download.ui.main_window.enable_startup") as mock_enable_startup, \
+        with patch("faqih_downloader.ui.main_window.SystemTrayManager"), \
+             patch("faqih_downloader.ui.main_window.BrowserBridgeServer"), \
+             patch("faqih_downloader.ui.main_window.is_startup_enabled", return_value=False), \
+             patch("faqih_downloader.ui.main_window.get_setting", side_effect=lambda k, d=None: True if k == "startup_enabled" else d), \
+             patch("faqih_downloader.ui.main_window.enable_startup") as mock_enable_startup, \
              patch("threading.Thread", side_effect=FakeThread), \
              patch.object(ModernFramelessGUI, "_setup_window"), \
              patch.object(ModernFramelessGUI, "_init_theme"), \

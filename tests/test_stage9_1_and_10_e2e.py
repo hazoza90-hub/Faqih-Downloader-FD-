@@ -16,12 +16,12 @@ from unittest.mock import MagicMock, patch
 
 import tkinter as tk
 
-from smart_download.core.engine import TurboDownloadEngine
-from smart_download.core.stream_coordinator import StreamDownloadCoordinator
-from smart_download.services.youtube_models import YouTubeStreamInfo, VideoFormatOption
-from smart_download.services.youtube_service import YouTubeResolver
-from smart_download.services.subtitle_processor import embed_subtitle_into_mp4, burn_subtitle_into_video
-from smart_download.ui.panels.media_options_bar import MediaOptionsBarMixin
+from faqih_downloader.core.engine import TurboDownloadEngine
+from faqih_downloader.core.stream_coordinator import StreamDownloadCoordinator
+from faqih_downloader.services.youtube_models import YouTubeStreamInfo, VideoFormatOption
+from faqih_downloader.services.youtube_service import YouTubeResolver
+from faqih_downloader.services.subtitle_processor import embed_subtitle_into_mp4, burn_subtitle_into_video
+from faqih_downloader.ui.panels.media_options_bar import MediaOptionsBarMixin
 
 
 class TestStage9_1_And_10_Verification(unittest.TestCase):
@@ -174,19 +174,19 @@ class TestStage9_1_And_10_Verification(unittest.TestCase):
     def test_preview_completely_removed(self):
         """Verify that broken fake preview modules and symbols are completely eliminated."""
         with self.assertRaises((ImportError, ModuleNotFoundError)):
-            import smart_download.services.preview_service  # type: ignore
+            import faqih_downloader.services.preview_service  # type: ignore
 
-        import smart_download.ui.modals as modals
+        import faqih_downloader.ui.modals as modals
         self.assertFalse(hasattr(modals, "VideoPreviewModal"))
 
-        import smart_download.ui.modals.video_preview_modal as vpm
+        import faqih_downloader.ui.modals.video_preview_modal as vpm
         self.assertFalse(hasattr(vpm, "VideoPreviewModal"))
 
-        from smart_download.ui.modals.quality_modal import QualitySelectionModal
+        from faqih_downloader.ui.modals.quality_modal import QualitySelectionModal
         self.assertFalse(hasattr(QualitySelectionModal, "_open_live_preview"))
         self.assertFalse(hasattr(QualitySelectionModal, "_open_preview"))
 
-        from smart_download.ui.panels.media_options_bar import MediaOptionsBarMixin
+        from faqih_downloader.ui.panels.media_options_bar import MediaOptionsBarMixin
         self.assertFalse(hasattr(MediaOptionsBarMixin, "_open_media_preview"))
         self.assertFalse(hasattr(MediaOptionsBarMixin, "_on_media_bar_preview_click"))
 
@@ -203,7 +203,7 @@ class TestStage9_1_And_10_Verification(unittest.TestCase):
         ]
         mock_proc.returncode = 0
 
-        with patch("smart_download.services.youtube_service.find_ffmpeg_bin", return_value="fake_ffmpeg"):
+        with patch("faqih_downloader.services.youtube_service.find_ffmpeg_bin", return_value="fake_ffmpeg"):
             with patch("subprocess.Popen", return_value=mock_proc):
                 with patch("os.path.exists", return_value=True):
                     with patch("os.path.getsize", return_value=1024):
@@ -216,7 +216,7 @@ class TestStage9_1_And_10_Verification(unittest.TestCase):
 
     def test_download_controller_cancel_with_dummy_ui(self):
         """Verify _on_cancel_download executes without AttributeError on partial/dummy UI objects."""
-        from smart_download.ui.main_window import ModernFramelessGUI
+        from faqih_downloader.ui.main_window import ModernFramelessGUI
 
         class MinimalDummyUI:
             def __init__(self):
@@ -237,7 +237,7 @@ class TestStage9_1_And_10_Verification(unittest.TestCase):
 
     def test_animate_window_fallback_in_test_env(self):
         """Verify animate_window_open and animate_window_close execute callbacks synchronously in test env."""
-        from smart_download.utils.tk_helpers import animate_window_open, animate_window_close
+        from faqih_downloader.utils.tk_helpers import animate_window_open, animate_window_close
         mock_win = MagicMock()
         mock_win.winfo_exists.return_value = True
 

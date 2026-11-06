@@ -25,20 +25,20 @@ os.environ["SD_HEADLESS_TEST"] = "1"
 import tkinter as tk
 from tkinter import ttk
 
-from smart_download.utils.tk_helpers import (
+from faqih_downloader.utils.tk_helpers import (
     _BG_TK_CALLBACK_QUEUE,
     _drain_bg_tk_callbacks,
     animate_window_open,
     animate_window_close,
 )
-from smart_download.core.engine import TurboDownloadEngine
-from smart_download.core.stream_coordinator import StreamDownloadCoordinator
-from smart_download.services.youtube_models import YouTubeStreamInfo, VideoFormatOption
-from smart_download.ui.panels.media_options_bar import MediaOptionsBarMixin
-from smart_download.ui.modals.quality_modal import QualitySelectionModal
-from smart_download.ui.modals.fetching_toast import FetchingLinkToast
-from smart_download.ui.panels.history_panel import HistoryPanelMixin
-from smart_download.core.history import DownloadHistoryManager
+from faqih_downloader.core.engine import TurboDownloadEngine
+from faqih_downloader.core.stream_coordinator import StreamDownloadCoordinator
+from faqih_downloader.services.youtube_models import YouTubeStreamInfo, VideoFormatOption
+from faqih_downloader.ui.panels.media_options_bar import MediaOptionsBarMixin
+from faqih_downloader.ui.modals.quality_modal import QualitySelectionModal
+from faqih_downloader.ui.modals.fetching_toast import FetchingLinkToast
+from faqih_downloader.ui.panels.history_panel import HistoryPanelMixin
+from faqih_downloader.core.history import DownloadHistoryManager
 
 
 class TestStage9_2Stabilization(unittest.TestCase):
@@ -62,7 +62,7 @@ class TestStage9_2Stabilization(unittest.TestCase):
         queue instance on tk.Misc._sd_bg_callback_queue and correctly routes
         background-thread after() and after_idle() calls into the main-thread drain loop.
         """
-        import smart_download.utils.tk_helpers as helpers1
+        import faqih_downloader.utils.tk_helpers as helpers1
 
         initial_queue = helpers1._BG_TK_CALLBACK_QUEUE
         self.assertIs(getattr(tk.Misc, "_sd_bg_callback_queue", None), initial_queue)
@@ -78,10 +78,10 @@ class TestStage9_2Stabilization(unittest.TestCase):
         t.join()
 
         # Simulate _purge_and_reimport_core()
-        if "smart_download.utils.tk_helpers" in sys.modules:
-            del sys.modules["smart_download.utils.tk_helpers"]
+        if "faqih_downloader.utils.tk_helpers" in sys.modules:
+            del sys.modules["faqih_downloader.utils.tk_helpers"]
 
-        import smart_download.utils.tk_helpers as helpers2
+        import faqih_downloader.utils.tk_helpers as helpers2
 
         # Verify it reuses the exact same queue instance
         self.assertIs(helpers2._BG_TK_CALLBACK_QUEUE, initial_queue)
@@ -105,7 +105,7 @@ class TestStage9_2Stabilization(unittest.TestCase):
         Verify that after_idle called from a background thread returns 'bg_queued_idle'
         instead of invoking Tcl directly and crashing with Tcl_AsyncDelete.
         """
-        import smart_download.utils.tk_helpers as helpers
+        import faqih_downloader.utils.tk_helpers as helpers
         executed = []
 
         def bg_task():
@@ -126,12 +126,12 @@ class TestStage9_2Stabilization(unittest.TestCase):
         and no dead imports or preview buttons remain in modals or toolbars.
         """
         with self.assertRaises((ImportError, ModuleNotFoundError)):
-            import smart_download.services.preview_service  # type: ignore
+            import faqih_downloader.services.preview_service  # type: ignore
 
-        import smart_download.ui.modals as modals
+        import faqih_downloader.ui.modals as modals
         self.assertFalse(hasattr(modals, "VideoPreviewModal"))
 
-        import smart_download.ui.modals.video_preview_modal as vpm
+        import faqih_downloader.ui.modals.video_preview_modal as vpm
         self.assertFalse(hasattr(vpm, "VideoPreviewModal"))
 
         # Verify QualitySelectionModal has no preview button or method
@@ -304,7 +304,7 @@ class TestStage9_2Stabilization(unittest.TestCase):
         """
         Verify that _drain_bg_tk_callbacks executes queued callables even if widget is None.
         """
-        import smart_download.utils.tk_helpers as helpers
+        import faqih_downloader.utils.tk_helpers as helpers
         ran = []
         helpers._BG_TK_CALLBACK_QUEUE.put((None, lambda: ran.append("called"), ()))
         helpers._drain_bg_tk_callbacks()

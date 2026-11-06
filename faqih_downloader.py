@@ -1,11 +1,62 @@
 """
 Main official entry-point for Faqih Downloader (FD) | فقيه التنزيلات.
-Modular architecture packages are located under src/smart_download/.
+Modular architecture packages are located under src/faqih_downloader/.
 This entry-point exposes all symbols, CLI handlers, and starts the GUI application.
 """
 import sys
 import os
 import time
+
+_src_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "src")
+if os.path.isdir(_src_dir) and _src_dir not in sys.path:
+    sys.path.insert(0, _src_dir)
+
+_pkg_dir = os.path.join(_src_dir, "faqih_downloader")
+if os.path.isdir(_pkg_dir):
+    __path__ = [_pkg_dir]
+
+import importlib
+import importlib.abc
+import importlib.util
+
+class _SmartDownloadAliasLoader(importlib.abc.Loader):
+    def __init__(self, target_name: str):
+        self.target_name = target_name
+
+    def create_module(self, spec):
+        mod = importlib.import_module(self.target_name)
+        sys.modules[spec.name] = mod
+        return mod
+
+    def exec_module(self, module):
+        pass
+
+
+class _SmartDownloadAliasFinder(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname: str, path=None, target=None):
+        if fullname == "smart_download" or fullname.startswith("smart_download."):
+            target_name = "faqih_downloader" + fullname[14:]
+            try:
+                spec = importlib.util.find_spec(target_name)
+                if spec is not None:
+                    alias_spec = importlib.util.spec_from_loader(
+                        fullname,
+                        _SmartDownloadAliasLoader(target_name),
+                        origin=spec.origin,
+                        is_package=spec.submodule_search_locations is not None,
+                    )
+                    alias_spec.submodule_search_locations = spec.submodule_search_locations
+                    return alias_spec
+            except Exception:
+                pass
+        return None
+
+
+if not any(isinstance(f, _SmartDownloadAliasFinder) for f in sys.meta_path):
+    sys.meta_path.insert(0, _SmartDownloadAliasFinder())
+
+if __name__ in sys.modules:
+    sys.modules["smart_download"] = sys.modules[__name__]
 
 # Fast-path for --test-startup verification
 if "--test-startup" in sys.argv:
@@ -13,13 +64,13 @@ if "--test-startup" in sys.argv:
     _src_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "src")
     if os.path.isdir(_src_dir) and _src_dir not in sys.path:
         sys.path.insert(0, _src_dir)
-    import smart_download.services.youtube_service as youtube_resolver
+    import faqih_downloader.services.youtube_service as youtube_resolver
     t1 = time.time()
-    import smart_download.services.browser.bridge_server as browser_bridge
+    import faqih_downloader.services.browser.bridge_server as browser_bridge
     t2 = time.time()
-    import smart_download.services.browser.native_host as native_messaging_host
+    import faqih_downloader.services.browser.native_host as native_messaging_host
     t3 = time.time()
-    import smart_download.services.browser.registry as register_browser
+    import faqih_downloader.services.browser.registry as register_browser
     t4 = time.time()
     import yt_dlp
     t5 = time.time()
@@ -55,18 +106,18 @@ if os.path.isdir(_src_dir) and _src_dir not in sys.path:
 
 # Fast-path for uninstaller execution
 if any(arg.lower() in ("--uninstall", "-uninstall", "/uninstall", "/u", "-u", "--uninstall-gui") for arg in sys.argv[1:]):
-    from smart_download.installer.uninstaller_runner import handle_uninstall_cli
+    from faqih_downloader.installer.uninstaller_runner import handle_uninstall_cli
     handle_uninstall_cli()
 
 # Initialize Dynamic Core Loader (Zero-Rebuild Dev Mode & OTA Hot-Patch Plugin)
 try:
-    from smart_download.services.core_patch_updater import init_core_loader
+    from faqih_downloader.services.core_patch_updater import init_core_loader
     init_core_loader()
 except Exception:
     pass
 
 # Early Single-Instance Mutex Check: import before heavy modules (Tkinter, PIL, pystray, yt-dlp)
-from smart_download.services.single_instance import (
+from faqih_downloader.services.single_instance import (
     acquire_single_instance_mutex,
     release_single_instance_mutex,
     notify_running_instance,
@@ -78,11 +129,11 @@ if __name__ == "__main__":
     early_single_instance_guard()
 
 # Initialize DPI awareness
-from smart_download.utils.dpi import enable_high_dpi_awareness, get_windows_work_area
+from faqih_downloader.utils.dpi import enable_high_dpi_awareness, get_windows_work_area
 enable_high_dpi_awareness()
 
 # Re-export all config & constants
-from smart_download.config import (
+from faqih_downloader.config import (
     APP_NAME,
     APP_TITLE,
     APP_ID,
@@ -107,7 +158,7 @@ from smart_download.config import (
 )
 
 # Re-export i18n
-from smart_download.locales.i18n import (
+from faqih_downloader.locales.i18n import (
     LocalizationManager,
     tr,
     get_current_language,
@@ -116,8 +167,8 @@ from smart_download.locales.i18n import (
 )
 
 # Re-export utils
-from smart_download.utils.clipboard import _win32_clipboard_get, get_clipboard_text
-from smart_download.utils.url_utils import (
+from faqih_downloader.utils.clipboard import _win32_clipboard_get, get_clipboard_text
+from faqih_downloader.utils.url_utils import (
     COMMON_DOWNLOAD_EXTENSIONS,
     WEB_SCRIPT_EXTENSIONS,
     is_downloadable_url,
@@ -128,10 +179,10 @@ from smart_download.utils.url_utils import (
     parse_speed_limit,
     format_speed,
 )
-from smart_download.utils.speed_utils import parse_speed_limit as parse_speed_limit_direct, format_speed as format_speed_direct
-from smart_download.utils.magic_detector import MagicBytesDetector as MagicBytesDetector_direct
-from smart_download.utils.archive_utils import calculate_file_integrity as calculate_file_integrity_direct, auto_unpack_archive as auto_unpack_archive_direct
-from smart_download.utils.file_ops import (
+from faqih_downloader.utils.speed_utils import parse_speed_limit as parse_speed_limit_direct, format_speed as format_speed_direct
+from faqih_downloader.utils.magic_detector import MagicBytesDetector as MagicBytesDetector_direct
+from faqih_downloader.utils.archive_utils import calculate_file_integrity as calculate_file_integrity_direct, auto_unpack_archive as auto_unpack_archive_direct
+from faqih_downloader.utils.file_ops import (
     MagicBytesDetector,
     calculate_file_integrity,
     auto_unpack_archive,
@@ -143,30 +194,30 @@ from smart_download.utils.file_ops import (
     generate_unique_destination_path,
     apply_media_filename_tags,
 )
-from smart_download.utils.tk_helpers import (
+from faqih_downloader.utils.tk_helpers import (
     _detach_photo_tk,
     _detach_widget_tk_refs,
     _drain_bg_tk_callbacks,
 )
 
 # Re-export core
-from smart_download.core.rate_limiter import TokenBucketRateLimiter
-from smart_download.core.chunk import DownloadChunk, get_permissive_ssl_context, _SSL_CONTEXT_LOCK
-from smart_download.core.html_resolver import (
+from faqih_downloader.core.rate_limiter import TokenBucketRateLimiter
+from faqih_downloader.core.chunk import DownloadChunk, get_permissive_ssl_context, _SSL_CONTEXT_LOCK
+from faqih_downloader.core.html_resolver import (
     _HtmlCandidateExtractor,
     resolve_all_download_candidates,
     _HtmlLinkCandidateParser,
     resolve_real_download_url,
     validate_refresh_url,
 )
-from smart_download.core.engine import TurboDownloadEngine
-from smart_download.core.engine_resumer import EngineResumerMixin
-from smart_download.core.engine_workers import EngineWorkersMixin
-from smart_download.core.stream_coordinator import StreamDownloadCoordinator
-from smart_download.core.history import DownloadHistoryManager
+from faqih_downloader.core.engine import TurboDownloadEngine
+from faqih_downloader.core.engine_resumer import EngineResumerMixin
+from faqih_downloader.core.engine_workers import EngineWorkersMixin
+from faqih_downloader.core.stream_coordinator import StreamDownloadCoordinator
+from faqih_downloader.core.history import DownloadHistoryManager
 
 # Re-export services
-from smart_download.services.startup_service import (
+from faqih_downloader.services.startup_service import (
     IS_WINDOWS,
     WINDOWS_RUN_KEY,
     STARTUP_REG_KEY_NAME,
@@ -185,18 +236,18 @@ from smart_download.services.startup_service import (
     disable_startup,
     get_startup_entry,
 )
-from smart_download.services.single_instance import (
+from faqih_downloader.services.single_instance import (
     notify_running_instance,
     acquire_single_instance_mutex,
     release_single_instance_mutex,
     is_single_instance_mutex_held,
     early_single_instance_guard,
 )
-from smart_download.services.media_extractor import (
+from faqih_downloader.services.media_extractor import (
     _get_yt_dlp,
     warmup_yt_dlp_background,
 )
-from smart_download.services.youtube_service import (
+from faqih_downloader.services.youtube_service import (
     YouTubeResolver,
     YouTubeFormatBuilderMixin,
     MediaResolver,
@@ -220,7 +271,7 @@ from smart_download.services.youtube_service import (
     SUPPORTED_COOKIE_BROWSERS,
     detect_installed_cookie_browsers,
 )
-from smart_download.services.youtube_tracks import (
+from faqih_downloader.services.youtube_tracks import (
     extract_audio_tracks,
     extract_subtitle_tracks,
     convert_vtt_to_srt,
@@ -229,7 +280,7 @@ from smart_download.services.youtube_tracks import (
     handle_subtitles_post_download,
     build_audio_subtitle_row,
 )
-from smart_download.services.updater_service import (
+from faqih_downloader.services.updater_service import (
     parse_version,
     is_newer_version,
     is_version_ge,
@@ -243,8 +294,8 @@ from smart_download.services.updater_service import (
     get_core_plugin_dir,
     init_core_loader,
 )
-from smart_download.services.browser.bridge_server import BrowserBridgeServer, DEFAULT_BRIDGE_PORT
-from smart_download.services.browser.registry import (
+from faqih_downloader.services.browser.bridge_server import BrowserBridgeServer, DEFAULT_BRIDGE_PORT
+from faqih_downloader.services.browser.registry import (
     register_native_host,
     unregister_native_host,
     check_and_register_browser,
@@ -261,48 +312,48 @@ from smart_download.services.browser.registry import (
 )
 
 # Re-export UI & Controllers
-from smart_download.ui.controllers.download_controller import DownloadControllerMixin
-from smart_download.ui.controllers.media_download_controller import MediaDownloadControllerMixin
-from smart_download.ui.controllers.youtube_download_controller import YouTubeDownloadControllerMixin
-from smart_download.ui.controllers.batch_download_controller import BatchDownloadControllerMixin
-from smart_download.ui.controllers.link_refresh_controller import LinkRefreshControllerMixin
-from smart_download.ui.controllers.settings_controller import SettingsControllerMixin
-from smart_download.ui.controllers.locale_controller import LocaleControllerMixin
-from smart_download.ui.controllers.speed_limiter_controller import SpeedLimiterControllerMixin
-from smart_download.ui.controllers.dialog_controller import DialogControllerMixin
-from smart_download.ui.controllers.lifecycle_controller import WindowLifecycleMixin
-from smart_download.ui.controllers.toast_controller import ToastControllerMixin
-from smart_download.ui.controllers.update_controller import UpdateControllerMixin
-from smart_download.ui.controllers.theme_controller import ThemeControllerMixin
-from smart_download.ui.controllers.dispatch_controller import DispatchControllerMixin
-from smart_download.ui.controllers.window_controller import WindowChromeMixin
-from smart_download.ui.controllers.browser_controller import BrowserControllerMixin
-from smart_download.ui.panels.metrics_panel import MetricsPanelMixin
-from smart_download.ui.panels.chunks_panel import ChunksPanelMixin
-from smart_download.ui.panels.controls_panel import ControlsPanelMixin
-from smart_download.ui.panels.inputs_panel import InputsPanelMixin
-from smart_download.ui.panels.history_panel import HistoryPanelMixin
-from smart_download.ui.components.top_bar import TopHeaderBarMixin
-from smart_download.ui.panels.kanban_panel import KanbanPanelMixin
-from smart_download.ui.panels.hidden_compat_panel import HiddenCompatPanelMixin
-from smart_download.ui.components.base_modal import SafeModalDialog
-from smart_download.ui.components.tooltip import ToolTip
-from smart_download.ui.modals.toasts import FetchingLinkToast, StartupWelcomeToast
-from smart_download.ui.modals.quality_modal import QualitySelectionModal
-from smart_download.ui.modals.settings_modal import SettingsModal
-from smart_download.ui.modals.settings_modal_tabs import SettingsModalTabsMixin
-from smart_download.ui.modals.settings_modal_extra import SettingsModalExtraMixin
-from smart_download.ui.modals.confirm_modal import (
+from faqih_downloader.ui.controllers.download_controller import DownloadControllerMixin
+from faqih_downloader.ui.controllers.media_download_controller import MediaDownloadControllerMixin
+from faqih_downloader.ui.controllers.youtube_download_controller import YouTubeDownloadControllerMixin
+from faqih_downloader.ui.controllers.batch_download_controller import BatchDownloadControllerMixin
+from faqih_downloader.ui.controllers.link_refresh_controller import LinkRefreshControllerMixin
+from faqih_downloader.ui.controllers.settings_controller import SettingsControllerMixin
+from faqih_downloader.ui.controllers.locale_controller import LocaleControllerMixin
+from faqih_downloader.ui.controllers.speed_limiter_controller import SpeedLimiterControllerMixin
+from faqih_downloader.ui.controllers.dialog_controller import DialogControllerMixin
+from faqih_downloader.ui.controllers.lifecycle_controller import WindowLifecycleMixin
+from faqih_downloader.ui.controllers.toast_controller import ToastControllerMixin
+from faqih_downloader.ui.controllers.update_controller import UpdateControllerMixin
+from faqih_downloader.ui.controllers.theme_controller import ThemeControllerMixin
+from faqih_downloader.ui.controllers.dispatch_controller import DispatchControllerMixin
+from faqih_downloader.ui.controllers.window_controller import WindowChromeMixin
+from faqih_downloader.ui.controllers.browser_controller import BrowserControllerMixin
+from faqih_downloader.ui.panels.metrics_panel import MetricsPanelMixin
+from faqih_downloader.ui.panels.chunks_panel import ChunksPanelMixin
+from faqih_downloader.ui.panels.controls_panel import ControlsPanelMixin
+from faqih_downloader.ui.panels.inputs_panel import InputsPanelMixin
+from faqih_downloader.ui.panels.history_panel import HistoryPanelMixin
+from faqih_downloader.ui.components.top_bar import TopHeaderBarMixin
+from faqih_downloader.ui.panels.kanban_panel import KanbanPanelMixin
+from faqih_downloader.ui.panels.hidden_compat_panel import HiddenCompatPanelMixin
+from faqih_downloader.ui.components.base_modal import SafeModalDialog
+from faqih_downloader.ui.components.tooltip import ToolTip
+from faqih_downloader.ui.modals.toasts import FetchingLinkToast, StartupWelcomeToast
+from faqih_downloader.ui.modals.quality_modal import QualitySelectionModal
+from faqih_downloader.ui.modals.settings_modal import SettingsModal
+from faqih_downloader.ui.modals.settings_modal_tabs import SettingsModalTabsMixin
+from faqih_downloader.ui.modals.settings_modal_extra import SettingsModalExtraMixin
+from faqih_downloader.ui.modals.confirm_modal import (
     DownloadConfirmationModal,
     DownloadConfirmationDialog,
     DownloadConfirmModal,
     ConfirmModalLogicMixin,
 )
-from smart_download.ui.modals.candidates_modal import MultipleCandidatesModal
-from smart_download.ui.modals.refresh_modal import RefreshLinkModal, RefreshLinkDialog
-from smart_download.ui.modals.update_modal import AppUpdateModal
-from smart_download.ui.system_tray import SystemTrayManager, PYSTRAY_AVAILABLE
-from smart_download.ui.main_window import (
+from faqih_downloader.ui.modals.candidates_modal import MultipleCandidatesModal
+from faqih_downloader.ui.modals.refresh_modal import RefreshLinkModal, RefreshLinkDialog
+from faqih_downloader.ui.modals.update_modal import AppUpdateModal
+from faqih_downloader.ui.system_tray import SystemTrayManager, PYSTRAY_AVAILABLE
+from faqih_downloader.ui.main_window import (
     ModernFramelessGUI,
     main,
     SmartDownloadEngine,
@@ -318,7 +369,7 @@ _SYNC_ACTIVE = False
 class _FaqihDownloaderShim(types.ModuleType):
     def __getattr__(self, name):
         if name == "yt_dlp":
-            from smart_download.services.media_extractor import _get_yt_dlp
+            from faqih_downloader.services.media_extractor import _get_yt_dlp
             return _get_yt_dlp()
         return super().__getattr__(name)
 
@@ -330,7 +381,7 @@ class _FaqihDownloaderShim(types.ModuleType):
         try:
             _SYNC_ACTIVE = True
             for mod in list(sys.modules.values()):
-                if mod is not None and getattr(mod, "__name__", "").startswith("smart_download"):
+                if mod is not None and getattr(mod, "__name__", "").startswith("faqih_downloader"):
                     if hasattr(mod, name):
                         try:
                             setattr(mod, name, value)
@@ -354,7 +405,8 @@ class _FaqihDownloaderShim(types.ModuleType):
         finally:
             _SYNC_ACTIVE = False
 
-sys.modules[__name__].__class__ = _FaqihDownloaderShim
+if __name__ in sys.modules:
+    sys.modules[__name__].__class__ = _FaqihDownloaderShim
 
 if __name__ == "__main__":
     main()
