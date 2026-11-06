@@ -47,7 +47,6 @@ a = Analysis(
         'updater',
         'youtube_resolver',
         'turbo_downloader',
-        'faqih_downloader',
         'browser_bridge',
         'native_messaging_host',
         'register_browser',

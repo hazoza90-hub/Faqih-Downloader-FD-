@@ -56,7 +56,7 @@ if "--preview-html" in sys.argv:
     os._exit(0)
 
 # 3. Fast-path for uninstaller execution
-if any(arg.lower() in ("--uninstall", "-uninstall", "/uninstall", "/u", "-u", "--uninstall-gui") for arg in sys.argv[1:]):
+if any(arg.lower() in ("--uninstall", "-uninstall", "/uninstall", "/u", "-u", "--uninstall-gui", "--uninstall-worker") for arg in sys.argv[1:]):
     from faqih_downloader.installer.uninstaller_runner import handle_uninstall_cli
     handle_uninstall_cli()
     os._exit(0)

@@ -15,14 +15,14 @@ from .engine import TurboDownloadEngine
 from .chunk import DownloadChunk
 from ..config import IS_WINDOWS
 from ..services.subtitle_processor import run_cancellable_ffmpeg
-from ..services.youtube_service import (
+from ..services.youtube_models import (
     YouTubeStreamInfo,
     MediaStreamInfo,
-    YouTubeResolver,
-    MediaResolver,
+    is_youtube_url,
+)
+from ..services.media_env_helpers import (
     has_ffmpeg,
     find_ffmpeg_bin,
-    is_youtube_url,
 )
 
 class StreamDownloadCoordinator:
@@ -490,6 +490,7 @@ class StreamDownloadCoordinator:
                 self.on_progress(combined_total, combined_total, rep_spd, "Merging...", 0)
 
             self.log(f"[{tag}] Phase 2/2: Merging video and audio streams into final container...")
+            from ..services.youtube_service import YouTubeResolver
             YouTubeResolver.merge_video_audio(video_tmp, audio_tmp, self.destination_path, on_log=self.log, cancel_event=self._cancel_event)
             self._process_subtitles(self.destination_path)
 

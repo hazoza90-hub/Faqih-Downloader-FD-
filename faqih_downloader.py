@@ -123,9 +123,10 @@ if os.path.isdir(_src_dir) and _src_dir not in sys.path:
     sys.path.insert(0, _src_dir)
 
 # Fast-path for uninstaller execution
-if any(arg.lower() in ("--uninstall", "-uninstall", "/uninstall", "/u", "-u", "--uninstall-gui") for arg in sys.argv[1:]):
+if any(arg.lower() in ("--uninstall", "-uninstall", "/uninstall", "/u", "-u", "--uninstall-gui", "--uninstall-worker") for arg in sys.argv[1:]):
     from faqih_downloader.installer.uninstaller_runner import handle_uninstall_cli
     handle_uninstall_cli()
+    sys.exit(0)
 
 # Initialize Dynamic Core Loader (Zero-Rebuild Dev Mode & OTA Hot-Patch Plugin)
 try:

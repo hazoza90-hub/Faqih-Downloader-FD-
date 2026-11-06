@@ -12,8 +12,6 @@ except ImportError:
     try: from faqih_downloader.services.updater_service import APP_VERSION, YtDlpAutoUpdater, get_ytdlp_plugin_dir
     except ImportError: from updater import APP_VERSION, YtDlpAutoUpdater, get_ytdlp_plugin_dir
 
-from ..core.chunk import get_permissive_ssl_context
-
 from .youtube_models import (
     YOUTUBE_URL_REGEX, SOCIAL_MEDIA_PATTERNS, INVALID_FILENAME_CHARS,
     SUPPORTED_COOKIE_BROWSERS, detect_installed_cookie_browsers,
@@ -25,6 +23,8 @@ from .youtube_models import (
     YouTubeStreamInfo, MediaStreamInfo,
 )
 from .youtube_format_builder import YouTubeFormatBuilderMixin
+
+from ..core.chunk import get_permissive_ssl_context
 
 
 class YouTubeResolver(YouTubeFormatBuilderMixin):
