@@ -177,14 +177,14 @@ def resolve_real_download_url(
         req = urllib.request.Request(clean_url, headers=custom_headers)
         with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
             final_url = resp.geturl() or clean_url
+            redir_scheme = urllib.parse.urlsplit(final_url).scheme.lower()
+            if redir_scheme not in ("http", "https", "ftp"):
+                raise ValueError("Unsupported redirect scheme")
             final_host = urllib.parse.urlparse(final_url).hostname or ""
             if src_is_public and _is_private_or_loopback_host(final_host):
                 result["url"] = final_url
                 result["error"] = "SSRF: Redirect to internal host blocked"
                 return result
-            redir_scheme = urllib.parse.urlsplit(final_url).scheme.lower()
-            if redir_scheme not in ("http", "https", "ftp"):
-                raise ValueError("Unsupported redirect scheme")
             raw_ct = resp.headers.get("Content-Type", "")
             content_type = raw_ct.split(";")[0].strip().lower()
             cl = resp.headers.get("Content-Length")
