@@ -1,0 +1,59 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# PyInstaller / Build outputs
+build/
+dist/
+installer_payload/
+*.spec.bak
+
+# Exclude standalone executables and archives from git tracking (use GitHub Releases)
+*.exe
+*.zip
+
+# Exclude REA analysis folder
+rea/
+.rea/
+
+# Download fragments & temp files
+*.tmp
+*.temp
+*.sd_parts
+*.tdm_parts
+*.part
+*.crdownload
+*.ytdl
+
+# Logs and databases
+*.log
+*.sqlite
+*.sqlite3
+
+# Environment & IDE
+.env
+.venv
+env/
+venv/
+ENV/
+.vscode/
+.idea/
+*.swp
+*~
+
+# Testing & Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+temp_pytest/
+
+# Local native host manifests
+com.smartdownload.host.json
+sd_host.bat
+com.faqihdownloader.host.json
+fd_host.bat
+
+# Temporary prompt dumps
+last_user_prompt.txt
+

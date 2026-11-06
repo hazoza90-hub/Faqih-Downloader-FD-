@@ -1,0 +1,14 @@
+{
+  "name": "com.faqihdownloader.host",
+  "description": "Faqih Downloader (FD) Native Messaging Host",
+  "path": "C:\\Users\\hazoz\\OneDrive\\Desktop\\swi copy\\fd_host.bat",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://smart-download-integration/",
+    "chrome-extension://com.smartdownload.extension/",
+    "chrome-extension://turbo-downloader-integration/",
+    "chrome-extension://com.turbodownloader.extension/",
+    "chrome-extension://gokbjcmdmbjlngbdpanlccbfpmppjloa/",
+    "chrome-extension://pklgcncmklkpccfdoaehbibmfmmpkilj/"
+  ]
+}
