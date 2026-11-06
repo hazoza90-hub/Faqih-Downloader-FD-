@@ -339,6 +339,7 @@ class YouTubeStreamInfo:
     subtitle_embed_mode: str = "soft_embed"
     subtitle_position: str = "bottom"
     webpage_url: str = ""
+    audio_format_id: str = ""
 
 
 # Clean alias

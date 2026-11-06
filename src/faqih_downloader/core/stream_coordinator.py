@@ -325,7 +325,8 @@ class StreamDownloadCoordinator:
 
             # Dual-stream: Video + Audio + FFmpeg merge
             video_tmp = self.destination_path + ".video.tmp"
-            audio_tmp = self.destination_path + ".audio.tmp"
+            a_ext = getattr(self.stream_info, "audio_ext", "m4a") or "m4a"
+            audio_tmp = f"{self.destination_path}.audio.{a_ext}.tmp"
 
             self._active_phase = 1
             plat = getattr(self.stream_info, "platform", "Media")
@@ -470,9 +471,13 @@ class StreamDownloadCoordinator:
             if v_error:
                 a_engine.cancel(); _drain_workers()
                 raise RuntimeError(f"Video stream download error: {v_error[0]}")
-            if a_error:
-                v_engine.cancel(); _drain_workers()
-                raise RuntimeError(f"Audio stream download error: {a_error[0]}")
+
+            # Audio completeness validation and automatic yt-dlp fallback recovery
+            from ..services.media_env_helpers import ensure_complete_audio_file
+            if not ensure_complete_audio_file(self.stream_info, audio_tmp, tag, self.log, has_prior_error=bool(a_error)):
+                if a_error:
+                    v_engine.cancel(); _drain_workers()
+                    raise RuntimeError(f"Audio stream download error: {a_error[0]}")
 
             # 3. Merge Phase via FFmpeg
             self._active_phase = 3
@@ -482,21 +487,6 @@ class StreamDownloadCoordinator:
             rep_spd = self._last_active_speed if self._last_active_speed > 0 else (combined_total / max(0.05, el))
             if self.on_progress:
                 self.on_progress(combined_total, combined_total, rep_spd, "Merging...", 0)
-
-            # Validate audio integrity for long media streams
-            if getattr(self.stream_info, "duration", 0) > 15:
-                try:
-                    from ..services.media_env_helpers import probe_media_file_duration, recover_audio_stream_fallback
-                    a_dur = probe_media_file_duration(audio_tmp)
-                    exp_dur = float(self.stream_info.duration)
-                    exp_sz = getattr(self.stream_info, "audio_size", 0) or 0
-                    cur_sz = os.path.getsize(audio_tmp) if os.path.isfile(audio_tmp) else 0
-                    is_trunc = (a_dur > 0 and a_dur < (0.85 * exp_dur)) or (a_dur == 0 and exp_sz > 0 and cur_sz < (0.85 * exp_sz)) or (cur_sz < 1024)
-                    if is_trunc:
-                        self.log(f"[{tag}] Audio stream incomplete ({cur_sz:,} bytes). Triggering yt-dlp fallback...")
-                        recover_audio_stream_fallback(self.stream_info, audio_tmp, on_log=self.log)
-                except Exception:
-                    pass
 
             self.log(f"[{tag}] Phase 2/2: Merging video and audio streams into final container...")
             YouTubeResolver.merge_video_audio(video_tmp, audio_tmp, self.destination_path, on_log=self.log, cancel_event=self._cancel_event)

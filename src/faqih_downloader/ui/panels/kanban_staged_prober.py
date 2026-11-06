@@ -279,6 +279,20 @@ def _probe_file_worker(gui: Any, url_clean: str, base_dir: str, conn_count: int,
         "category": category, "badge": badge, "supports_resume": supports_resume,
         "final_dest": final_dest, "conn_count": conn_count, "speed_limit": speed_limit
     }
+    def _hide_if_active():
+        cur_u = gui.entry_url.get().strip() if hasattr(gui, "entry_url") and gui.entry_url else ""
+        if not cur_u or cur_u in (url_clean, resolved_url):
+            gui._pending_media_context = None
+            if hasattr(gui, "hide_main_media_bar"):
+                try: gui.hide_main_media_bar()
+                except Exception: pass
+    if hasattr(gui, "dispatch_to_main_thread") and callable(gui.dispatch_to_main_thread):
+        gui.dispatch_to_main_thread(_hide_if_active)
+    elif hasattr(gui, "after"):
+        gui.after(0, _hide_if_active)
+    else:
+        _hide_if_active()
+
     if hasattr(gui, "stage_probed_link_in_col1"):
         gui.stage_probed_link_in_col1(info_dict)
 

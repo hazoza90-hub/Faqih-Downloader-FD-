@@ -269,12 +269,14 @@ class MediaOptionsActionsMixin:
 
     def _start_pending_media_download(self):
         """Starts media download directly using the selections made in the Main Window Media Bar."""
-        if hasattr(self, "_sync_media_bar_state"):
-            try: self._sync_media_bar_state()
-            except Exception: pass
         ctx = getattr(self, "_pending_media_context", None)
         if not ctx:
             return
+        bar_url = getattr(self, "_main_bar_url", None)
+        is_same_video = bool(not bar_url or (ctx.get("url") and bar_url == ctx.get("url")))
+        if is_same_video and hasattr(self, "_sync_media_bar_state"):
+            try: self._sync_media_bar_state()
+            except Exception: pass
         if hasattr(self, "remove_staged_link"):
             self.remove_staged_link(ctx.get("url", ""))
 
@@ -286,7 +288,7 @@ class MediaOptionsActionsMixin:
         info, resolver = ctx.get("info", {}), ctx.get("resolver")
 
         selected_opt = ctx.get("selected_option") or ctx.get("selected_opt")
-        if hasattr(self, "cb_main_quality") and options and bar_opts == options:
+        if is_same_video and hasattr(self, "cb_main_quality") and options and bar_opts == options:
             q_idx = self.cb_main_quality.current()
             if 0 <= q_idx < len(options):
                 selected_opt = options[q_idx]
@@ -294,7 +296,7 @@ class MediaOptionsActionsMixin:
             pref_i = resolve_preferred_option_index(options)
             selected_opt = options[pref_i] if 0 <= pref_i < len(options) else options[0]
 
-        if selected_opt:
+        if selected_opt and is_same_video:
             if hasattr(self, "cb_main_audio") and audio_tracks and 0 <= self.cb_main_audio.current() < len(audio_tracks):
                 selected_opt.selected_audio_track = audio_tracks[self.cb_main_audio.current()]
             sub_mode = self._main_sub_mode_codes[self.cb_main_sub_mode.current()] if (hasattr(self, "cb_main_sub_mode") and 0 <= self.cb_main_sub_mode.current() < len(self._main_sub_mode_codes)) else "soft_embed"

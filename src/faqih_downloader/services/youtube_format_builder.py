@@ -514,5 +514,6 @@ class YouTubeFormatBuilderMixin:
                 subtitle_embed_mode=sub_mode,
                 subtitle_position=sub_pos,
                 webpage_url=webpage_url,
+                audio_format_id=str(opt.selected_audio_track.get("format_id") or "") if isinstance(opt.selected_audio_track, dict) else "",
             )
 

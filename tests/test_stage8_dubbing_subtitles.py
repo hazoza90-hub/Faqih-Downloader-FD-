@@ -32,6 +32,9 @@ class TestYouTubeTracks(unittest.TestCase):
     """Test suite for audio dubbing and subtitle track extraction and processing."""
 
     def setUp(self):
+        from faqih_downloader.config import set_setting
+        set_setting("preferred_audio_lang", "original")
+        set_setting("preferred_subtitle_lang", "none")
         self.builder = DummyBuilder()
 
     def test_extract_audio_tracks_sorting_and_selection(self):

@@ -510,7 +510,7 @@ class YouTubeResolver(YouTubeFormatBuilderMixin):
             c.append(output_path)
             return c
 
-        audio_incompatible = audio_path.lower().endswith((".webm", ".opus", ".ogg")) and output_path.lower().endswith((".mp4", ".m4v"))
+        audio_incompatible = any(e in audio_path.lower() for e in (".webm", ".opus", ".ogg")) and output_path.lower().endswith((".mp4", ".m4v"))
         rc, primary_err = (-1, "Incompatible container") if audio_incompatible else _run_proc(_build_cmd(["-c", "copy"]))
         if cancel_event and cancel_event.is_set(): return False
 

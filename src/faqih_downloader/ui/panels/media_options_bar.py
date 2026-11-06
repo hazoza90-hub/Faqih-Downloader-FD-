@@ -121,6 +121,7 @@ class MediaOptionsBarMixin(MediaOptionsActionsMixin):
         }
         self._last_media_context = dict(self._pending_media_context)
         self._cache_media_context(media_url, self._pending_media_context)
+        self._main_bar_url = media_url
 
         # Show host frame and options frame directly under top header
         if hasattr(self, "media_bar_host") and self.media_bar_host:
@@ -146,7 +147,15 @@ class MediaOptionsBarMixin(MediaOptionsActionsMixin):
         a_vals = [t.get("label", "") for t in self._main_audio_tracks]
         self.cb_main_audio.configure(values=a_vals)
         a_idx, pref_a = 0, get_setting("preferred_audio_lang", "original")
-        if pref_a and pref_a != "original":
+        sel_at = getattr(sel_opt, "selected_audio_track", None)
+        if sel_at and sel_at in self._main_audio_tracks:
+            a_idx = self._main_audio_tracks.index(sel_at)
+        elif sel_at and isinstance(sel_at, dict):
+            for i, t in enumerate(self._main_audio_tracks):
+                if t.get("track_id") == sel_at.get("track_id") or (t.get("language") and t.get("language") == sel_at.get("language")):
+                    a_idx = i
+                    break
+        elif pref_a and pref_a != "original":
             for i, t in enumerate(self._main_audio_tracks):
                 if str(t.get("language", "")).lower().startswith(pref_a.lower()):
                     a_idx = i; break
@@ -157,8 +166,14 @@ class MediaOptionsBarMixin(MediaOptionsActionsMixin):
         s_vals = [s.get("label", "") for s in self._main_subtitle_tracks]
         self.cb_main_sub.configure(values=s_vals)
         sub_idx, pref_s = 0, get_setting("preferred_subtitle_lang", "none")
-        if sel_opt and getattr(sel_opt, "selected_subtitle_track", None) in self._main_subtitle_tracks:
-            sub_idx = self._main_subtitle_tracks.index(sel_opt.selected_subtitle_track)
+        sel_st = getattr(sel_opt, "selected_subtitle_track", None)
+        if sel_st and sel_st in self._main_subtitle_tracks:
+            sub_idx = self._main_subtitle_tracks.index(sel_st)
+        elif sel_st and isinstance(sel_st, dict):
+            for i, s in enumerate(self._main_subtitle_tracks):
+                if s.get("sub_id") == sel_st.get("sub_id") or (s.get("language") and s.get("language") == sel_st.get("language")):
+                    sub_idx = i
+                    break
         elif pref_s and pref_s != "none":
             for i, s in enumerate(self._main_subtitle_tracks):
                 if i > 0 and str(s.get("language", "")).lower().startswith(pref_s.lower()):
@@ -185,6 +200,7 @@ class MediaOptionsBarMixin(MediaOptionsActionsMixin):
 
     def hide_main_media_bar(self):
         """Hides the Media Settings Bar frame when switching to non-media URLs."""
+        self._main_bar_url = None
         if hasattr(self, "media_options_frame"):
             try: self.media_options_frame.pack_forget()
             except Exception: pass
@@ -196,6 +212,11 @@ class MediaOptionsBarMixin(MediaOptionsActionsMixin):
         """Synchronizes dropdown selections with _pending_media_context and the Column 1 Kanban card."""
         ctx = getattr(self, "_pending_media_context", None)
         if not isinstance(ctx, dict):
+            return
+
+        # Guard: prevent cross-video state corruption if media bar currently belongs to another URL
+        bar_url = getattr(self, "_main_bar_url", None)
+        if bar_url and ctx.get("url") and bar_url != ctx.get("url"):
             return
 
         opts = getattr(self, "_main_media_options", []) or ctx.get("options") or []

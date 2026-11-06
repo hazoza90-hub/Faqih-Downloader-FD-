@@ -96,17 +96,21 @@ def build_staged_link_card(parent: Any, info: Dict[str, Any], callbacks: Dict[st
         if not opt and isinstance(info.get("media_context"), dict):
             opt = info["media_context"].get("selected_option") or info["media_context"].get("selected_opt")
         audio_lbl, sub_lbl = "", ""
-        if opt:
-            at = getattr(opt, "selected_audio_track", None)
-            if isinstance(at, dict):
-                a_name = at.get("language_label") or at.get("label") or at.get("language", "")
-                audio_lbl = a_name.split(" - ")[0].strip() if " - " in a_name else a_name.strip()
-            st = getattr(opt, "selected_subtitle_track", None)
-            if isinstance(st, dict):
-                s_name = st.get("language_label") or st.get("label") or st.get("language", "")
-                sub_lbl = s_name.split(" - ")[0].strip() if " - " in s_name else s_name.strip()
-                if getattr(opt, "subtitle_embed_mode", "") == "hard_burn":
-                    sub_lbl += " (Burn)"
+        at = getattr(opt, "selected_audio_track", None) if opt else None
+        if not at and isinstance(info.get("media_context"), dict):
+            at = info["media_context"].get("selected_audio_track")
+        if isinstance(at, dict):
+            a_name = at.get("language_label") or at.get("label") or at.get("language", "")
+            audio_lbl = a_name.split(" - ")[0].strip() if " - " in a_name else a_name.strip()
+        st = getattr(opt, "selected_subtitle_track", None) if opt else None
+        if not st and isinstance(info.get("media_context"), dict):
+            st = info["media_context"].get("selected_subtitle_track")
+        if isinstance(st, dict):
+            s_name = st.get("language_label") or st.get("label") or st.get("language", "")
+            sub_lbl = s_name.split(" - ")[0].strip() if " - " in s_name else s_name.strip()
+            sub_mode = getattr(opt, "subtitle_embed_mode", "") if opt else (info.get("media_context", {}).get("subtitle_embed_mode", ""))
+            if sub_mode == "hard_burn":
+                sub_lbl += " (Burn)"
         parts = [p for p in [badge, f"🔊 {audio_lbl}" if audio_lbl else "", f"💬 {sub_lbl}" if sub_lbl else "", _format_size(file_size)] if p]
         desc_txt = " • ".join(parts) if parts else f"{_format_size(file_size)} • {str(category).capitalize()}"
         tk.Label(meta_row, text=desc_txt, font=("Segoe UI", 8), bg="#151a24", fg="#94a3b8").pack(side=pad_side)

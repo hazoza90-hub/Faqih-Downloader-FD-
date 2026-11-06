@@ -215,12 +215,54 @@ def probe_media_file_duration(file_path: str) -> float:
     return 0.0
 
 
+def _resolve_cookie_browser(cb: Optional[str]) -> Optional[str]:
+    """Resolves 'auto' or browser names to a concrete installed browser for yt-dlp."""
+    if not cb:
+        return None
+    val = str(cb).strip().lower()
+    if val in ("none", "off", "disabled", "file", ""):
+        return None
+    if val == "auto":
+        detected = detect_installed_cookie_browsers()
+        return detected[0] if detected else None
+    if val in ("chrome", "edge", "firefox", "brave", "opera", "vivaldi", "safari", "chromium"):
+        return val
+    return val
+
+
+def ensure_complete_audio_file(
+    stream_info: Any,
+    audio_tmp: str,
+    tag: str = "Media",
+    on_log: Optional[Callable[[str], None]] = None,
+    has_prior_error: bool = False
+) -> bool:
+    """Verifies audio stream completeness and duration; triggers yt-dlp fallback if truncated or missing."""
+    cur_sz = os.path.getsize(audio_tmp) if os.path.isfile(audio_tmp) else 0
+    exp_dur = float(getattr(stream_info, "duration", 0) or 0)
+    exp_sz = int(getattr(stream_info, "audio_size", 0) or 0)
+    a_dur = probe_media_file_duration(audio_tmp) if cur_sz > 0 else 0.0
+
+    is_trunc = has_prior_error or (cur_sz < 1024)
+    if not is_trunc and exp_dur > 15:
+        if a_dur > 0 and a_dur < (0.85 * exp_dur):
+            is_trunc = True
+        elif a_dur == 0 and exp_sz > 0 and cur_sz < (0.85 * exp_sz):
+            is_trunc = True
+
+    if is_trunc:
+        if on_log:
+            on_log(f"[{tag}] Audio stream missing, failed or incomplete ({cur_sz:,} bytes). Triggering yt-dlp fallback...")
+        return recover_audio_stream_fallback(stream_info, audio_tmp, on_log=on_log)
+    return True
+
+
 def recover_audio_stream_fallback(stream_info: Any, audio_tmp: str, on_log: Optional[Callable[[str], None]] = None) -> bool:
     """Fallback audio downloader via yt_dlp directly to audio_tmp when stream is truncated."""
     try:
         import yt_dlp
         from ..config import get_setting
-        cb = get_setting("cookies_browser", "none") or "none"
+        cb = _resolve_cookie_browser(get_setting("cookies_browser", "none"))
         target_url = getattr(stream_info, "webpage_url", "") or ""
         v_id = getattr(stream_info, "video_id", "")
         if not target_url and v_id:
@@ -228,8 +270,15 @@ def recover_audio_stream_fallback(stream_info: Any, audio_tmp: str, on_log: Opti
         if not target_url:
             return False
 
+        fmt_id = str(getattr(stream_info, "audio_format_id", "") or "").strip()
         lang = getattr(stream_info, "audio_language", None)
-        fmt_spec = f"bestaudio[language={lang}]/bestaudio" if lang else "bestaudio"
+        if fmt_id:
+            fmt_spec = f"{fmt_id}/bestaudio[language={lang}]/bestaudio" if lang else f"{fmt_id}/bestaudio"
+        elif lang:
+            fmt_spec = f"bestaudio[language={lang}]/bestaudio"
+        else:
+            fmt_spec = "bestaudio"
+
         ydl_opts: Dict[str, Any] = {
             "format": fmt_spec,
             "outtmpl": audio_tmp,
@@ -237,13 +286,13 @@ def recover_audio_stream_fallback(stream_info: Any, audio_tmp: str, on_log: Opti
             "quiet": True,
             "no_warnings": True,
         }
-        if cb and cb.lower() not in ("none", "disabled", ""):
-            ydl_opts["cookiesfrombrowser"] = (cb.lower(),)
+        if cb:
+            ydl_opts["cookiesfrombrowser"] = (cb,)
         if hasattr(stream_info, "audio_headers") and stream_info.audio_headers:
             ydl_opts["http_headers"] = stream_info.audio_headers
 
         if on_log:
-            on_log(f"[AUDIO FALLBACK] Downloading complete audio track ({lang or 'default'}) via yt-dlp...")
+            on_log(f"[AUDIO FALLBACK] Downloading complete audio track ({fmt_id or lang or 'default'}) via yt-dlp...")
         if os.path.exists(audio_tmp):
             try: os.remove(audio_tmp)
             except Exception: pass
@@ -277,4 +326,6 @@ __all__ = [
     "has_ffmpeg",
     "probe_media_file_duration",
     "recover_audio_stream_fallback",
+    "ensure_complete_audio_file",
+    "_resolve_cookie_browser",
 ]

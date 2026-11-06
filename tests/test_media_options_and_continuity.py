@@ -179,13 +179,77 @@ class TestMediaOptionsAndContinuity(unittest.TestCase):
             gui._on_main_sub_changed(event=MagicMock())
             self.assertEqual(pending["selected_option"].selected_subtitle_track["language"], "ar")
 
+            # Verify that re-populating with explicit selected_option keeps chosen Arabic audio
+            opt_chosen = pending["selected_option"]
+            gui.populate_main_media_bar(
+                info={"title": "Demo Video", "duration": 180},
+                options=[opt1, opt2],
+                audio_tracks=[audio1, audio2],
+                subtitle_tracks=[sub1, sub2],
+                selected_option=opt_chosen,
+                url="https://youtube.com/watch?v=demo123",
+                dest="video.mp4"
+            )
+            self.assertEqual(gui.cb_main_audio.current(), 1)
+            self.assertEqual(gui._pending_media_context["selected_option"].selected_audio_track["language"], "ar")
+
             # Hide media bar
             gui.hide_main_media_bar()
+            self.assertIsNone(getattr(gui, "_main_bar_url", None))
         finally:
+            from faqih_downloader.config import set_setting
+            set_setting("preferred_audio_lang", "original")
+            set_setting("preferred_subtitle_lang", "none")
             try:
                 root.destroy()
             except Exception:
                 pass
+
+    def test_cross_video_sync_guard(self):
+        """Verifies _sync_media_bar_state does not overwrite options of Video A when main bar holds Video B."""
+        from faqih_downloader.ui.panels.media_options_bar import MediaOptionsBarMixin
+        class DummyGUI(MediaOptionsBarMixin):
+            pass
+
+        gui = DummyGUI()
+        gui._main_bar_url = "https://youtube.com/watch?v=video_B"
+        gui._main_media_options = [MagicMock(resolution_label="1080p")]
+        gui.cb_main_quality = MagicMock()
+        gui.cb_main_quality.current.return_value = 0
+
+        opt_a = VideoFormatOption(format_id="18", ext="mp4", resolution_label="720p", height=720, filesize_approx=1000)
+        ctx_a = {"url": "https://youtube.com/watch?v=video_A", "selected_option": opt_a, "options": [opt_a]}
+        gui._pending_media_context = ctx_a
+
+        # Attempt to sync - should be guarded because _main_bar_url != ctx_a["url"]
+        gui._sync_media_bar_state()
+        self.assertEqual(gui._pending_media_context["selected_option"].resolution_label, "720p")
+
+    def test_audio_fallback_and_cookie_resolution(self):
+        """Verifies _resolve_cookie_browser handles 'auto' and ensure_complete_audio_file falls back to yt-dlp."""
+        from faqih_downloader.services.media_env_helpers import _resolve_cookie_browser, ensure_complete_audio_file
+
+        # Test cookie resolution
+        self.assertIsNone(_resolve_cookie_browser("none"))
+        self.assertIsNone(_resolve_cookie_browser("off"))
+        self.assertEqual(_resolve_cookie_browser("chrome"), "chrome")
+        # 'auto' should resolve to a valid string or None, never the literal string 'auto'
+        auto_res = _resolve_cookie_browser("auto")
+        self.assertNotEqual(auto_res, "auto")
+
+        # Test ensure_complete_audio_file fallback on truncated audio
+        stream_info = YouTubeStreamInfo(
+            video_id="demo_id", title="Demo", clean_filename="demo.mp4",
+            is_progressive=False, video_url="https://googlevideo.com/v",
+            audio_url="https://googlevideo.com/a", audio_ext="m4a",
+            duration=300, audio_size=10000000, audio_format_id="140-ar"
+        )
+        with patch("faqih_downloader.services.media_env_helpers.probe_media_file_duration", return_value=10.0), \
+             patch("faqih_downloader.services.media_env_helpers.recover_audio_stream_fallback", return_value=True) as mock_recover:
+            # cur_sz 500 bytes (< 1024) -> should trigger fallback
+            ok = ensure_complete_audio_file(stream_info, "fake_audio.tmp", has_prior_error=True)
+            self.assertTrue(ok)
+            self.assertTrue(mock_recover.called)
 
 
 if __name__ == "__main__":

@@ -18,6 +18,14 @@ except Exception:
     def get_setting(k: str, d: Any = None) -> Any: return d  # type: ignore
 
 try:
+    from .media_env_helpers import _resolve_cookie_browser
+except Exception:
+    try:
+        from faqih_downloader.services.media_env_helpers import _resolve_cookie_browser
+    except Exception:
+        def _resolve_cookie_browser(b: Any) -> Optional[str]: return None
+
+try:
     import requests
 except ImportError:
     requests = None
@@ -270,7 +278,7 @@ def _translate_srt_cues_via_gtx(
 
         res = []
         for c in sub_items:
-            time.sleep(0.05)
+            time.sleep(0.15)
             single_trans = _query_gtx(str(c[2]))
             res.append((c[0], c[1], single_trans.strip() if single_trans else c[2]))
         return res
@@ -386,9 +394,9 @@ def download_subtitle_as_srt(sub_track: Dict[str, Any], video_filepath: str) -> 
                     "skip_download": True, "quiet": True, "no_warnings": True,
                     "outtmpl": os.path.join(tmp_dir, "%(id)s.%(ext)s"),
                 }
-                cb = get_setting("cookies_browser", "none") or "none"
-                if cb and cb.lower() not in ("none", "disabled", ""):
-                    ydl_opts["cookiesfrombrowser"] = (cb.lower(),)
+                cb = _resolve_cookie_browser(get_setting("cookies_browser", "none"))
+                if cb:
+                    ydl_opts["cookiesfrombrowser"] = (cb,)
                 if isinstance(sub_track.get("http_headers"), dict) and sub_track["http_headers"]:
                     ydl_opts["http_headers"] = sub_track["http_headers"]
 
