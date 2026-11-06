@@ -64,21 +64,28 @@ def extract_audio_tracks(info: Dict[str, Any]) -> List[Dict[str, Any]]:
             "filesize": None, "is_original": True, "http_headers": {},
         }]
 
+    max_pref = max((f.get("language_preference") for f in audio_formats if f.get("language_preference") is not None), default=-1)
     orig_lang = None
     for f in audio_formats:
         fn = str(f.get("format_note") or "").lower()
+        at_id = ""
         lang = str(f.get("language") or "").strip().lower()
-        if not lang and isinstance(f.get("audio_track"), dict):
+        if isinstance(f.get("audio_track"), dict):
             at = f["audio_track"]
-            lang = str(at.get("language") or "").strip().lower()
-            if not lang and at.get("id"):
-                lang = str(at.get("id")).split(".")[0].strip().lower()
+            if not lang:
+                lang = str(at.get("language") or "").strip().lower()
+            at_id = str(at.get("id") or "").lower()
+            if not lang and at_id:
+                lang = at_id.split(".")[0].strip().lower()
         pref = f.get("language_preference")
-        has_lang_pref = (pref if pref is not None else -1) >= 0
-        if "original" in fn or "default" in fn or has_lang_pref:
-            if lang:
-                orig_lang = lang
-                break
+        is_f_orig = (
+            "original" in fn or "default" in fn
+            or "original" in at_id or "default" in at_id
+            or (max_pref > 0 and pref == max_pref)
+        )
+        if is_f_orig and lang:
+            orig_lang = lang
+            break
     if not orig_lang:
         top_lang = str(info.get("language") or "").strip().lower()
         first_lang = ""
@@ -99,20 +106,23 @@ def extract_audio_tracks(info: Dict[str, Any]) -> List[Dict[str, Any]]:
         lang = str(f.get("language") or "").strip().lower()
         fn = str(f.get("format_note") or "").strip().lower()
         disp_name = ""
+        at_id = ""
         if isinstance(f.get("audio_track"), dict):
             at = f["audio_track"]
+            at_id = str(at.get("id") or "").lower()
             if not lang:
                 lang = str(at.get("language") or "").strip().lower()
-                if not lang and at.get("id"):
-                    lang = str(at.get("id")).split(".")[0].strip().lower()
+                if not lang and at_id:
+                    lang = at_id.split(".")[0].strip().lower()
             disp_name = str(at.get("display_name") or at.get("name") or "").strip()
 
         pref = f.get("language_preference")
-        has_lang_pref = (pref if pref is not None else -1) >= 0
         is_orig = (
             "original" in fn or "default" in fn
-            or has_lang_pref
-            or (orig_lang and lang == orig_lang) or (not lang and not orig_lang)
+            or "original" in at_id or "default" in at_id
+            or (max_pref > 0 and pref == max_pref)
+            or (orig_lang and lang == orig_lang and not any(tag in fn or tag in at_id for tag in ("dub", "dubbed", "descriptive")))
+            or (not lang and not orig_lang)
         )
         key = "original" if is_orig else (lang or next((c for c in LANG_NAMES if c in fn), "und"))
         groups.setdefault(key, []).append((f, disp_name))
@@ -146,11 +156,16 @@ def extract_audio_tracks(info: Dict[str, Any]) -> List[Dict[str, Any]]:
         else:
             label = f"{lang_code.upper()} - {int(abr)}kbps" if abr > 0 else lang_code.upper()
 
+        fs = best_f.get("filesize") or best_f.get("filesize_approx")
+        if not fs:
+            dur = float(info.get("duration") or 0)
+            fs = int((abr * 1000.0 / 8.0) * dur) if (abr > 0 and dur > 0) else None
+
         result.append({
             "track_id": key, "language": lang_code, "label": label,
             "format_id": str(best_f.get("format_id") or ""), "url": str(best_f.get("url") or ""),
             "ext": str(best_f.get("ext") or "m4a"), "acodec": str(best_f.get("acodec") or ""),
-            "abr": abr, "filesize": best_f.get("filesize") or best_f.get("filesize_approx"),
+            "abr": abr, "filesize": fs,
             "is_original": is_orig, "http_headers": dict(best_f.get("http_headers") or {}),
         })
 

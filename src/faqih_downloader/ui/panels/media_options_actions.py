@@ -269,6 +269,9 @@ class MediaOptionsActionsMixin:
 
     def _start_pending_media_download(self):
         """Starts media download directly using the selections made in the Main Window Media Bar."""
+        if hasattr(self, "_sync_media_bar_state"):
+            try: self._sync_media_bar_state()
+            except Exception: pass
         ctx = getattr(self, "_pending_media_context", None)
         if not ctx:
             return

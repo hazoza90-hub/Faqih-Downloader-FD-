@@ -510,15 +510,16 @@ class YouTubeResolver(YouTubeFormatBuilderMixin):
             c.append(output_path)
             return c
 
-        rc, primary_err = _run_proc(_build_cmd(["-c", "copy"]))
+        audio_incompatible = audio_path.lower().endswith((".webm", ".opus", ".ogg")) and output_path.lower().endswith((".mp4", ".m4v"))
+        rc, primary_err = (-1, "Incompatible container") if audio_incompatible else _run_proc(_build_cmd(["-c", "copy"]))
         if cancel_event and cancel_event.is_set(): return False
 
         if rc != 0:
             for enc_args, desc in [
-                (["-c:v", "copy", "-c:a", "aac", "-b:a", "192k"], "audio transcode to AAC"),
-                (["-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-b:a", "192k"], "container transcode (libx264+aac)"),
+                (["-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-af", "aresample=async=1:first_pts=0"], "audio transcode to AAC with timestamp resync"),
+                (["-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-b:a", "192k", "-af", "aresample=async=1:first_pts=0"], "container transcode (libx264+aac)"),
             ]:
-                if on_log: on_log(f"[FFMPEG] Direct stream copy failed ({rc}). Retrying with {desc}...")
+                if on_log: on_log(f"[FFMPEG] Direct copy inapplicable/failed ({rc}). Retrying with {desc}...")
                 rc, primary_err = _run_proc(_build_cmd(enc_args))
                 if (cancel_event and cancel_event.is_set()) or rc == 0: break
             if rc != 0:
@@ -535,13 +536,8 @@ class YouTubeResolver(YouTubeFormatBuilderMixin):
         if on_log: on_log(f"[FFMPEG SUCCESS] Merged file successfully created ({os.path.getsize(output_path):,} bytes).")
         return True
 
-    def extract_stream_info(self, url: str) -> Any:
-        """Alias returning resolved YouTubeStreamInfo from URL."""
-        return self.resolve(url)
-
-    def extract_info(self, url: str) -> Any:
-        """Alias returning resolved YouTubeStreamInfo from URL."""
-        return self.resolve(url)
+    def extract_stream_info(self, url: str) -> Any: return self.resolve(url)
+    def extract_info(self, url: str) -> Any: return self.resolve(url)
 
 # Backward-compatible alias for universal media resolution
 MediaResolver = YouTubeResolver

@@ -193,9 +193,79 @@ def find_ffmpeg_bin() -> Optional[str]:
 
 def has_ffmpeg() -> bool:
     """Checks whether FFmpeg executable is installed and reachable."""
-    ym = sys.modules.get("faqih_downloader.services.youtube_models")
-    finder = getattr(ym, "find_ffmpeg_bin", find_ffmpeg_bin) if ym else find_ffmpeg_bin
-    return finder() is not None
+    return find_ffmpeg_bin() is not None
+
+
+def probe_media_file_duration(file_path: str) -> float:
+    """Probes media file duration in seconds via FFmpeg stderr inspection."""
+    if not file_path or not os.path.isfile(file_path):
+        return 0.0
+    ffmpeg_bin = find_ffmpeg_bin()
+    if not ffmpeg_bin:
+        return 0.0
+    import subprocess, re
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if sys.platform.startswith("win") else 0
+    try:
+        res = subprocess.run([ffmpeg_bin, "-i", file_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, errors="replace", creationflags=flags)
+        m = re.search(r'Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)', res.stderr or "")
+        if m:
+            return int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3))
+    except Exception:
+        pass
+    return 0.0
+
+
+def recover_audio_stream_fallback(stream_info: Any, audio_tmp: str, on_log: Optional[Callable[[str], None]] = None) -> bool:
+    """Fallback audio downloader via yt_dlp directly to audio_tmp when stream is truncated."""
+    try:
+        import yt_dlp
+        from ..config import get_setting
+        cb = get_setting("cookies_browser", "none") or "none"
+        target_url = getattr(stream_info, "webpage_url", "") or ""
+        v_id = getattr(stream_info, "video_id", "")
+        if not target_url and v_id:
+            target_url = f"https://www.youtube.com/watch?v={v_id}"
+        if not target_url:
+            return False
+
+        lang = getattr(stream_info, "audio_language", None)
+        fmt_spec = f"bestaudio[language={lang}]/bestaudio" if lang else "bestaudio"
+        ydl_opts: Dict[str, Any] = {
+            "format": fmt_spec,
+            "outtmpl": audio_tmp,
+            "overwrites": True,
+            "quiet": True,
+            "no_warnings": True,
+        }
+        if cb and cb.lower() not in ("none", "disabled", ""):
+            ydl_opts["cookiesfrombrowser"] = (cb.lower(),)
+        if hasattr(stream_info, "audio_headers") and stream_info.audio_headers:
+            ydl_opts["http_headers"] = stream_info.audio_headers
+
+        if on_log:
+            on_log(f"[AUDIO FALLBACK] Downloading complete audio track ({lang or 'default'}) via yt-dlp...")
+        if os.path.exists(audio_tmp):
+            try: os.remove(audio_tmp)
+            except Exception: pass
+
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([target_url])
+
+        if not os.path.exists(audio_tmp):
+            d_dir = os.path.dirname(audio_tmp) or "."
+            b_name = os.path.basename(audio_tmp)
+            for f in os.listdir(d_dir):
+                if f.startswith(b_name) and os.path.isfile(os.path.join(d_dir, f)):
+                    shutil.move(os.path.join(d_dir, f), audio_tmp)
+                    break
+        ok = os.path.isfile(audio_tmp) and os.path.getsize(audio_tmp) > 1024
+        if on_log and ok:
+            on_log(f"[AUDIO FALLBACK SUCCESS] Full audio track restored ({os.path.getsize(audio_tmp):,} bytes)!")
+        return ok
+    except Exception as e:
+        if on_log:
+            on_log(f"[AUDIO FALLBACK FAILED] {e}")
+        return False
 
 
 __all__ = [
@@ -205,4 +275,6 @@ __all__ = [
     "update_ytdlp_engine",
     "find_ffmpeg_bin",
     "has_ffmpeg",
+    "probe_media_file_duration",
+    "recover_audio_stream_fallback",
 ]

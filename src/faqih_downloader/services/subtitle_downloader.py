@@ -5,11 +5,17 @@ Decomposed component of subtitle_processor (Stage 8.1 & Stage 9 SRP).
 import os
 import re
 import sys
+import time
 import html
 import json
 import urllib.request
 import urllib.parse
 from typing import Dict, List, Optional, Tuple, Any
+
+try:
+    from ..config import get_setting
+except Exception:
+    def get_setting(k: str, d: Any = None) -> Any: return d  # type: ignore
 
 try:
     import requests
@@ -194,7 +200,7 @@ def _translate_srt_cues_via_gtx(
     for cue in cues:
         cue_text = str(cue[2] if len(cue) >= 3 else "")
         added_len = len(cue_text) + len(sep)
-        if cur_batch and (cur_len + added_len > 2500):
+        if cur_batch and (cur_len + added_len > 1500 or len(cur_batch) >= 25):
             batches.append(cur_batch)
             cur_batch = [cue]
             cur_len = added_len
@@ -205,47 +211,72 @@ def _translate_srt_cues_via_gtx(
         batches.append(cur_batch)
 
     translated_cues: List[Tuple[float, float, str]] = []
+    post_url = f"https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl={t_lang}&dt=t"
+    post_headers = dict(headers)
+    post_headers["Content-Type"] = "application/x-www-form-urlencoded;charset=utf-8"
 
     def _query_gtx(text_chunk: str) -> str:
-        q = urllib.parse.quote(text_chunk)
-        url = f"https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl={t_lang}&dt=t&q={q}"
-        req = urllib.request.Request(url, headers=headers)
-        data = None
-        try:
-            import ssl
-            default_ctx = ssl.create_default_context()
-            with urllib.request.urlopen(req, timeout=10, context=default_ctx) as resp:
-                data = json.loads(resp.read().decode("utf-8", errors="replace"))
-        except (ssl.SSLError, urllib.error.URLError, Exception):
+        if not text_chunk or not text_chunk.strip():
+            return ""
+        post_data = urllib.parse.urlencode({"q": text_chunk}).encode("utf-8")
+        for attempt in range(3):
             try:
+                req = urllib.request.Request(post_url, data=post_data, headers=post_headers)
                 import ssl
-                ctx = ssl._create_unverified_context() if hasattr(ssl, "_create_unverified_context") else None
-                with urllib.request.urlopen(req, timeout=10, context=ctx) as resp:
-                    data = json.loads(resp.read().decode("utf-8", errors="replace"))
+                default_ctx = ssl.create_default_context()
+                with urllib.request.urlopen(req, timeout=12, context=default_ctx) as resp:
+                    raw = resp.read().decode("utf-8", errors="replace")
+                    data = json.loads(raw)
+                    if isinstance(data, list) and data and isinstance(data[0], list):
+                        return "".join(part[0] for part in data[0] if part and len(part) > 0 and part[0])
+                    return ""
             except Exception:
+                if attempt < 2:
+                    time.sleep(0.2 * (attempt + 1))
+                    continue
+                try:
+                    import ssl
+                    ctx = ssl._create_unverified_context() if hasattr(ssl, "_create_unverified_context") else None
+                    req = urllib.request.Request(post_url, data=post_data, headers=post_headers)
+                    with urllib.request.urlopen(req, timeout=12, context=ctx) as resp:
+                        raw = resp.read().decode("utf-8", errors="replace")
+                        data = json.loads(raw)
+                        if isinstance(data, list) and data and isinstance(data[0], list):
+                            return "".join(part[0] for part in data[0] if part and len(part) > 0 and part[0])
+                except Exception:
+                    pass
                 return ""
-        if isinstance(data, list) and data and isinstance(data[0], list):
-            return "".join(part[0] for part in data[0] if part and len(part) > 0 and part[0])
         return ""
 
-    for batch in batches:
-        chunk = sep.join(str(c[2]) for c in batch)
+    def _translate_sub_batch(sub_items: List[Tuple[float, float, str]]) -> List[Tuple[float, float, str]]:
+        if not sub_items:
+            return []
+        time.sleep(0.15)
+        chunk = sep.join(str(c[2]) for c in sub_items)
         try:
             full_trans = _query_gtx(chunk)
             parts = re.split(r'\s*\|\|\|\s*', full_trans) if full_trans else []
-            if len(parts) == len(batch):
-                for i, c in enumerate(batch):
-                    translated_cues.append((c[0], c[1], parts[i].strip()))
-                continue
+            if len(parts) == len(sub_items):
+                return [(c[0], c[1], parts[i].strip()) for i, c in enumerate(sub_items)]
         except Exception:
             pass
 
-        for c in batch:
-            try:
-                single_trans = _query_gtx(str(c[2]))
-                translated_cues.append((c[0], c[1], single_trans.strip() if single_trans else c[2]))
-            except Exception:
-                translated_cues.append((c[0], c[1], c[2]))
+        # Split mismatch batch into smaller sub-batches of 5 sentences
+        if len(sub_items) > 5:
+            res: List[Tuple[float, float, str]] = []
+            for i in range(0, len(sub_items), 5):
+                res.extend(_translate_sub_batch(sub_items[i:i + 5]))
+            return res
+
+        res = []
+        for c in sub_items:
+            time.sleep(0.05)
+            single_trans = _query_gtx(str(c[2]))
+            res.append((c[0], c[1], single_trans.strip() if single_trans else c[2]))
+        return res
+
+    for batch in batches:
+        translated_cues.extend(_translate_sub_batch(batch))
 
     return translated_cues
 
@@ -355,6 +386,9 @@ def download_subtitle_as_srt(sub_track: Dict[str, Any], video_filepath: str) -> 
                     "skip_download": True, "quiet": True, "no_warnings": True,
                     "outtmpl": os.path.join(tmp_dir, "%(id)s.%(ext)s"),
                 }
+                cb = get_setting("cookies_browser", "none") or "none"
+                if cb and cb.lower() not in ("none", "disabled", ""):
+                    ydl_opts["cookiesfrombrowser"] = (cb.lower(),)
                 if isinstance(sub_track.get("http_headers"), dict) and sub_track["http_headers"]:
                     ydl_opts["http_headers"] = sub_track["http_headers"]
 

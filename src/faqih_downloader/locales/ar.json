@@ -340,6 +340,7 @@
   "vault_deselect_all": "إلغاء التحديد",
   "vault_no_unregistered_files": "لم يتم العثور على ملفات غير مسجلة في المجلد",
   "staged_btn_start": "▶ ابدأ التحميل",
+  "staged_btn_quality": "⚙ خيارات / الجودة",
   "staged_btn_info": "ℹ معلومات",
   "staged_btn_remove": "✕ إزالة",
   "ctx_file_info": "ℹ معلومات الملف والرابط",

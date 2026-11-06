@@ -96,19 +96,22 @@ def _start_staged_download(gui: Any, item_or_url: Any) -> None:
             if speed_limit > 0:
                 gui.entry_custom_speed.insert(0, str(int(speed_limit / 1024.0)))
 
-        # Set media context AFTER updating URL entries so _on_url_change does not wipe it
-        if info.get("media_context"):
+        # Ensure latest choices from main media bar are read if this is the active media URL
+        cur_ctx = getattr(gui, "_pending_media_context", None)
+        if isinstance(cur_ctx, dict) and cur_ctx.get("url") == url:
+            if hasattr(gui, "_sync_media_bar_state"):
+                try: gui._sync_media_bar_state()
+                except Exception: pass
+        elif info.get("media_context"):
             gui._pending_media_context = dict(info["media_context"])
         elif info.get("selected_opt") is not None:
-            cur_pending = getattr(gui, "_pending_media_context", None)
-            if not cur_pending or cur_pending.get("url") != url:
-                gui._pending_media_context = {
-                    "url": url,
-                    "info": info.get("stream_info") if isinstance(info.get("stream_info"), dict) else {},
-                    "selected_option": info.get("selected_opt"),
-                    "selected_opt": info.get("selected_opt"),
-                    "final_dest": dest
-                }
+            gui._pending_media_context = {
+                "url": url,
+                "info": info.get("stream_info") if isinstance(info.get("stream_info"), dict) else {},
+                "selected_option": info.get("selected_opt"),
+                "selected_opt": info.get("selected_opt"),
+                "final_dest": dest
+            }
 
         if hasattr(gui, "remove_staged_link"):
             gui.remove_staged_link(url)

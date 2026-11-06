@@ -59,6 +59,7 @@ class MediaOptionsBarMixin(MediaOptionsActionsMixin):
         self.btn_main_preview.pack(side=tk.RIGHT, padx=(4, 0))
         self.btn_reopen_quality = tk.Button(row1, text=tr("btn_media_quality_options", "⚙ Options..."), font=("Segoe UI", 8, "bold"), bg=self.c_panel_light, fg=self.c_accent, relief="flat", activebackground=self.c_accent_dark, activeforeground="white", cursor="hand2", padx=8, pady=2, command=self._reopen_media_quality_modal)
         self.btn_reopen_quality.pack(side=tk.RIGHT, padx=(0, 4))
+        self.btn_main_advanced = self.btn_reopen_quality
 
         # Row 2: Subtitles (Combobox), Subtitle Delivery Mode (Combobox), Subtitle Position (Combobox)
         row2 = tk.Frame(self.media_options_frame, bg=self.c_panel)
@@ -121,7 +122,12 @@ class MediaOptionsBarMixin(MediaOptionsActionsMixin):
         self._last_media_context = dict(self._pending_media_context)
         self._cache_media_context(media_url, self._pending_media_context)
 
-        # Show frame in layout
+        # Show host frame and options frame directly under top header
+        if hasattr(self, "media_bar_host") and self.media_bar_host:
+            if hasattr(self, "kanban_container") and self.kanban_container:
+                self.media_bar_host.pack(fill=tk.X, before=self.kanban_container, padx=10, pady=2)
+            else:
+                self.media_bar_host.pack(fill=tk.X, padx=10, pady=2)
         self.media_options_frame.pack(fill=tk.X, pady=(4, 2))
 
         # 1. Populate Quality Combobox
@@ -174,50 +180,95 @@ class MediaOptionsBarMixin(MediaOptionsActionsMixin):
         pos_st = "readonly" if sub_idx > 0 else "disabled"
         if hasattr(self, "cb_main_sub_pos") and self.cb_main_sub_pos: self.cb_main_sub_pos.configure(state=pos_st)
 
+        # Synchronize context and column 1 card immediately
+        self._sync_media_bar_state()
+
     def hide_main_media_bar(self):
         """Hides the Media Settings Bar frame when switching to non-media URLs."""
         if hasattr(self, "media_options_frame"):
+            try: self.media_options_frame.pack_forget()
+            except Exception: pass
+        if hasattr(self, "media_bar_host") and self.media_bar_host:
+            try: self.media_bar_host.pack_forget()
+            except Exception: pass
+
+    def _sync_media_bar_state(self, event=None):
+        """Synchronizes dropdown selections with _pending_media_context and the Column 1 Kanban card."""
+        ctx = getattr(self, "_pending_media_context", None)
+        if not isinstance(ctx, dict):
+            return
+
+        opts = getattr(self, "_main_media_options", []) or ctx.get("options") or []
+        q_idx = self.cb_main_quality.current() if hasattr(self, "cb_main_quality") else -1
+        opt = opts[q_idx] if (0 <= q_idx < len(opts)) else (ctx.get("selected_option") or ctx.get("selected_opt"))
+
+        # Audio track
+        audios = getattr(self, "_main_audio_tracks", []) or ctx.get("audio_tracks") or []
+        a_idx = self.cb_main_audio.current() if hasattr(self, "cb_main_audio") else -1
+        if opt and 0 <= a_idx < len(audios):
+            opt.selected_audio_track = audios[a_idx]
+            ctx["selected_audio_track"] = audios[a_idx]
+
+        # Subtitle track
+        subs = getattr(self, "_main_subtitle_tracks", []) or ctx.get("subtitle_tracks") or []
+        s_idx = self.cb_main_sub.current() if hasattr(self, "cb_main_sub") else -1
+        if opt:
+            if 0 < s_idx < len(subs):
+                opt.selected_subtitle_track = subs[s_idx]
+                ctx["selected_subtitle_track"] = subs[s_idx]
+            else:
+                opt.selected_subtitle_track = None
+                ctx["selected_subtitle_track"] = None
+
+        # Subtitle mode
+        m_idx = self.cb_main_sub_mode.current() if hasattr(self, "cb_main_sub_mode") else 0
+        sub_mode = self._main_sub_mode_codes[m_idx] if (0 <= m_idx < len(self._main_sub_mode_codes)) else "soft_embed"
+        if opt:
+            opt.subtitle_embed_mode = sub_mode
+            ctx["subtitle_embed_mode"] = sub_mode
+
+        # Subtitle position
+        p_idx = self.cb_main_sub_pos.current() if hasattr(self, "cb_main_sub_pos") else 0
+        sub_pos = self._main_sub_pos_codes[p_idx] if (hasattr(self, "_main_sub_pos_codes") and 0 <= p_idx < len(self._main_sub_pos_codes)) else "bottom"
+        if opt:
+            opt.subtitle_position = sub_pos
+            ctx["subtitle_position"] = sub_pos
+
+        ctx["selected_option"] = opt
+        ctx["selected_opt"] = opt
+
+        # Update destination path filename tags
+        cur_dest = self.entry_dest.get().strip() if hasattr(self, "entry_dest") else ""
+        if cur_dest and opt:
+            is_sub_burned = (sub_mode == "hard_burn")
+            updated_dest = apply_media_filename_tags(cur_dest, quality_label=opt.resolution_label, is_sub_burned=is_sub_burned, ext=opt.ext)
+            if hasattr(self, "entry_dest") and updated_dest != cur_dest:
+                self.entry_dest.delete(0, tk.END)
+                self.entry_dest.insert(0, updated_dest)
+            ctx["final_dest"] = updated_dest
+
+        # Reflect updated options into Column 1 staged card
+        u = ctx.get("url")
+        staged = getattr(self, "_staged_links", [])
+        if u and any(it.get("url") == u for it in staged):
             try:
-                self.media_options_frame.pack_forget()
+                from faqih_downloader.ui.panels.kanban_staged_helpers import stage_media_option_in_col1
+                raw_title = ctx.get("raw_title") or (ctx.get("info", {}).get("title") if isinstance(ctx.get("info"), dict) else "")
+                dur = ctx.get("duration") or (ctx.get("info", {}).get("duration") if isinstance(ctx.get("info"), dict) else 0) or 0
+                stage_media_option_in_col1(self, u, raw_title, opt, ctx.get("final_dest", "") or cur_dest, dur)
             except Exception:
                 pass
 
     def _on_main_quality_changed(self, event=None):
         """Dynamically updates destination filename extension and quality tag when user picks a different quality."""
-        if not getattr(self, "_main_media_options", None):
-            return
-        idx = self.cb_main_quality.current()
-        if 0 <= idx < len(self._main_media_options):
-            opt = self._main_media_options[idx]
-            if event is not None:
-                h = getattr(opt, "height", 0) or 0
+        if getattr(self, "_main_media_options", None) and hasattr(self, "cb_main_quality"):
+            idx = self.cb_main_quality.current()
+            if 0 <= idx < len(self._main_media_options) and event is not None:
+                h = getattr(self._main_media_options[idx], "height", 0) or 0
                 if h > 0:
                     try: set_setting("preferred_video_height", h)
                     except Exception: pass
-            cur = self.entry_dest.get().strip()
-            updated = cur
-            if cur:
-                sub_mode = "soft_embed"
-                if hasattr(self, "cb_main_sub_mode") and hasattr(self, "_main_sub_mode_codes"):
-                    m_idx = self.cb_main_sub_mode.current()
-                    if 0 <= m_idx < len(self._main_sub_mode_codes):
-                        sub_mode = self._main_sub_mode_codes[m_idx]
-                updated = apply_media_filename_tags(cur, quality_label=opt.resolution_label, is_sub_burned=(sub_mode == "hard_burn"), ext=opt.ext)
-                self.entry_dest.delete(0, tk.END); self.entry_dest.insert(0, updated)
-
-            pending = getattr(self, "_pending_media_context", None)
-            if isinstance(pending, dict):
-                pending["selected_option"], pending["selected_opt"] = opt, opt
-                if updated: pending["final_dest"] = updated
-                u = pending.get("url")
-                staged = getattr(self, "_staged_links", [])
-                if u and any(it.get("url") == u for it in staged):
-                    try:
-                        from faqih_downloader.ui.panels.kanban_staged_helpers import stage_media_option_in_col1
-                        raw_title = pending.get("raw_title") or (pending.get("info", {}).get("title") if isinstance(pending.get("info"), dict) else "")
-                        dur = pending.get("duration") or (pending.get("info", {}).get("duration") if isinstance(pending.get("info"), dict) else 0) or 0
-                        stage_media_option_in_col1(self, u, raw_title, opt, updated or pending.get("final_dest", ""), dur)
-                    except Exception: pass
+        self._sync_media_bar_state(event)
 
     def _on_main_audio_changed(self, event=None):
         """Persists preferred audio language when user selects a different audio track."""
@@ -229,17 +280,21 @@ class MediaOptionsBarMixin(MediaOptionsActionsMixin):
                 if lang:
                     try: set_setting("preferred_audio_lang", lang)
                     except Exception: pass
+        self._sync_media_bar_state(event)
 
     def _on_main_sub_changed(self, event=None):
         """Enables or disables subtitle mode combobox based on selected subtitle."""
         idx = self.cb_main_sub.current()
         has_s = len(getattr(self, "_main_subtitle_tracks", [])) > 1
-        self.cb_main_sub_mode.configure(state="readonly" if has_s else "disabled")
-        self.cb_main_sub_pos.configure(state="readonly" if idx > 0 else "disabled")
-        if event is not None:
+        if hasattr(self, "cb_main_sub_mode"):
+            self.cb_main_sub_mode.configure(state="readonly" if has_s else "disabled")
+        if hasattr(self, "cb_main_sub_pos"):
+            self.cb_main_sub_pos.configure(state="readonly" if idx > 0 else "disabled")
+        if event is not None and getattr(self, "_main_subtitle_tracks", None):
             lang = self._main_subtitle_tracks[idx].get("language") if (0 < idx < len(self._main_subtitle_tracks)) else "none"
             try: set_setting("preferred_subtitle_lang", lang or "none")
             except Exception: pass
+        self._sync_media_bar_state(event)
 
     def _on_main_sub_mode_changed(self, event=None):
         """Saves chosen mode, auto-selects Arabic/first subtitle track if None, and reflects [Sub] tag."""
@@ -255,14 +310,7 @@ class MediaOptionsBarMixin(MediaOptionsActionsMixin):
             self.cb_main_sub.current(target_idx)
             self.cb_main_sub_mode.configure(state="readonly")
             self.cb_main_sub_pos.configure(state="readonly")
-        cur = self.entry_dest.get().strip()
-        if cur and getattr(self, "_main_media_options", None):
-            q_idx = self.cb_main_quality.current() if hasattr(self, "cb_main_quality") else 0
-            opt = self._main_media_options[q_idx] if (0 <= q_idx < len(self._main_media_options)) else None
-            ql = opt.resolution_label if opt else None
-            ext = opt.ext if opt else None
-            updated = apply_media_filename_tags(cur, quality_label=ql, is_sub_burned=(chosen == "hard_burn"), ext=ext)
-            self.entry_dest.delete(0, tk.END); self.entry_dest.insert(0, updated)
+        self._sync_media_bar_state(event)
 
     def _on_main_sub_pos_changed(self, event=None):
         """Persists selected subtitle position."""
@@ -272,6 +320,7 @@ class MediaOptionsBarMixin(MediaOptionsActionsMixin):
             if event is not None:
                 try: set_setting("subtitle_position", pos)
                 except Exception: pass
+        self._sync_media_bar_state(event)
 
 
 __all__ = ["MediaOptionsBarMixin", "MediaOptionsActionsMixin"]

@@ -46,6 +46,10 @@ def show_staged_context_menu(event: Any, info: Dict[str, Any], root: Any, callba
     menu = tk.Menu(root, tearoff=0, bg="#151a24", fg="#f8fafc", activebackground="#19f3ee", activeforeground="#0b0e14", activeborderwidth=0, bd=1, relief="flat", font=("Segoe UI", 9))
     url = info.get("url", "")
     menu.add_command(label=tr("staged_btn_start", "▶ Start Download"), command=lambda: callbacks.get("start", lambda i: None)(info))
+    category = info.get("category", "")
+    is_media = bool(info.get("media_context") or str(category).lower() in ("video", "audio") or info.get("selected_opt"))
+    if is_media and "quality" in callbacks:
+        menu.add_command(label=tr("staged_btn_quality", "⚙ Quality & Dub"), command=lambda: callbacks.get("quality", lambda i: None)(info))
     menu.add_command(label=tr("ctx_file_info", "ℹ File & Link Info"), command=lambda: callbacks.get("info", lambda i: None)(info))
     def _copy_url():
         if url and root:
@@ -72,10 +76,11 @@ def build_staged_link_card(parent: Any, info: Dict[str, Any], callbacks: Dict[st
     is_ar = (tr("locale_lang", "") == "ar" or tr("app_title", "").startswith("فقيه"))
     pad_side = tk.RIGHT if is_ar else tk.LEFT
     opp_side = tk.LEFT if is_ar else tk.RIGHT
+    is_media = bool(info.get("media_context") or str(category).lower() in ("video", "audio") or info.get("selected_opt"))
 
     card = RoundedGlassCard(
         parent, radius=12, bg="#0b0e14", card_bg="#151a24", border_color="#283548",
-        height=134, inner_padx=12, inner_pady=10
+        height=138, inner_padx=12, inner_pady=10
     )
     card.pack(fill=tk.X, pady=(0, 10))
 
@@ -84,9 +89,29 @@ def build_staged_link_card(parent: Any, info: Dict[str, Any], callbacks: Dict[st
     tk.Label(top_row, text=_truncate_title(file_name, 28), font=("Segoe UI", 9, "bold"), bg="#151a24", fg="#f8fafc").pack(side=pad_side)
     tk.Label(top_row, text=badge, font=("Segoe UI", 8, "bold"), bg="#0284c7", fg="#ffffff", padx=6, pady=1).pack(side=opp_side)
 
-    # Second Row: Size, Category, Resume
+    # Second Row: Size, Category, Audio/Sub Status, Resume
     meta_row = tk.Frame(card.inner, bg="#151a24"); meta_row.pack(fill=tk.X, pady=(3, 0))
-    tk.Label(meta_row, text=f"{_format_size(file_size)}  •  {str(category).capitalize()}", font=("Segoe UI", 8), bg="#151a24", fg="#94a3b8").pack(side=pad_side)
+    if is_media:
+        opt = info.get("selected_opt")
+        if not opt and isinstance(info.get("media_context"), dict):
+            opt = info["media_context"].get("selected_option") or info["media_context"].get("selected_opt")
+        audio_lbl, sub_lbl = "", ""
+        if opt:
+            at = getattr(opt, "selected_audio_track", None)
+            if isinstance(at, dict):
+                a_name = at.get("language_label") or at.get("label") or at.get("language", "")
+                audio_lbl = a_name.split(" - ")[0].strip() if " - " in a_name else a_name.strip()
+            st = getattr(opt, "selected_subtitle_track", None)
+            if isinstance(st, dict):
+                s_name = st.get("language_label") or st.get("label") or st.get("language", "")
+                sub_lbl = s_name.split(" - ")[0].strip() if " - " in s_name else s_name.strip()
+                if getattr(opt, "subtitle_embed_mode", "") == "hard_burn":
+                    sub_lbl += " (Burn)"
+        parts = [p for p in [badge, f"🔊 {audio_lbl}" if audio_lbl else "", f"💬 {sub_lbl}" if sub_lbl else "", _format_size(file_size)] if p]
+        desc_txt = " • ".join(parts) if parts else f"{_format_size(file_size)} • {str(category).capitalize()}"
+        tk.Label(meta_row, text=desc_txt, font=("Segoe UI", 8), bg="#151a24", fg="#94a3b8").pack(side=pad_side)
+    else:
+        tk.Label(meta_row, text=f"{_format_size(file_size)}  •  {str(category).capitalize()}", font=("Segoe UI", 8), bg="#151a24", fg="#94a3b8").pack(side=pad_side)
     res_txt = tr("info_resumable", "✓ Resumable") if supports_resume else tr("info_not_resumable", "✕ Non-resumable")
     tk.Label(meta_row, text=res_txt, font=("Segoe UI", 8), bg="#151a24", fg=("#22c55e" if supports_resume else "#ef4444")).pack(side=opp_side)
 
@@ -102,9 +127,18 @@ def build_staged_link_card(parent: Any, info: Dict[str, Any], callbacks: Dict[st
         relief="flat", bd=0, cursor="hand2", padx=10, pady=3,
         command=lambda: callbacks.get("start", lambda i: None)(info)
     ).pack(side=pad_side, padx=(0, 6) if not is_ar else (6, 0))
+
+    if is_media and "quality" in callbacks:
+        tk.Button(
+            btn_row, text=tr("staged_btn_quality", "⚙ Quality & Dub"), font=("Segoe UI", 8, "bold"),
+            bg="#1e293b", fg="#38bdf8", activebackground="#0284c7", activeforeground="#ffffff",
+            relief="flat", bd=0, cursor="hand2", padx=8, pady=3,
+            command=lambda: callbacks.get("quality", lambda i: None)(info)
+        ).pack(side=pad_side, padx=(0, 6) if not is_ar else (6, 0))
+
     tk.Button(
         btn_row, text=tr("staged_btn_info", "ℹ Info"), font=("Segoe UI", 8, "bold"),
-        bg="#1e293b", fg="#38bdf8", activebackground="#0284c7", activeforeground="#ffffff",
+        bg="#1e293b", fg="#94a3b8", activebackground="#0284c7", activeforeground="#ffffff",
         relief="flat", bd=0, cursor="hand2", padx=8, pady=3,
         command=lambda: callbacks.get("info", lambda i: None)(info)
     ).pack(side=pad_side, padx=(0, 6) if not is_ar else (6, 0))
@@ -140,8 +174,36 @@ def render_col1_staged_cards(
         if hasattr(gui, "remove_staged_link"):
             gui.remove_staged_link(url)
 
+    def _on_quality(info: Dict[str, Any]):
+        url = info.get("url", "")
+        dest = info.get("final_dest", "")
+        if hasattr(gui, "entry_url") and gui.entry_url and url:
+            gui.entry_url.delete(0, tk.END); gui.entry_url.insert(0, url)
+        if hasattr(gui, "entry_dest") and gui.entry_dest and dest:
+            gui.entry_dest.delete(0, tk.END); gui.entry_dest.insert(0, dest)
+        if info.get("media_context"):
+            gui._pending_media_context = dict(info["media_context"])
+        elif info.get("selected_opt") is not None:
+            gui._pending_media_context = {
+                "url": url,
+                "info": info.get("stream_info") if isinstance(info.get("stream_info"), dict) else {},
+                "selected_option": info.get("selected_opt"),
+                "selected_opt": info.get("selected_opt"),
+                "final_dest": dest,
+            }
+        ctx = getattr(gui, "_pending_media_context", None)
+        if hasattr(gui, "populate_main_media_bar") and ctx and ctx.get("options"):
+            gui.populate_main_media_bar(
+                ctx.get("info"), ctx.get("options"), ctx.get("audio_tracks", []),
+                ctx.get("subtitle_tracks", []), selected_option=ctx.get("selected_option"),
+                url=url, dest=dest
+            )
+        if hasattr(gui, "_reopen_media_quality_modal"):
+            gui._reopen_media_quality_modal()
+
     callbacks = {
         "start": lambda item: getattr(sys.modules.get("faqih_downloader.ui.panels.kanban_staged_helpers"), "_start_staged_download", _start_staged_download)(gui, item),
+        "quality": _on_quality,
         "info": _on_info,
         "remove": _on_remove
     }

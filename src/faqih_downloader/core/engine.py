@@ -254,11 +254,8 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
                             ar = resp.headers.get("Accept-Ranges", "").lower()
                             self.total_size = int(cl) if cl and cl.isdigit() else 0
                             self.supports_ranges = (ar == "bytes") and (self.total_size > 0)
-
-                            cd = resp.headers.get("Content-Disposition", "")
-                            cd_fn = self._parse_filename_from_cd(cd)
-                            if cd_fn:
-                                self.filename = cd_fn
+                            cd_fn = self._parse_filename_from_cd(resp.headers.get("Content-Disposition", ""))
+                            if cd_fn: self.filename = cd_fn
                     except ValueError:
                         raise
                     except Exception as e_plain:
@@ -268,6 +265,17 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
                                 self.has_expired_link = True
                                 self.last_http_status = e_plain.code
                         raise RuntimeError(f"Connection failed: {e_plain}")
+
+        # Additional defense for googlevideo.com streams: extract clen query parameter if total_size is missing
+        if (self.is_googlevideo or "googlevideo.com" in self.url) and self.total_size <= 0:
+            try:
+                q_map = urllib.parse.parse_qs(urllib.parse.urlsplit(self.url).query)
+                clen = q_map.get("clen")
+                if clen and clen[0].isdigit():
+                    self.total_size = int(clen[0])
+                    self.supports_ranges = True
+            except Exception:
+                pass
 
         if self.is_googlevideo and self.total_size > 0:
             self.supports_ranges = True
@@ -525,16 +533,13 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
             speed_str = f"{avg_speed / (1024*1024):.2f} MB/s" if avg_speed >= 1024*1024 else f"{avg_speed / 1024:.1f} KB/s"
             self.log(f"[SUCCESS] Download finished successfully in {elapsed:.1f}s (Average Speed: {speed_str})!")
             self.is_running = False
-            if self.on_complete:
-                self.on_complete(self.destination_path, self.total_size, elapsed)
+            if self.on_complete: self.on_complete(self.destination_path, self.total_size, elapsed)
         except Exception as e:
             self.is_running = False
             self.log(f"[ERROR] {e}")
-            if self.on_error:
-                self.on_error(str(e))
+            if self.on_error: self.on_error(str(e))
         finally:
             self.is_running = False
-            if self._cancel_event.is_set():
-                self.cleanup_temp_files()
+            if self._cancel_event.is_set(): self.cleanup_temp_files()
 
 __all__ = ["TurboDownloadEngine", "EngineWorkersMixin"]

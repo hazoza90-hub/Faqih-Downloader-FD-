@@ -28,17 +28,10 @@ from ..services.youtube_service import (
 class StreamDownloadCoordinator:
     """Coordinates multi-part YouTube & media stream downloads, dynamic chunking, and FFmpeg multiplexing."""
     def __init__(
-        self,
-        stream_info: YouTubeStreamInfo,
-        destination_path: str,
-        max_connections: int = 8,
-        rate_limit_bytes_per_sec: float = 0.0,
-        ssl_context: Optional[ssl.SSLContext] = None,
-        on_progress: Optional[Callable] = None,
-        on_chunk_update: Optional[Callable] = None,
-        on_log: Optional[Callable] = None,
-        on_complete: Optional[Callable] = None,
-        on_error: Optional[Callable] = None
+        self, stream_info: YouTubeStreamInfo, destination_path: str, max_connections: int = 8,
+        rate_limit_bytes_per_sec: float = 0.0, ssl_context: Optional[ssl.SSLContext] = None,
+        on_progress: Optional[Callable] = None, on_chunk_update: Optional[Callable] = None,
+        on_log: Optional[Callable] = None, on_complete: Optional[Callable] = None, on_error: Optional[Callable] = None
     ):
         self.stream_info = stream_info
         self.destination_path = destination_path
@@ -46,11 +39,8 @@ class StreamDownloadCoordinator:
         self._requested_max_connections = self.max_connections
         self.rate_limit = rate_limit_bytes_per_sec
         self.ssl_context = ssl_context
-        self.on_progress = on_progress
-        self.on_chunk_update = on_chunk_update
-        self.on_log = on_log
-        self.on_complete = on_complete
-        self.on_error = on_error
+        self.on_progress, self.on_chunk_update, self.on_log = on_progress, on_chunk_update, on_log
+        self.on_complete, self.on_error = on_complete, on_error
 
         # YouTube googlevideo CDN detection
         self.is_youtube_stream = (
@@ -81,10 +71,8 @@ class StreamDownloadCoordinator:
 
     def log(self, msg: str):
         if self.on_log:
-            try:
-                self.on_log(msg)
-            except Exception:
-                pass
+            try: self.on_log(msg)
+            except Exception: pass
 
     @property
     def chunks(self) -> List[DownloadChunk]:
@@ -478,8 +466,7 @@ class StreamDownloadCoordinator:
                             w.join(timeout=0.15)
 
             if self._cancel_event.is_set():
-                v_engine.cancel(); a_engine.cancel(); _drain_workers()
-                return
+                v_engine.cancel(); a_engine.cancel(); _drain_workers(); return
             if v_error:
                 a_engine.cancel(); _drain_workers()
                 raise RuntimeError(f"Video stream download error: {v_error[0]}")
@@ -489,13 +476,27 @@ class StreamDownloadCoordinator:
 
             # 3. Merge Phase via FFmpeg
             self._active_phase = 3
-            with self._lock:
-                self._active_engines.clear()
+            with self._lock: self._active_engines.clear()
             combined_total = max(1, self._v_total_size + self._a_total_size)
             st = self.start_time; el = (time.time() - st) if (isinstance(st, (int, float)) and st > 0) else 0.1
             rep_spd = self._last_active_speed if self._last_active_speed > 0 else (combined_total / max(0.05, el))
             if self.on_progress:
                 self.on_progress(combined_total, combined_total, rep_spd, "Merging...", 0)
+
+            # Validate audio integrity for long media streams
+            if getattr(self.stream_info, "duration", 0) > 15:
+                try:
+                    from ..services.media_env_helpers import probe_media_file_duration, recover_audio_stream_fallback
+                    a_dur = probe_media_file_duration(audio_tmp)
+                    exp_dur = float(self.stream_info.duration)
+                    exp_sz = getattr(self.stream_info, "audio_size", 0) or 0
+                    cur_sz = os.path.getsize(audio_tmp) if os.path.isfile(audio_tmp) else 0
+                    is_trunc = (a_dur > 0 and a_dur < (0.85 * exp_dur)) or (a_dur == 0 and exp_sz > 0 and cur_sz < (0.85 * exp_sz)) or (cur_sz < 1024)
+                    if is_trunc:
+                        self.log(f"[{tag}] Audio stream incomplete ({cur_sz:,} bytes). Triggering yt-dlp fallback...")
+                        recover_audio_stream_fallback(self.stream_info, audio_tmp, on_log=self.log)
+                except Exception:
+                    pass
 
             self.log(f"[{tag}] Phase 2/2: Merging video and audio streams into final container...")
             YouTubeResolver.merge_video_audio(video_tmp, audio_tmp, self.destination_path, on_log=self.log, cancel_event=self._cancel_event)
@@ -504,8 +505,7 @@ class StreamDownloadCoordinator:
             elapsed = max(0.01, time.time() - self.start_time)
             final_size = os.path.getsize(self.destination_path) if os.path.isfile(self.destination_path) else combined_total
             self.log(f"[SUCCESS] {plat} media assembled & merged successfully ({final_size:,} bytes in {elapsed:.1f}s)!")
-            with self._lock:
-                self._is_running = False
+            with self._lock: self._is_running = False
             if self.on_complete:
                 self.on_complete(self.destination_path, final_size, elapsed)
 
@@ -516,8 +516,7 @@ class StreamDownloadCoordinator:
             with self._lock: self._is_running = False
             if self.on_error: self.on_error(str(e))
         finally:
-            with self._lock:
-                self._is_running = False
+            with self._lock: self._is_running = False
             # Cleanly remove temporary part files on cancel or error
             if self._cancel_event.is_set() or has_error or v_error or a_error:
                 clean_targets = [p for p in (video_tmp, audio_tmp, actual_dest if is_mp3_request else "") if p]

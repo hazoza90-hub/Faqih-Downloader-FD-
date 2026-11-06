@@ -340,6 +340,7 @@
   "vault_deselect_all": "Deselect All",
   "vault_no_unregistered_files": "No unregistered files found on disk",
   "staged_btn_start": "▶ Start Download",
+  "staged_btn_quality": "⚙ Quality & Dub",
   "staged_btn_info": "ℹ Info",
   "staged_btn_remove": "✕ Remove",
   "ctx_file_info": "ℹ File & Link Info",

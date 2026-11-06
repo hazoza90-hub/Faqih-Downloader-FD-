@@ -396,6 +396,11 @@ class ModernFramelessGUI(
         # 1. Unified Top Navigation Header (Cloud Icon, Brand, URL + Paste, Save to, Download, Settings, Lang)
         self._build_unified_header_bar(self.container)
 
+        # Media options bar host frame (Quality, Dubbing, Subtitles)
+        self.media_bar_host = tk.Frame(self.container, bg="#0b0e14", padx=10, pady=2)
+        if hasattr(self, "_build_media_options_bar"):
+            self._build_media_options_bar(self.media_bar_host)
+
         # 2. 3-Column Kanban Pipeline Workspace
         self._build_kanban_pipeline(self.container)
 
@@ -435,11 +440,8 @@ def main():
         os._exit(0)
 
     # CLI handler for Chrome/Edge Native Messaging Host execution
-    if (
-        "--native-host" in sys.argv
-        or "--native-messaging-host" in sys.argv
-        or any(arg.startswith("chrome-extension://") or arg.startswith("edge-extension://") for arg in sys.argv[1:])
-    ):
+    if ("--native-host" in sys.argv or "--native-messaging-host" in sys.argv
+            or any(arg.startswith("chrome-extension://") or arg.startswith("edge-extension://") for arg in sys.argv[1:])):
         try:
             from ..services.browser.native_host import run_host
         except ImportError:
