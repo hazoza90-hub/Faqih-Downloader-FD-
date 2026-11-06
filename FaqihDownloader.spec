@@ -2,9 +2,17 @@
 import os
 import sys
 
+_root_path = os.path.abspath('.')
 _src_path = os.path.abspath('src')
+
+# Clean root paths from sys.path so 'faqih_downloader' is collected strictly from src/
+sys.path = [p for p in sys.path if p not in ('', '.', _root_path)]
 if _src_path not in sys.path:
     sys.path.insert(0, _src_path)
+os.environ['PYTHONPATH'] = _src_path
+
+if 'faqih_downloader' in sys.modules:
+    del sys.modules['faqih_downloader']
 
 from PyInstaller.utils.hooks import collect_submodules, collect_data_files
 
@@ -15,9 +23,10 @@ sd_hidden = collect_submodules('faqih_downloader')
 
 extra_binaries = []
 
+entry_script = os.path.abspath(os.path.join('scripts', 'pyinstaller_entry.py'))
 
 a = Analysis(
-    ['faqih_downloader.py'],
+    [entry_script],
     pathex=[_src_path],
     binaries=extra_binaries,
     datas=[

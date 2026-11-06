@@ -122,6 +122,7 @@ YouTubeFormatBuilderMixin (services/youtube_format_builder.py)
 | File Path | Lines | Responsibility | Key Classes / Functions | When to Edit |
 |:---|:---:|:---|:---|:---|
 | `src/faqih_downloader/__init__.py` | 112 | Package initialization and unified namespace re-exports for the core application. | `_SmartDownloadAliasLoader`, `_SmartDownloadAliasFinder`, `__getattr__()`, `__dir__()` | Edit when exposing new subpackages or top-level public APIs. |
+| `src/faqih_downloader/__main__.py` | 76 | Package CLI entry point and CLI dispatcher for python -m faqih_downloader. | — | Edit when modifying CLI execution arguments or package launch hooks. |
 | `src/faqih_downloader/config.py` | 279 | Configuration constants, path resolvers, and settings file I/O with caching. | `get_resource_path()`, `is_test_environment()`, `get_config_dir()` | Edit when modifying app constants, version, default settings, or storage directories. |
 | `src/faqih_downloader/i18n.py` | 18 | Backward-compatible i18n import shim redirecting to locales.i18n. | — | Edit if re-exporting additional translation functions. |
 | `src/faqih_downloader/main.py` | 25 | Main runtime GUI entry point initializing Tkinter and launching ModernFramelessGUI. | — | Edit when altering CLI argument parsing at launch or main window instantiation. |
@@ -248,7 +249,7 @@ YouTubeFormatBuilderMixin (services/youtube_format_builder.py)
 | `src/faqih_downloader/utils/tk_helpers.py` | 397 | Tkinter resource cleanup preventing photo reference and callback memory leaks. | `animate_window_open()`, `animate_window_close()` | Edit when adding memory leak mitigations for Tkinter widgets. |
 | `src/faqih_downloader/utils/url_utils.py` | 393 | URL parsing, filename derivation, and Content-Disposition header extraction. | `is_downloadable_url()`, `clean_download_filename()`, `derive_download_filename()` | Edit when improving filename derivation from complex redirect URLs. |
 | `src/faqih_downloader/utils/window_effects.py` | 363 | Window effects and rounded glass Canvas styling for Smart Download (SD). | `RoundedGlassCard`, `apply_acrylic_or_mica_effect()`, `draw_rounded_rect()`, `draw_glow_border()` | Edit when modifying this module's features. |
-| `faqih_downloader.py` | 414 | Main official application entry point, CLI dispatcher, and unified symbol re-exporter. | `_SmartDownloadAliasLoader`, `_SmartDownloadAliasFinder`, `_FaqihDownloaderShim` | Edit when updating top-level launch hooks, CLI flags, or application initialization. |
+| `faqih_downloader.py` | 430 | Main official application entry point, CLI dispatcher, and unified symbol re-exporter. | `_SmartDownloadAliasLoader`, `_SmartDownloadAliasFinder`, `_FaqihDownloaderShim` | Edit when updating top-level launch hooks, CLI flags, or application initialization. |
 | `turbo_downloader.py` | 58 | Backward-compatibility root shim re-exporting all symbols from faqih_downloader. | `_TurboDownloaderCompatShim` | Edit when maintaining legacy backward-compatible import compatibility. |
 | `browser_bridge.py` | 24 | Backward-compatibility root shim re-exporting BrowserBridgeServer. | — | Edit when changing browser bridge root exports. |
 | `native_messaging_host.py` | 29 | Backward-compatibility root shim re-exporting native messaging host functions. | — | Edit when updating native messaging entry point. |

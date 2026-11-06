@@ -40,6 +40,10 @@ FILE_METADATA: Dict[str, Dict[str, str]] = {
         "responsibility": "Main runtime GUI entry point initializing Tkinter and launching ModernFramelessGUI.",
         "when_to_edit": "Edit when altering CLI argument parsing at launch or main window instantiation."
     },
+    "src/faqih_downloader/__main__.py": {
+        "responsibility": "Package CLI entry point and CLI dispatcher for python -m faqih_downloader.",
+        "when_to_edit": "Edit when modifying CLI execution arguments or package launch hooks."
+    },
     "src/faqih_downloader/core/__init__.py": {
         "responsibility": "Re-exports core download engine, chunking, and candidate resolution components.",
         "when_to_edit": "Edit when adding new core download engine modules."

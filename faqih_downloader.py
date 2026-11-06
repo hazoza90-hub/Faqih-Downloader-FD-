@@ -13,9 +13,24 @@ _src_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "src")
 if os.path.isdir(_src_dir) and _src_dir not in sys.path:
     sys.path.insert(0, _src_dir)
 
-_pkg_dir = os.path.join(_src_dir, "faqih_downloader")
-if os.path.isdir(_pkg_dir):
+_meipass = getattr(sys, "_MEIPASS", None)
+_pkg_candidates = [
+    os.path.join(_src_dir, "faqih_downloader"),
+]
+if _meipass:
+    _pkg_candidates.append(os.path.join(_meipass, "faqih_downloader"))
+
+_pkg_dir = next((p for p in _pkg_candidates if os.path.isdir(p)), None)
+if _pkg_dir:
     __path__ = [_pkg_dir]
+else:
+    __path__ = [os.path.join(_meipass or os.path.dirname(os.path.abspath(__file__)), "faqih_downloader")]
+
+if "__spec__" in globals() and __spec__ is not None:
+    try:
+        __spec__.submodule_search_locations = __path__
+    except Exception:
+        pass
 
 import importlib
 import importlib.abc
@@ -58,6 +73,7 @@ if not any(isinstance(f, _SmartDownloadAliasFinder) for f in sys.meta_path):
     sys.meta_path.insert(0, _SmartDownloadAliasFinder())
 
 if __name__ in sys.modules:
+    sys.modules.setdefault("faqih_downloader", sys.modules[__name__])
     sys.modules["smart_download"] = sys.modules[__name__]
 
 # Fast-path for --test-startup verification
