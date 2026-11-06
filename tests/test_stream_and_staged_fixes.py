@@ -27,6 +27,15 @@ class TestStreamCoordinatorDubbingFixes(unittest.TestCase):
         self.assertIn("while not (v_completed.is_set() and a_completed.is_set())", src)
         self.assertIn("if v_error:\n                    break", src)
 
+    def test_audio_error_resets_metrics_without_cancelling_video(self):
+        from faqih_downloader.core.stream_coordinator import StreamDownloadCoordinator
+        src = inspect.getsource(StreamDownloadCoordinator._run_coordinator)
+        a_error_func = src.split("def _on_a_error")[1].split("def _on_a_progress")[0]
+        self.assertIn("self._a_speed = 0.0", a_error_func)
+        self.assertIn("self._a_active = 0", a_error_func)
+        self.assertIn("_report_combined()", a_error_func)
+        self.assertNotIn("v_engine.cancel()", a_error_func)
+
 
 class TestSubtitleFilenameTagAccuracy(unittest.TestCase):
     """Verifies that [Sub] tag only appears when an actual subtitle track is selected."""
@@ -183,6 +192,90 @@ class TestMediaOptionsBarAndStagedCard(unittest.TestCase):
         stage_media_option_in_col1(gui, "https://example.com/v", "Video", opt2, "C:\\vid.mp4", 100)
         self.assertEqual(len(gui._staged_links), 1)
         self.assertEqual(gui._staged_links[0]["selected_opt"], opt2)
+
+    def test_sync_modal_selection_to_staged_updates_media_bar_comboboxes(self):
+        from faqih_downloader.ui.modals.quality_modal_helpers import sync_modal_selection_to_staged
+
+        class MockApp:
+            def __init__(self):
+                self._staged_links = []
+                self._pending_media_context = {}
+                self._main_sub_mode_codes = ["soft_embed", "srt_only", "hard_burn"]
+                self._main_sub_pos_codes = ["bottom", "middle", "top"]
+                self.cb_main_quality = MagicMock()
+                self.cb_main_audio = MagicMock()
+                self.cb_main_sub = MagicMock()
+                self.cb_main_sub_mode = MagicMock()
+                self.cb_main_sub_pos = MagicMock()
+                self._main_media_options = [
+                    VideoFormatOption("1", "720p", 720, "mp4", 100),
+                    VideoFormatOption("2", "1080p", 1080, "mp4", 200)
+                ]
+                self._main_audio_tracks = [{"track_id": "a1", "language": "en"}]
+                self._main_subtitle_tracks = [{"sub_id": "s1", "language": "ar"}]
+
+        app = MockApp()
+        modal = MagicMock()
+        modal.parent_app = app
+        modal.selected_option = app._main_media_options[1]
+        modal.selected_option.selected_audio_track = app._main_audio_tracks[0]
+        modal.selected_option.selected_subtitle_track = app._main_subtitle_tracks[0]
+        modal.audio_tracks = app._main_audio_tracks
+        modal.subtitle_tracks = app._main_subtitle_tracks
+        modal.cb_audio = None
+        modal.cb_sub = None
+        modal.entry_dest.get.return_value = "C:\\vid.mp4"
+        modal.video_url = "https://youtu.be/test"
+
+        sync_modal_selection_to_staged(modal)
+        app.cb_main_quality.current.assert_called_with(1)
+        app.cb_main_audio.current.assert_called_with(0)
+        app.cb_main_sub.current.assert_called_with(0)
+
+    def test_start_pending_media_download_preserves_modal_selected_opt(self):
+        from faqih_downloader.ui.panels.media_options_actions import MediaOptionsActionsMixin
+
+        class MockGUI(MediaOptionsActionsMixin):
+            def __init__(self):
+                self._staged_links = []
+                self._main_sub_mode_codes = ["soft_embed", "srt_only", "hard_burn"]
+                self._main_sub_pos_codes = ["bottom", "middle", "top"]
+                self._main_bar_url = "https://youtu.be/test"
+                self.entry_dest = MagicMock()
+                self.entry_dest.get.return_value = "C:\\vid.mp4"
+                self.conn_var = MagicMock()
+                self.conn_var.get.return_value = "8"
+                self.entry_custom_speed = MagicMock()
+                self.entry_custom_speed.get.return_value = "0"
+                self.cb_main_quality = MagicMock()
+                self.cb_main_quality.current.return_value = 0
+                self.cb_main_audio = MagicMock()
+                self.cb_main_audio.current.return_value = 0
+                self.cb_main_sub = MagicMock()
+                self.cb_main_sub.current.return_value = 0
+                self.cb_main_sub_mode = MagicMock()
+                self.cb_main_sub_mode.current.return_value = 0
+                self.cb_main_sub_pos = MagicMock()
+                self.cb_main_sub_pos.current.return_value = 0
+                self._main_media_options = [
+                    VideoFormatOption("1", "720p", 720, "mp4", 100),
+                    VideoFormatOption("2", "1080p", 1080, "mp4", 200)
+                ]
+                self._pending_media_context = {
+                    "url": "https://youtu.be/test",
+                    "options": self._main_media_options,
+                    "selected_option": self._main_media_options[1],
+                    "selected_opt": self._main_media_options[1],
+                    "info": {"title": "vid"},
+                    "resolver": MagicMock()
+                }
+
+            def _launch_stream_coordinator(self, stream_info, final_dest, max_conn, bytes_limit):
+                pass
+
+        gui = MockGUI()
+        gui._start_pending_media_download()
+        self.assertEqual(gui._last_media_context["selected_option"].resolution_label, "1080p")
 
 
 if __name__ == "__main__":

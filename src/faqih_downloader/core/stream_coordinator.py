@@ -400,8 +400,12 @@ class StreamDownloadCoordinator:
                 _report_combined()
 
             def _on_a_error(err):
+                with self._lock:
+                    self._a_speed = 0.0
+                    self._a_active = 0
                 a_error.append(err)
                 a_completed.set()
+                _report_combined()
 
             def _on_a_progress(downloaded, total, speed, eta, active):
                 with self._lock:
@@ -472,9 +476,9 @@ class StreamDownloadCoordinator:
             # Audio completeness validation and automatic yt-dlp fallback recovery
             from ..services.media_env_helpers import ensure_complete_audio_file
             if not ensure_complete_audio_file(self.stream_info, audio_tmp, tag, self.log, has_prior_error=bool(a_error)):
-                if a_error:
-                    v_engine.cancel(); _drain_workers()
-                    raise RuntimeError(f"Audio stream download error: {a_error[0]}")
+                v_engine.cancel(); _drain_workers()
+                err_msg = a_error[0] if a_error else "Audio stream is incomplete or missing and recovery failed"
+                raise RuntimeError(f"Audio stream download error: {err_msg}")
 
             # 3. Merge Phase via FFmpeg
             self._active_phase = 3

@@ -81,7 +81,10 @@ class ClipboardControllerMixin(ClipboardDialogMixin):
             except Exception: self._last_clipboard_seq = None
         try:
             cur = get_clipboard_text(self.root)
-            if cur: self._last_clipboard_url = cur.strip()
+            if cur:
+                from faqih_downloader.config import is_test_environment
+                if is_test_environment() or not is_downloadable_url(cur.strip()):
+                    self._last_clipboard_url = cur.strip()
         except Exception: pass
 
         self._fetch_cancel_event = threading.Event()

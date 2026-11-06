@@ -288,7 +288,7 @@ class MediaOptionsActionsMixin:
         info, resolver = ctx.get("info", {}), ctx.get("resolver")
 
         selected_opt = ctx.get("selected_option") or ctx.get("selected_opt")
-        if is_same_video and hasattr(self, "cb_main_quality") and options and bar_opts == options:
+        if selected_opt is None and is_same_video and hasattr(self, "cb_main_quality") and options and bar_opts == options:
             q_idx = self.cb_main_quality.current()
             if 0 <= q_idx < len(options):
                 selected_opt = options[q_idx]
@@ -297,19 +297,21 @@ class MediaOptionsActionsMixin:
             selected_opt = options[pref_i] if 0 <= pref_i < len(options) else options[0]
 
         if selected_opt and is_same_video:
-            if hasattr(self, "cb_main_audio") and audio_tracks and 0 <= self.cb_main_audio.current() < len(audio_tracks):
-                selected_opt.selected_audio_track = audio_tracks[self.cb_main_audio.current()]
-            sub_mode = self._main_sub_mode_codes[self.cb_main_sub_mode.current()] if (hasattr(self, "cb_main_sub_mode") and 0 <= self.cb_main_sub_mode.current() < len(self._main_sub_mode_codes)) else "soft_embed"
-            selected_opt.subtitle_embed_mode = sub_mode
-            sub_pos = self._main_sub_pos_codes[self.cb_main_sub_pos.current()] if (hasattr(self, "cb_main_sub_pos") and hasattr(self, "_main_sub_pos_codes") and 0 <= self.cb_main_sub_pos.current() < len(self._main_sub_pos_codes)) else "bottom"
-            selected_opt.subtitle_position = sub_pos
+            if getattr(selected_opt, "selected_audio_track", None) is None:
+                if hasattr(self, "cb_main_audio") and audio_tracks and 0 <= self.cb_main_audio.current() < len(audio_tracks):
+                    selected_opt.selected_audio_track = audio_tracks[self.cb_main_audio.current()]
+            if not getattr(selected_opt, "subtitle_embed_mode", None):
+                sub_mode = self._main_sub_mode_codes[self.cb_main_sub_mode.current()] if (hasattr(self, "cb_main_sub_mode") and 0 <= self.cb_main_sub_mode.current() < len(self._main_sub_mode_codes)) else "soft_embed"
+                selected_opt.subtitle_embed_mode = sub_mode
+            if not getattr(selected_opt, "subtitle_position", None):
+                sub_pos = self._main_sub_pos_codes[self.cb_main_sub_pos.current()] if (hasattr(self, "cb_main_sub_pos") and hasattr(self, "_main_sub_pos_codes") and 0 <= self.cb_main_sub_pos.current() < len(self._main_sub_pos_codes)) else "bottom"
+                selected_opt.subtitle_position = sub_pos
 
-            if hasattr(self, "cb_main_sub") and subtitle_tracks:
-                s_idx = self.cb_main_sub.current()
-                if 0 < s_idx < len(subtitle_tracks):
-                    selected_opt.selected_subtitle_track = subtitle_tracks[s_idx]
-                else:
-                    selected_opt.selected_subtitle_track = None
+            if not hasattr(selected_opt, "selected_subtitle_track") or selected_opt.selected_subtitle_track is None:
+                if hasattr(self, "cb_main_sub") and subtitle_tracks:
+                    s_idx = self.cb_main_sub.current()
+                    if 0 < s_idx < len(subtitle_tracks):
+                        selected_opt.selected_subtitle_track = subtitle_tracks[s_idx]
 
         final_dest = (self.entry_dest.get().strip() if hasattr(self, "entry_dest") else "") or ctx.get("final_dest", "")
         if selected_opt:

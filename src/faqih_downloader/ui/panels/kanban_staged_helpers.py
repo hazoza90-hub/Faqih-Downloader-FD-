@@ -91,7 +91,8 @@ def build_staged_link_card(parent: Any, info: Dict[str, Any], callbacks: Dict[st
     tk.Label(top_row, text=badge, font=("Segoe UI", 8, "bold"), bg="#0284c7", fg="#ffffff", padx=6, pady=1).pack(side=opp_side)
 
     # Second Row: Size, Category, Audio/Sub Status, Resume
-    meta_row = tk.Frame(card.inner, bg="#151a24"); meta_row.pack(fill=tk.X, pady=(3, 0))
+    res_txt = tr("info_resumable", "✓ Resumable") if supports_resume else tr("info_not_resumable", "✕ Non-resumable")
+    tk.Label(meta_row, text=res_txt, font=("Segoe UI", 8), bg="#151a24", fg=("#22c55e" if supports_resume else "#ef4444")).pack(side=opp_side)
     if is_media:
         opt = info.get("selected_opt")
         if not opt and isinstance(info.get("media_context"), dict):
@@ -122,8 +123,6 @@ def build_staged_link_card(parent: Any, info: Dict[str, Any], callbacks: Dict[st
         tk.Label(meta_row, text=desc_txt, font=("Segoe UI", 8), bg="#151a24", fg="#38bdf8").pack(side=pad_side)
     else:
         tk.Label(meta_row, text=f"{_format_size(file_size)}  •  {str(category).capitalize()}", font=("Segoe UI", 8), bg="#151a24", fg="#94a3b8").pack(side=pad_side)
-    res_txt = tr("info_resumable", "✓ Resumable") if supports_resume else tr("info_not_resumable", "✕ Non-resumable")
-    tk.Label(meta_row, text=res_txt, font=("Segoe UI", 8), bg="#151a24", fg=("#22c55e" if supports_resume else "#ef4444")).pack(side=opp_side)
 
     # Third Row: Destination Path
     path_row = tk.Frame(card.inner, bg="#151a24"); path_row.pack(fill=tk.X, pady=(2, 0))

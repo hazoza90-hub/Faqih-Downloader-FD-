@@ -94,6 +94,54 @@ def sync_modal_selection_to_staged(modal: Any) -> None:
                 it["media_context"]["selected_option"] = opt
                 it["media_context"]["selected_opt"] = opt
 
+    # Synchronize parent main media bar comboboxes and entry_dest if present
+    if hasattr(target, "cb_main_quality"):
+        opts = getattr(target, "_main_media_options", [])
+        for i, o in enumerate(opts):
+            if o == opt or getattr(o, "format_id", None) == getattr(opt, "format_id", None):
+                try: target.cb_main_quality.current(i)
+                except Exception: pass
+                break
+    if hasattr(target, "cb_main_audio"):
+        audios = getattr(target, "_main_audio_tracks", [])
+        sel_a = getattr(opt, "selected_audio_track", None)
+        if sel_a and audios:
+            for i, a in enumerate(audios):
+                if a == sel_a or (isinstance(a, dict) and isinstance(sel_a, dict) and (a.get("track_id") == sel_a.get("track_id") or a.get("language") == sel_a.get("language"))):
+                    try: target.cb_main_audio.current(i)
+                    except Exception: pass
+                    break
+    if hasattr(target, "cb_main_sub"):
+        subs = getattr(target, "_main_subtitle_tracks", [])
+        sel_s = getattr(opt, "selected_subtitle_track", None)
+        if sel_s and subs:
+            for i, s in enumerate(subs):
+                if s == sel_s or (isinstance(s, dict) and isinstance(sel_s, dict) and (s.get("sub_id") == sel_s.get("sub_id") or s.get("language") == sel_s.get("language"))):
+                    try: target.cb_main_sub.current(i)
+                    except Exception: pass
+                    break
+        elif subs:
+            try: target.cb_main_sub.current(0)
+            except Exception: pass
+    if hasattr(target, "cb_main_sub_mode"):
+        sub_mode = getattr(opt, "subtitle_embed_mode", "soft_embed")
+        codes = getattr(target, "_main_sub_mode_codes", ["soft_embed", "srt_only", "hard_burn"])
+        if sub_mode in codes:
+            try: target.cb_main_sub_mode.current(codes.index(sub_mode))
+            except Exception: pass
+    if hasattr(target, "cb_main_sub_pos"):
+        sub_pos = getattr(opt, "subtitle_position", "bottom")
+        pos_codes = getattr(target, "_main_sub_pos_codes", ["bottom", "middle", "top"])
+        if sub_pos in pos_codes:
+            try: target.cb_main_sub_pos.current(pos_codes.index(sub_pos))
+            except Exception: pass
+    if hasattr(target, "entry_dest") and cur_dest and tk:
+        try:
+            target.entry_dest.delete(0, tk.END)
+            target.entry_dest.insert(0, cur_dest)
+        except Exception:
+            pass
+
     try:
         from faqih_downloader.ui.panels.kanban_staged_prober import stage_media_option_in_col1
         stage_media_option_in_col1(target, u, getattr(modal, "video_title", ""), opt, cur_dest, dur)

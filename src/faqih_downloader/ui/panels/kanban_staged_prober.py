@@ -107,7 +107,7 @@ def _start_staged_download(gui: Any, item_or_url: Any) -> None:
         # Ensure latest choices from main media bar are read if this is the active media URL
         cur_ctx = getattr(gui, "_pending_media_context", None)
         if isinstance(cur_ctx, dict) and cur_ctx.get("url") == url:
-            if hasattr(gui, "_sync_media_bar_state"):
+            if info.get("selected_opt") is None and hasattr(gui, "_sync_media_bar_state"):
                 try: gui._sync_media_bar_state()
                 except Exception: pass
         elif info.get("media_context"):
