@@ -137,6 +137,58 @@ class TestMediaOptionsBarAndStagedCard(unittest.TestCase):
         self.assertEqual(len(gui._main_media_options), 1)
         self.assertTrue(gui.media_bar_host.pack.called)
 
+    def test_populate_main_media_bar_when_tk_is_none(self):
+        """Verifies populate_main_media_bar does not raise AttributeError when tk is None."""
+        import faqih_downloader.ui.panels.media_options_bar as mob
+        from faqih_downloader.ui.panels.media_options_bar import MediaOptionsBarMixin
+
+        class DummyGUI(MediaOptionsBarMixin):
+            def __init__(self):
+                self.media_bar_host = MagicMock()
+                self.media_options_frame = MagicMock()
+                self.kanban_container = MagicMock()
+                self.cb_main_quality = MagicMock()
+                self.cb_main_quality.current.return_value = 0
+                self.cb_main_audio = MagicMock()
+                self.cb_main_audio.current.return_value = 0
+                self.cb_main_sub = MagicMock()
+                self.cb_main_sub.current.return_value = 0
+                self.cb_main_sub_mode = MagicMock()
+                self.cb_main_sub_mode.current.return_value = 0
+                self.cb_main_sub_pos = MagicMock()
+                self.cb_main_sub_pos.current.return_value = 0
+                self.entry_url = MagicMock()
+                self.entry_dest = MagicMock()
+                self.entry_url.get.return_value = "https://www.youtube.com/watch?v=demo"
+                self.entry_dest.get.return_value = "video.mp4"
+                self._staged_links = []
+                self._main_sub_mode_codes = ["soft_embed", "srt_only", "hard_burn"]
+                self._main_sub_pos_codes = ["bottom", "middle", "top"]
+
+        gui = DummyGUI()
+        opt = VideoFormatOption(
+            format_id="137", resolution_label="1080p", height=1080, ext="mp4", filesize_approx=1024 * 1024
+        )
+        ctx = {
+            "url": "https://www.youtube.com/watch?v=demo",
+            "info": {"title": "Demo"},
+            "options": [opt],
+            "audio_tracks": [],
+            "subtitle_tracks": [],
+            "selected_option": opt,
+            "final_dest": "C:\\Downloads\\video.mp4"
+        }
+
+        orig_tk = mob.tk
+        try:
+            mob.tk = None
+            gui.populate_main_media_bar(ctx)
+            self.assertTrue(gui.media_bar_host.pack.called)
+            gui.media_bar_host.pack.assert_called_with(fill="x", before=gui.kanban_container, padx=10, pady=2)
+            gui.media_options_frame.pack.assert_called_with(fill="x", pady=(4, 2))
+        finally:
+            mob.tk = orig_tk
+
     def test_on_staged_probe_ready_callback(self):
         from faqih_downloader.ui.panels.media_options_bar import MediaOptionsBarMixin
 
@@ -276,6 +328,97 @@ class TestMediaOptionsBarAndStagedCard(unittest.TestCase):
         gui = MockGUI()
         gui._start_pending_media_download()
         self.assertEqual(gui._last_media_context["selected_option"].resolution_label, "1080p")
+
+    def test_build_staged_link_card_no_name_error_and_buttons_exist(self):
+        """Verifies build_staged_link_card constructs card without NameError and creates quality & start buttons."""
+        try:
+            import tkinter as tk
+            root = tk.Tk()
+            root.withdraw()
+        except Exception:
+            self.skipTest("Tkinter display not available")
+
+        try:
+            from faqih_downloader.ui.panels.kanban_staged_helpers import build_staged_link_card
+            from faqih_downloader.locales.i18n import tr
+
+            parent = tk.Frame(root)
+            parent.pack()
+
+            opt = VideoFormatOption(
+                format_id="137",
+                resolution_label="1080p",
+                height=1080,
+                ext="mp4",
+                filesize_approx=10 * 1024 * 1024,
+            )
+            opt.selected_audio_track = {"label": "English", "language": "en"}
+            opt.selected_subtitle_track = {"label": "Arabic", "language": "ar"}
+
+            info = {
+                "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                "file_name": "Never_Gonna_Give_You_Up.mp4",
+                "file_size": 10 * 1024 * 1024,
+                "category": "video",
+                "badge": "1080P",
+                "supports_resume": True,
+                "final_dest": "C:\\Downloads\\Never_Gonna_Give_You_Up.mp4",
+                "selected_opt": opt,
+                "media_context": {"selected_option": opt},
+            }
+
+            callbacks = {
+                "quality": MagicMock(),
+                "start": MagicMock(),
+                "info": MagicMock(),
+                "remove": MagicMock(),
+            }
+
+            # Call build_staged_link_card for media link
+            card = build_staged_link_card(parent, info, callbacks)
+            self.assertIsNotNone(card)
+
+            # Find all buttons inside card.inner
+            buttons = []
+            for child in card.inner.winfo_children():
+                if isinstance(child, tk.Button):
+                    buttons.append(child)
+                for sub in child.winfo_children():
+                    if isinstance(sub, tk.Button):
+                        buttons.append(sub)
+
+            quality_btn = next((b for b in buttons if tr("staged_btn_quality", "") in b.cget("text") or "⚙" in b.cget("text")), None)
+            start_btn = next((b for b in buttons if tr("staged_btn_start", "") in b.cget("text") or "▶" in b.cget("text")), None)
+
+            self.assertIsNotNone(quality_btn, "staged_btn_quality button was not found in card")
+            self.assertIsNotNone(start_btn, "staged_btn_start button was not found in card")
+
+            # Click quality button and verify callback
+            quality_btn.invoke()
+            callbacks["quality"].assert_called_once_with(info)
+
+            # Click start button and verify callback
+            start_btn.invoke()
+            callbacks["start"].assert_called_once_with(info)
+
+            # Also verify a non-media link card works cleanly
+            file_info = {
+                "url": "https://example.com/file.zip",
+                "file_name": "file.zip",
+                "file_size": 5000000,
+                "category": "archive",
+                "badge": "ZIP",
+                "supports_resume": False,
+                "final_dest": "C:\\Downloads\\file.zip",
+            }
+            file_card = build_staged_link_card(parent, file_info, callbacks)
+            self.assertIsNotNone(file_card)
+
+        finally:
+            try:
+                root.destroy()
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":

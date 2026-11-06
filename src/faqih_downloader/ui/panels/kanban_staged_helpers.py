@@ -91,6 +91,7 @@ def build_staged_link_card(parent: Any, info: Dict[str, Any], callbacks: Dict[st
     tk.Label(top_row, text=badge, font=("Segoe UI", 8, "bold"), bg="#0284c7", fg="#ffffff", padx=6, pady=1).pack(side=opp_side)
 
     # Second Row: Size, Category, Audio/Sub Status, Resume
+    meta_row = tk.Frame(card.inner, bg="#151a24"); meta_row.pack(fill=tk.X, pady=(3, 0))
     res_txt = tr("info_resumable", "✓ Resumable") if supports_resume else tr("info_not_resumable", "✕ Non-resumable")
     tk.Label(meta_row, text=res_txt, font=("Segoe UI", 8), bg="#151a24", fg=("#22c55e" if supports_resume else "#ef4444")).pack(side=opp_side)
     if is_media:

@@ -148,13 +148,14 @@ class MediaOptionsBarMixin(MediaOptionsActionsMixin):
         self._main_bar_url = media_url
 
         # Show host frame and options frame directly under top header
+        fill_x = tk.X if tk else "x"
         if hasattr(self, "media_bar_host") and self.media_bar_host:
             if hasattr(self, "kanban_container") and self.kanban_container:
-                self.media_bar_host.pack(fill=tk.X, before=self.kanban_container, padx=10, pady=2)
+                self.media_bar_host.pack(fill=fill_x, before=self.kanban_container, padx=10, pady=2)
             else:
-                self.media_bar_host.pack(fill=tk.X, padx=10, pady=2)
+                self.media_bar_host.pack(fill=fill_x, padx=10, pady=2)
         if hasattr(self, "media_options_frame") and self.media_options_frame:
-            self.media_options_frame.pack(fill=tk.X, pady=(4, 2))
+            self.media_options_frame.pack(fill=fill_x, pady=(4, 2))
 
         # 1. Populate Quality Combobox
         q_vals = []
@@ -289,7 +290,8 @@ class MediaOptionsBarMixin(MediaOptionsActionsMixin):
             is_sub_burned = (sub_mode == "hard_burn") and bool(getattr(opt, "selected_subtitle_track", None))
             updated_dest = apply_media_filename_tags(cur_dest, quality_label=opt.resolution_label, is_sub_burned=is_sub_burned, ext=opt.ext)
             if hasattr(self, "entry_dest") and updated_dest != cur_dest:
-                self.entry_dest.delete(0, tk.END)
+                end_val = tk.END if tk else "end"
+                self.entry_dest.delete(0, end_val)
                 self.entry_dest.insert(0, updated_dest)
             ctx["final_dest"] = updated_dest
 
