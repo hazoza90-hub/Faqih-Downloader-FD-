@@ -66,14 +66,13 @@ def is_version_ge(v1: str, v2: str) -> bool:
 
 
 def build_core_patch_zip(
-    output_path: str,
+    output_path: Optional[str] = None,
     src_dir: Optional[str] = None,
     version: Optional[str] = None
 ) -> str:
-    """
-    Packages src/smart_download/ (all .py and locales/*.json files + core_version.json)
-    into a lightweight SmartDownload-CorePatch.zip (<150 KB) in <0.5 seconds.
-    """
+    """Packages src/faqih_downloader into lightweight CorePatch.zip in <0.5s."""
+    if not output_path:
+        output_path = os.path.join(tempfile.gettempdir(), "FaqihDownloader-CorePatch.zip")
     out_abs = os.path.abspath(output_path)
     os.makedirs(os.path.dirname(out_abs), exist_ok=True)
 
@@ -463,6 +462,7 @@ class CoreHotPatchUpdater:
                     except Exception:
                         pass
                 raise
+    install_patch_from_zip = apply_core_patch
 
     def activate_plugin(self, force: bool = False) -> bool:
         with self._lock:

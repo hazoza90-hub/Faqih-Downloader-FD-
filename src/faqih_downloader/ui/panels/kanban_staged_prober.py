@@ -48,6 +48,10 @@ def stage_media_option_in_col1(
         target = getattr(gui, "parent_app", None) or getattr(gui, "gui", None) or getattr(gui, "master", None) or gui
 
     media_ctx = getattr(target, "_pending_media_context", None)
+    staged = getattr(target, "_staged_links", [])
+    old_info = next((it for it in staged if it.get("url") == url), None)
+    conn_count = old_info.get("conn_count", 8) if old_info else 8
+    speed_limit = old_info.get("speed_limit", 0.0) if old_info else 0.0
     info_dict = {
         "url": url,
         "file_name": file_name,
@@ -59,10 +63,14 @@ def stage_media_option_in_col1(
         "final_dest": final_dest,
         "duration": duration,
         "platform": platform,
+        "conn_count": conn_count,
+        "speed_limit": speed_limit,
         "selected_opt": selected_opt,
         "stream_info": media_ctx.get("info") if isinstance(media_ctx, dict) else None,
         "media_context": dict(media_ctx) if isinstance(media_ctx, dict) else None,
     }
+    if old_info:
+        old_info.update(info_dict)
 
     if hasattr(target, "stage_probed_link_in_col1"):
         target.stage_probed_link_in_col1(info_dict)
@@ -112,6 +120,9 @@ def _start_staged_download(gui: Any, item_or_url: Any) -> None:
                 "selected_opt": info.get("selected_opt"),
                 "final_dest": dest
             }
+        if info.get("selected_opt") is not None and isinstance(getattr(gui, "_pending_media_context", None), dict):
+            gui._pending_media_context["selected_opt"] = info.get("selected_opt")
+            gui._pending_media_context["selected_option"] = info.get("selected_opt")
 
         if hasattr(gui, "remove_staged_link"):
             gui.remove_staged_link(url)
@@ -200,14 +211,16 @@ def _probe_media_worker(gui: Any, url_clean: str, base_dir: str, conn_count: int
             audio_tracks, subtitle_tracks = [], []
 
     if best_opt is not None:
-        gui._pending_media_context = {
+        media_ctx = {
             "url": url_clean, "raw_title": raw_title,
             "info": info_dict_meta, "stream_info": stream_info, "options": opts_list,
             "selected_opt": best_opt, "selected_option": best_opt, "option": best_opt,
             "audio_tracks": audio_tracks, "subtitle_tracks": subtitle_tracks,
             "resolver": resolver, "final_dest": final_dest, "dest": final_dest,
-            "cookies_browser": cookies_browser, "referer": ""
+            "cookies_browser": cookies_browser, "referer": "",
+            "duration": dur
         }
+        gui._pending_media_context = media_ctx
         def _sync_main_gui():
             if hasattr(gui, "entry_dest") and gui.entry_dest and tk:
                 cur_u = gui.entry_url.get().strip() if (hasattr(gui, "entry_url") and gui.entry_url) else url_clean
@@ -217,14 +230,19 @@ def _probe_media_worker(gui: Any, url_clean: str, base_dir: str, conn_count: int
                         gui.entry_dest.insert(0, final_dest)
                     except Exception:
                         pass
-            if hasattr(gui, "populate_main_media_bar") and isinstance(info_dict_meta, dict) and opts_list:
+            if hasattr(gui, "_on_staged_probe_ready"):
                 try:
-                    gui.populate_main_media_bar(
-                        url=url_clean, dest=final_dest, info=info_dict_meta,
-                        options=opts_list, selected_opt=best_opt,
-                        audio_tracks=audio_tracks, subtitle_tracks=subtitle_tracks,
-                        resolver=resolver
-                    )
+                    gui._on_staged_probe_ready(media_ctx)
+                except Exception:
+                    pass
+            elif hasattr(gui, "populate_main_media_bar") and isinstance(info_dict_meta, dict) and opts_list:
+                try:
+                    gui.populate_main_media_bar(media_ctx)
+                except Exception:
+                    pass
+            if hasattr(gui, "update_idletasks"):
+                try:
+                    gui.update_idletasks()
                 except Exception:
                     pass
 

@@ -17,7 +17,8 @@ from ...services.youtube_service import VideoFormatOption, format_filesize
 from ...utils.tk_helpers import _detach_photo_tk, animate_window_open, animate_window_close
 from .quality_modal_helpers import (
     attach_selected_tracks_to_option, resolve_final_dest,
-    build_preview_header_banner, resolve_preferred_option_index, build_quality_title_bar
+    build_preview_header_banner, resolve_preferred_option_index, build_quality_title_bar,
+    sync_modal_selection_to_staged
 )
 
 _BaseToplevel = tk.Toplevel if tk is not None else object
@@ -184,6 +185,10 @@ class QualitySelectionModal(_BaseToplevel):
             self.cb_audio, self.cb_sub = build_audio_subtitle_row(
                 body, self.theme, self.audio_tracks, self.subtitle_tracks
             )
+            if self.cb_audio:
+                self.cb_audio.bind("<<ComboboxSelected>>", lambda e: sync_modal_selection_to_staged(self), add="+")
+            if self.cb_sub:
+                self.cb_sub.bind("<<ComboboxSelected>>", lambda e: sync_modal_selection_to_staged(self), add="+")
 
         card_dest = tk.Frame(body, bg=c_panel, padx=12, pady=8, highlightbackground=c_border, highlightthickness=1)
         card_dest.pack(fill=tk.X, pady=(0, 12))
@@ -209,6 +214,7 @@ class QualitySelectionModal(_BaseToplevel):
                     self.entry_dest.delete(0, tk.END)
                     self.entry_dest.insert(0, updated)
                     if self.dest_path: self.dest_path = updated
+                    sync_modal_selection_to_staged(self)
             try: self.cb_sub._mode_var.trace_add("write", _on_sub_mode_modal_changed)
             except Exception:
                 try: self.cb_sub._mode_var.trace("w", _on_sub_mode_modal_changed)
@@ -376,6 +382,7 @@ class QualitySelectionModal(_BaseToplevel):
             self.entry_dest.insert(0, updated_dest)
             if self.dest_path:
                 self.dest_path = updated_dest
+        sync_modal_selection_to_staged(self)
 
     def _on_browse(self):
         cur = self.entry_dest.get().strip()
@@ -487,11 +494,7 @@ class QualitySelectionModal(_BaseToplevel):
             if target and hasattr(target, "restore_window"):
                 try: target.restore_window()
                 except Exception: pass
-            try:
-                from faqih_downloader.ui.panels.kanban_staged_helpers import stage_media_option_in_col1
-                dur = getattr(self, "duration", 0) or 0
-                stage_media_option_in_col1(target, self.video_url, self.video_title, self.selected_option, final_dest, dur)
-            except Exception: pass
+            sync_modal_selection_to_staged(self)
 
     def _on_drag_press(self, event):
         self._drag_offset_x = event.x_root - self.winfo_x()

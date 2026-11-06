@@ -402,9 +402,6 @@ class StreamDownloadCoordinator:
             def _on_a_error(err):
                 a_error.append(err)
                 a_completed.set()
-                v_completed.set()
-                try: v_engine.cancel()
-                except Exception: pass
 
             def _on_a_progress(downloaded, total, speed, eta, active):
                 with self._lock:
@@ -430,12 +427,12 @@ class StreamDownloadCoordinator:
                 on_error=_on_v_error
             )
 
-            a_conn = max(1, min(4, self.max_connections // 2))
+            a_conn = 1
             a_engine = TurboDownloadEngine(
                 url=self.stream_info.audio_url,
                 destination_path=audio_tmp,
                 max_connections=a_conn,
-                allow_dynamic_split=(self.max_connections > 1),
+                allow_dynamic_split=False,
                 rate_limit_bytes_per_sec=self.rate_limit,
                 ssl_context=self.ssl_context,
                 headers=self.stream_info.audio_headers,
@@ -456,7 +453,7 @@ class StreamDownloadCoordinator:
             a_engine.start()
 
             while not (v_completed.is_set() and a_completed.is_set()) and not self._cancel_event.is_set():
-                if v_error or a_error:
+                if v_error:
                     break
                 time.sleep(0.05)
 

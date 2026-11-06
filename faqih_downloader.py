@@ -3,6 +3,8 @@ Main official entry-point for Faqih Downloader (FD) | فقيه التنزيلا�
 Modular architecture packages are located under src/faqih_downloader/.
 This entry-point exposes all symbols, CLI handlers, and starts the GUI application.
 """
+__version__ = "2.0.2"
+
 import sys
 import os
 import time

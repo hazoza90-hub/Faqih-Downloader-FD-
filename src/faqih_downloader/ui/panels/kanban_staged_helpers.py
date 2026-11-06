@@ -78,9 +78,10 @@ def build_staged_link_card(parent: Any, info: Dict[str, Any], callbacks: Dict[st
     opp_side = tk.LEFT if is_ar else tk.RIGHT
     is_media = bool(info.get("media_context") or str(category).lower() in ("video", "audio") or info.get("selected_opt"))
 
+    card_h = 172 if is_media else 138
     card = RoundedGlassCard(
         parent, radius=12, bg="#0b0e14", card_bg="#151a24", border_color="#283548",
-        height=138, inner_padx=12, inner_pady=10
+        height=card_h, inner_padx=12, inner_pady=10
     )
     card.pack(fill=tk.X, pady=(0, 10))
 
@@ -111,9 +112,14 @@ def build_staged_link_card(parent: Any, info: Dict[str, Any], callbacks: Dict[st
             sub_mode = getattr(opt, "subtitle_embed_mode", "") if opt else (info.get("media_context", {}).get("subtitle_embed_mode", ""))
             if sub_mode == "hard_burn":
                 sub_lbl += " (Burn)"
-        parts = [p for p in [badge, f"🔊 {audio_lbl}" if audio_lbl else "", f"💬 {sub_lbl}" if sub_lbl else "", _format_size(file_size)] if p]
-        desc_txt = " • ".join(parts) if parts else f"{_format_size(file_size)} • {str(category).capitalize()}"
-        tk.Label(meta_row, text=desc_txt, font=("Segoe UI", 8), bg="#151a24", fg="#94a3b8").pack(side=pad_side)
+        q_summary = getattr(opt, "resolution_label", "") or getattr(opt, "format_note", "") or badge or "Video"
+        a_summary = f"🔊 {audio_lbl}" if audio_lbl else ("🔊 " + tr("media_opt_audio_default", "الصوت الافتراضي" if is_ar else "Default Audio"))
+        s_summary = f"💬 {sub_lbl}" if sub_lbl else ("💬 " + tr("sub_none", "بدون ترجمة" if is_ar else "No Sub"))
+        parts = [q_summary, a_summary, s_summary]
+        if file_size > 0:
+            parts.append(_format_size(file_size))
+        desc_txt = " • ".join(parts)
+        tk.Label(meta_row, text=desc_txt, font=("Segoe UI", 8), bg="#151a24", fg="#38bdf8").pack(side=pad_side)
     else:
         tk.Label(meta_row, text=f"{_format_size(file_size)}  •  {str(category).capitalize()}", font=("Segoe UI", 8), bg="#151a24", fg="#94a3b8").pack(side=pad_side)
     res_txt = tr("info_resumable", "✓ Resumable") if supports_resume else tr("info_not_resumable", "✕ Non-resumable")
@@ -123,8 +129,19 @@ def build_staged_link_card(parent: Any, info: Dict[str, Any], callbacks: Dict[st
     path_row = tk.Frame(card.inner, bg="#151a24"); path_row.pack(fill=tk.X, pady=(2, 0))
     tk.Label(path_row, text=f"📁 {_truncate_title(final_dest, 36) if final_dest else '—'}", font=("Segoe UI", 7), bg="#151a24", fg="#64748b").pack(side=pad_side)
 
-    # Fourth Row: Action Buttons
-    btn_row = tk.Frame(card.inner, bg="#151a24"); btn_row.pack(fill=tk.X, pady=(6, 0))
+    # Fourth Row: Dedicated Quality & Dubbing Button (for Media)
+    if is_media and "quality" in callbacks:
+        q_row = tk.Frame(card.inner, bg="#151a24"); q_row.pack(fill=tk.X, pady=(5, 0))
+        tk.Button(
+            q_row, text=tr("staged_btn_quality", "⚙ الجودة والدبلجة والترجمة" if is_ar else "⚙ Quality, Dubbing & Subtitles"),
+            font=("Segoe UI", 8, "bold"),
+            bg="#1e293b", fg="#38bdf8", activebackground="#0284c7", activeforeground="#ffffff",
+            relief="flat", bd=0, cursor="hand2", padx=8, pady=3,
+            command=lambda: callbacks.get("quality", lambda i: None)(info)
+        ).pack(fill=tk.X)
+
+    # Fifth Row: Action Buttons
+    btn_row = tk.Frame(card.inner, bg="#151a24"); btn_row.pack(fill=tk.X, pady=(5, 0))
     tk.Button(
         btn_row, text=tr("staged_btn_start", "▶ Start Download"), font=("Segoe UI", 8, "bold"),
         bg="#10b981", fg="#ffffff", activebackground="#059669", activeforeground="#ffffff",
@@ -132,7 +149,7 @@ def build_staged_link_card(parent: Any, info: Dict[str, Any], callbacks: Dict[st
         command=lambda: callbacks.get("start", lambda i: None)(info)
     ).pack(side=pad_side, padx=(0, 6) if not is_ar else (6, 0))
 
-    if is_media and "quality" in callbacks:
+    if not is_media and "quality" in callbacks:
         tk.Button(
             btn_row, text=tr("staged_btn_quality", "⚙ Quality & Dub"), font=("Segoe UI", 8, "bold"),
             bg="#1e293b", fg="#38bdf8", activebackground="#0284c7", activeforeground="#ffffff",

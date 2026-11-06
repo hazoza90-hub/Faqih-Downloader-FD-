@@ -60,6 +60,53 @@ def attach_selected_tracks_to_option(
         selected_option.selected_subtitle_track = None
 
 
+def sync_modal_selection_to_staged(modal: Any) -> None:
+    """Synchronizes current modal option choices into parent pending media context and Column 1 staged card."""
+    if not modal or not getattr(modal, "selected_option", None):
+        return
+    attach_selected_tracks_to_option(
+        modal.selected_option,
+        getattr(modal, "audio_tracks", []),
+        getattr(modal, "cb_audio", None),
+        getattr(modal, "subtitle_tracks", []),
+        getattr(modal, "cb_sub", None)
+    )
+    target = getattr(modal, "parent_app", None) or getattr(modal, "master", None)
+    if not target:
+        return
+    cur_dest = modal.entry_dest.get().strip() if hasattr(modal, "entry_dest") else getattr(modal, "dest_path", "")
+    dur = getattr(modal, "duration", 0) or 0
+    u = getattr(modal, "video_url", "")
+    opt = modal.selected_option
+
+    ctx = getattr(target, "_pending_media_context", None)
+    if isinstance(ctx, dict):
+        ctx["selected_option"] = opt
+        ctx["selected_opt"] = opt
+        if cur_dest: ctx["final_dest"] = cur_dest
+
+    staged = getattr(target, "_staged_links", [])
+    for it in staged:
+        if it.get("url") == u:
+            it["selected_opt"] = opt
+            if cur_dest: it["final_dest"] = cur_dest
+            if isinstance(it.get("media_context"), dict):
+                it["media_context"]["selected_option"] = opt
+                it["media_context"]["selected_opt"] = opt
+
+    try:
+        from faqih_downloader.ui.panels.kanban_staged_prober import stage_media_option_in_col1
+        stage_media_option_in_col1(target, u, getattr(modal, "video_title", ""), opt, cur_dest, dur)
+    except Exception:
+        pass
+    if hasattr(target, "refresh_kanban_col1"):
+        try: target.refresh_kanban_col1()
+        except Exception: pass
+    if hasattr(target, "update_idletasks"):
+        try: target.update_idletasks()
+        except Exception: pass
+
+
 def resolve_final_dest(
     entry_dest: Any,
     dest_path: str,

@@ -84,6 +84,18 @@ class MediaOptionsBarMixin(MediaOptionsActionsMixin):
         self.lbl_main_sub_pos.pack(side=tk.LEFT); self.cb_main_sub_pos.pack(side=tk.LEFT, padx=(4, 8))
         self.cb_main_sub_pos.bind("<<ComboboxSelected>>", self._on_main_sub_pos_changed)
 
+    def _on_staged_probe_ready(self, ctx: Dict[str, Any]):
+        """Callback invoked immediately when link probe finishes (manual paste or clipboard capture)."""
+        if not ctx:
+            return
+        self._pending_media_context = dict(ctx)
+        self.populate_main_media_bar(ctx)
+        if hasattr(self, "update_idletasks"):
+            try:
+                self.update_idletasks()
+            except Exception:
+                pass
+
     def populate_main_media_bar(
         self, info: Optional[Dict[str, Any]] = None, options: Optional[List[VideoFormatOption]] = None,
         audio_tracks: Optional[List[Dict[str, Any]]] = None, subtitle_tracks: Optional[List[Dict[str, Any]]] = None,
@@ -93,6 +105,17 @@ class MediaOptionsBarMixin(MediaOptionsActionsMixin):
         """Displays and populates the Main Window Media Settings Bar with resolved formats."""
         if not hasattr(self, "media_options_frame"):
             return
+
+        if isinstance(info, dict) and ("options" in info or "selected_opt" in info or "selected_option" in info):
+            ctx_dict = info
+            info = ctx_dict.get("info") or ctx_dict.get("stream_info") or {}
+            options = options or ctx_dict.get("options") or []
+            audio_tracks = audio_tracks or ctx_dict.get("audio_tracks") or []
+            subtitle_tracks = subtitle_tracks or ctx_dict.get("subtitle_tracks") or []
+            selected_option = selected_option or ctx_dict.get("selected_option") or ctx_dict.get("selected_opt")
+            url = url or ctx_dict.get("url")
+            dest = dest or ctx_dict.get("final_dest") or ctx_dict.get("dest")
+            resolver = resolver or ctx_dict.get("resolver")
 
         self._main_media_info = info or {}
         self._main_media_options = list(options or [])
@@ -116,6 +139,7 @@ class MediaOptionsBarMixin(MediaOptionsActionsMixin):
             "audio_tracks": self._main_audio_tracks,
             "subtitle_tracks": self._main_subtitle_tracks,
             "selected_option": sel_opt,
+            "selected_opt": sel_opt,
             "resolver": resolver,
             "final_dest": final_dest
         }
@@ -129,7 +153,8 @@ class MediaOptionsBarMixin(MediaOptionsActionsMixin):
                 self.media_bar_host.pack(fill=tk.X, before=self.kanban_container, padx=10, pady=2)
             else:
                 self.media_bar_host.pack(fill=tk.X, padx=10, pady=2)
-        self.media_options_frame.pack(fill=tk.X, pady=(4, 2))
+        if hasattr(self, "media_options_frame") and self.media_options_frame:
+            self.media_options_frame.pack(fill=tk.X, pady=(4, 2))
 
         # 1. Populate Quality Combobox
         q_vals = []
@@ -261,7 +286,7 @@ class MediaOptionsBarMixin(MediaOptionsActionsMixin):
         # Update destination path filename tags
         cur_dest = self.entry_dest.get().strip() if hasattr(self, "entry_dest") else ""
         if cur_dest and opt:
-            is_sub_burned = (sub_mode == "hard_burn")
+            is_sub_burned = (sub_mode == "hard_burn") and bool(getattr(opt, "selected_subtitle_track", None))
             updated_dest = apply_media_filename_tags(cur_dest, quality_label=opt.resolution_label, is_sub_burned=is_sub_burned, ext=opt.ext)
             if hasattr(self, "entry_dest") and updated_dest != cur_dest:
                 self.entry_dest.delete(0, tk.END)
@@ -271,14 +296,29 @@ class MediaOptionsBarMixin(MediaOptionsActionsMixin):
         # Reflect updated options into Column 1 staged card
         u = ctx.get("url")
         staged = getattr(self, "_staged_links", [])
-        if u and any(it.get("url") == u for it in staged):
-            try:
-                from faqih_downloader.ui.panels.kanban_staged_helpers import stage_media_option_in_col1
-                raw_title = ctx.get("raw_title") or (ctx.get("info", {}).get("title") if isinstance(ctx.get("info"), dict) else "")
-                dur = ctx.get("duration") or (ctx.get("info", {}).get("duration") if isinstance(ctx.get("info"), dict) else 0) or 0
-                stage_media_option_in_col1(self, u, raw_title, opt, ctx.get("final_dest", "") or cur_dest, dur)
-            except Exception:
-                pass
+        for it in staged:
+            if it.get("url") == u:
+                it["selected_opt"] = opt
+                it["final_dest"] = ctx.get("final_dest", "") or cur_dest
+                if isinstance(it.get("media_context"), dict):
+                    it["media_context"]["selected_option"] = opt
+                    it["media_context"]["selected_opt"] = opt
+                    it["media_context"]["selected_audio_track"] = getattr(opt, "selected_audio_track", None)
+                    it["media_context"]["selected_subtitle_track"] = getattr(opt, "selected_subtitle_track", None)
+                    it["media_context"]["subtitle_embed_mode"] = sub_mode
+        try:
+            from faqih_downloader.ui.panels.kanban_staged_prober import stage_media_option_in_col1
+            raw_title = ctx.get("raw_title") or (ctx.get("info", {}).get("title") if isinstance(ctx.get("info"), dict) else "")
+            dur = ctx.get("duration") or (ctx.get("info", {}).get("duration") if isinstance(ctx.get("info"), dict) else 0) or 0
+            stage_media_option_in_col1(self, u, raw_title, opt, ctx.get("final_dest", "") or cur_dest, dur)
+        except Exception:
+            pass
+        if hasattr(self, "refresh_kanban_col1"):
+            try: self.refresh_kanban_col1()
+            except Exception: pass
+        if hasattr(self, "update_idletasks"):
+            try: self.update_idletasks()
+            except Exception: pass
 
     def _on_main_quality_changed(self, event=None):
         """Dynamically updates destination filename extension and quality tag when user picks a different quality."""

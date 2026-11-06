@@ -258,18 +258,39 @@ class YouTubeDownloadControllerMixin:
                                 pass
                             self._quality_modal = None
 
-                        self._last_media_context = {
+                        self._pending_media_context = {
                             "url": url,
                             "info": info,
                             "options": options,
                             "audio_tracks": audio_tracks,
                             "subtitle_tracks": subtitle_tracks,
                             "selected_option": init_opt,
+                            "selected_opt": init_opt,
                             "resolver": resolver,
-                            "final_dest": initial_dest
+                            "final_dest": initial_dest,
+                            "raw_title": raw_title,
+                            "duration": duration
                         }
+                        self._last_media_context = dict(self._pending_media_context)
                         if hasattr(self, "_cache_media_context"):
                             self._cache_media_context(url, self._last_media_context)
+
+                        if hasattr(self, "_on_staged_probe_ready"):
+                            try: self._on_staged_probe_ready(self._pending_media_context)
+                            except Exception: pass
+                        elif hasattr(self, "populate_main_media_bar"):
+                            try: self.populate_main_media_bar(self._pending_media_context)
+                            except Exception: pass
+
+                        try:
+                            from faqih_downloader.ui.panels.kanban_staged_prober import stage_media_option_in_col1
+                            stage_media_option_in_col1(self, url, raw_title, init_opt, initial_dest, duration)
+                        except Exception:
+                            pass
+
+                        if hasattr(self, "update_idletasks"):
+                            try: self.update_idletasks()
+                            except Exception: pass
 
                         self._quality_modal = QualitySelectionModal(
                             parent=self.root,
