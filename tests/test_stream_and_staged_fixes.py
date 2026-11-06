@@ -414,11 +414,41 @@ class TestMediaOptionsBarAndStagedCard(unittest.TestCase):
             file_card = build_staged_link_card(parent, file_info, callbacks)
             self.assertIsNotNone(file_card)
 
+            file_buttons = []
+            for child in file_card.inner.winfo_children():
+                if isinstance(child, tk.Button):
+                    file_buttons.append(child)
+                for sub in child.winfo_children():
+                    if isinstance(sub, tk.Button):
+                        file_buttons.append(sub)
+
+            file_quality_btn = next((b for b in file_buttons if tr("staged_btn_quality", "") in b.cget("text") or "⚙" in b.cget("text")), None)
+            file_start_btn = next((b for b in file_buttons if tr("staged_btn_start", "") in b.cget("text") or "▶" in b.cget("text")), None)
+            self.assertIsNotNone(file_quality_btn, "staged_btn_quality button not found in non-media card")
+            self.assertIsNotNone(file_start_btn, "staged_btn_start button not found in non-media card")
+            file_quality_btn.invoke()
+            callbacks["quality"].assert_called_with(file_info)
+            file_start_btn.invoke()
+            callbacks["start"].assert_called_with(file_info)
+
         finally:
             try:
                 root.destroy()
             except Exception:
                 pass
+
+    def test_build_staged_link_card_when_tk_is_none(self):
+        """Verifies build_staged_link_card handles headless/None Tkinter environments gracefully."""
+        import faqih_downloader.ui.panels.kanban_staged_helpers as ksh
+        orig_tk = ksh.tk
+        try:
+            ksh.tk = None
+            res = ksh.build_staged_link_card(None, {"url": "https://example.com"}, {})
+            self.assertIsNone(res)
+            ksh.render_col1_staged_cards(None, None, [{"url": "https://example.com"}])
+            ksh.render_kanban_col1_content(None, None, [], [{"url": "https://example.com"}], [])
+        finally:
+            ksh.tk = orig_tk
 
 
 if __name__ == "__main__":

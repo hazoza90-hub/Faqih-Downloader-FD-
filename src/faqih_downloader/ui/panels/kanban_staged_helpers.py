@@ -66,6 +66,8 @@ def show_staged_context_menu(event: Any, info: Dict[str, Any], root: Any, callba
 
 def build_staged_link_card(parent: Any, info: Dict[str, Any], callbacks: Dict[str, Callable]) -> Any:
     """Builds a rounded glass Canvas card for a staged/probed link in Column 1."""
+    if tk is None:
+        return None
     file_name = info.get("file_name") or derive_download_filename(info.get("url", "")) or "download.bin"
     file_size = int(info.get("file_size") or 0)
     category = info.get("category") or "file"
@@ -185,6 +187,8 @@ def render_col1_staged_cards(
     staged_links: List[Dict[str, Any]]
 ) -> None:
     """Builds and packs all staged link cards into container."""
+    if tk is None:
+        return
     from faqih_downloader.ui.modals.file_info_modal import open_file_info_modal
 
     def _on_info(info: Dict[str, Any]):
@@ -198,10 +202,11 @@ def render_col1_staged_cards(
     def _on_quality(info: Dict[str, Any]):
         url = info.get("url", "")
         dest = info.get("final_dest", "")
+        end_val = tk.END if tk else "end"
         if hasattr(gui, "entry_url") and gui.entry_url and url:
-            gui.entry_url.delete(0, tk.END); gui.entry_url.insert(0, url)
+            gui.entry_url.delete(0, end_val); gui.entry_url.insert(0, url)
         if hasattr(gui, "entry_dest") and gui.entry_dest and dest:
-            gui.entry_dest.delete(0, tk.END); gui.entry_dest.insert(0, dest)
+            gui.entry_dest.delete(0, end_val); gui.entry_dest.insert(0, dest)
         if info.get("media_context"):
             gui._pending_media_context = dict(info["media_context"])
         elif info.get("selected_opt") is not None:
@@ -241,6 +246,8 @@ def render_kanban_col1_content(
     queued: List[Any]
 ) -> None:
     """Renders active parsing tasks, staged links, and queued downloads in Column 1."""
+    if tk is None:
+        return
     from faqih_downloader.ui.panels.kanban_cards import build_queued_card
 
     # 1. Parsing links
