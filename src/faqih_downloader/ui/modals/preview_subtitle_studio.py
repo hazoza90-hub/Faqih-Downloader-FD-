@@ -8,6 +8,10 @@ from __future__ import annotations
 def get_studio_css() -> str:
     """Returns CSS rules for the live draggable subtitle overlay and styling studio bar."""
     return """
+video::cue, ::cue {
+    opacity: 0 !important; display: none !important; color: transparent !important;
+    background: transparent !important; text-shadow: none !important;
+}
 .live-sub-overlay {
     position: absolute; left: 50%; top: 86%; transform: translate(-50%, -50%);
     z-index: 25; pointer-events: auto; cursor: grab; user-select: none;
@@ -110,6 +114,63 @@ let subPreset = "youtube", subScale = 1.0, subColor = "#FFFFFF", subBgMode = "bo
 let liveSubCues = [];
 let isDraggingSub = false, dragStartX = 0, dragStartY = 0, initialSubX = 50.0, initialSubY = 86.0;
 
+function disableNativeTextTracks() {
+    try {
+        const vt = document.getElementById("vttTrack");
+        if (vt && vt.track) vt.track.mode = "disabled";
+    } catch(e) {}
+    try {
+        if (videoEl && videoEl.textTracks) {
+            for (let i = 0; i < videoEl.textTracks.length; i++) {
+                videoEl.textTracks[i].mode = "disabled";
+            }
+        }
+    } catch(e) {}
+}
+
+function getRenderedVideoRect() {
+    const container = document.getElementById("playerContainer");
+    const cW = (container && container.clientWidth) ? container.clientWidth : (window.innerWidth || 800);
+    const cH = (container && container.clientHeight) ? container.clientHeight : 400;
+    let vW = (videoEl && videoEl.videoWidth) ? videoEl.videoWidth : 0;
+    let vH = (videoEl && videoEl.videoHeight) ? videoEl.videoHeight : 0;
+
+    if (vW <= 0 || vH <= 0) {
+        let qText = "";
+        const selRow = document.querySelector(".opt-row.selected");
+        if (selRow) qText += " " + selRow.textContent;
+        const bRes = document.getElementById("badgeRes");
+        if (bRes) qText += " " + bRes.textContent;
+
+        const m = qText.match(/(\\d{3,5})\\s*x\\s*(\\d{3,5})/i);
+        if (m) {
+            vW = parseInt(m[1], 10);
+            vH = parseInt(m[2], 10);
+        } else if (/vertical|shorts/i.test(qText)) {
+            vW = 9; vH = 16;
+        } else {
+            vW = 16; vH = 9;
+        }
+    }
+
+    const vRatio = vW / (vH || 1);
+    const cRatio = cW / (cH || 1);
+    let rW, rH, oX, oY;
+
+    if (vRatio < cRatio) {
+        rH = cH;
+        rW = Math.round(cH * vRatio);
+        oX = Math.round((cW - rW) / 2);
+        oY = 0;
+    } else {
+        rW = cW;
+        rH = Math.round(cW / vRatio);
+        oX = 0;
+        oY = Math.round((cH - rH) / 2);
+    }
+    return { width: rW, height: rH, offsetX: oX, offsetY: oY };
+}
+
 function _decodeVttEntities(str) {
     if (!str || str.indexOf("&") === -1) return str;
     const txt = document.createElement("textarea");
@@ -185,11 +246,13 @@ function applyLiveSubStyle() {
     else if (subPreset === "custom") overlay.classList.add(subBgMode === "box" ? "sub-preset-custom-box" : "sub-preset-custom-outline");
     else overlay.classList.add("sub-preset-youtube");
 
-    const pHeight = (videoEl && videoEl.clientHeight > 100) ? videoEl.clientHeight : 380;
-    const baseSize = Math.max(13, Math.min(26, Math.round(pHeight * 0.046)));
+    const vidRect = getRenderedVideoRect();
+    overlay.style.maxWidth = Math.round(vidRect.width * 0.88) + "px";
+    const baseSize = Math.max(12, Math.min(28, Math.round(Math.min(vidRect.width, vidRect.height) * 0.045)));
     overlay.style.fontSize = Math.round(baseSize * subScale) + "px";
     if (subPreset === "custom") overlay.style.color = subColor;
-    overlay.style.left = subPosX + "%"; overlay.style.top = subPosY + "%";
+    overlay.style.left = Math.round(vidRect.offsetX + (subPosX / 100.0) * vidRect.width) + "px";
+    overlay.style.top = Math.round(vidRect.offsetY + (subPosY / 100.0) * vidRect.height) + "px";
 }
 
 function setSubPreset(name) {
@@ -253,14 +316,16 @@ function initLiveSubDragDrop() {
     const onMove = (e) => {
         if (!isDraggingSub) return;
         const cx = e.clientX || (e.touches && e.touches[0].clientX) || 0, cy = e.clientY || (e.touches && e.touches[0].clientY) || 0;
-        const rect = container.getBoundingClientRect();
-        if (rect.width <= 0 || rect.height <= 0) return;
-        let nx = Math.max(6.0, Math.min(94.0, initialSubX + ((cx - dragStartX) / rect.width) * 100.0));
-        let ny = Math.max(8.0, Math.min(92.0, initialSubY + ((cy - dragStartY) / rect.height) * 100.0));
+        const vidRect = getRenderedVideoRect();
+        if (vidRect.width <= 0 || vidRect.height <= 0) return;
+        let nx = initialSubX + ((cx - dragStartX) / vidRect.width) * 100.0;
+        let ny = initialSubY + ((cy - dragStartY) / vidRect.height) * 100.0;
+        nx = Math.max(8.0, Math.min(92.0, nx));
+        ny = Math.max(8.0, Math.min(92.0, ny));
         if (Math.abs(nx - 50.0) < 1.6) { nx = 50.0; if (guide) guide.style.display = "block"; }
         else if (guide) guide.style.display = "none";
         subPosX = parseFloat(nx.toFixed(1)); subPosY = parseFloat(ny.toFixed(1));
-        overlay.style.left = subPosX + "%"; overlay.style.top = subPosY + "%";
+        applyLiveSubStyle();
     };
     const onEnd = () => {
         if (!isDraggingSub) return;
@@ -276,5 +341,15 @@ function initLiveSubDragDrop() {
     window.addEventListener("touchmove", onMove, { passive: false });
     window.addEventListener("touchend", onEnd);
     window.addEventListener("resize", applyLiveSubStyle);
+    if (videoEl) {
+        videoEl.addEventListener("loadedmetadata", () => {
+            disableNativeTextTracks();
+            applyLiveSubStyle();
+        });
+        videoEl.addEventListener("play", disableNativeTextTracks);
+        videoEl.addEventListener("timeupdate", disableNativeTextTracks);
+        videoEl.addEventListener("resize", applyLiveSubStyle);
+    }
+    disableNativeTextTracks();
 }
 """.strip()

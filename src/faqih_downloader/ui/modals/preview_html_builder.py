@@ -24,7 +24,7 @@ body { background: #090d16; color: #f1f5f9; font-family: -apple-system, BlinkMac
 .btn:hover { background: #0284c7; color: #fff; border-color: #0284c7; }
 .player-container { flex: 52 1 0; min-height: 200px; position: relative; background: #000; display: flex; align-items: center; justify-content: center; overflow: hidden; }
 video, iframe { width: 100%; height: 100%; border: none; outline: none; background: #000; }
-::cue { background-color: rgba(0, 0, 0, 0.75); color: #ffffff; font-family: "Segoe UI", sans-serif; font-size: 18px; font-weight: 600; text-shadow: 0 2px 4px rgba(0,0,0,0.9); line-height: 1.4; }
+video::cue, ::cue { opacity: 0 !important; display: none !important; color: transparent !important; background: transparent !important; text-shadow: none !important; }
 .settings-panel { flex: 48 1 0; min-height: 200px; background: #0f172a; border-top: 1px solid #1e293b; padding: 8px 16px; display: flex; flex-direction: column; overflow-y: auto; gap: 6px; }
 .settings-header { display: flex; justify-content: space-between; align-items: center; }
 .settings-title { font-size: 11px; font-weight: 700; color: #38bdf8; text-transform: uppercase; letter-spacing: 0.5px; } .settings-count { font-size: 11px; color: #94a3b8; }
@@ -176,8 +176,9 @@ function selectQualityRow(idx) {
             videoEl.play().catch(e => {});
             if (hasDubAudio && dubAudioEl) { dubAudioEl.play().catch(e => {}); }
         }
-        requestUpdatedFilename();
+        if (typeof applyLiveSubStyle === "function") applyLiveSubStyle();
         syncStateToBridge();
+        requestUpdatedFilename();
     }
 }
 
@@ -248,12 +249,13 @@ function onSubChange() {
         if (subBadge) { subBadge.textContent = "💬 " + lbl; subBadge.className = "badge badge-sub"; }
         if (!trk) { trk = document.createElement("track"); trk.id = "vttTrack"; trk.kind = "subtitles"; trk.default = true; videoEl.appendChild(trk); }
         trk.label = lbl; trk.srclang = (t.language || "ar").split("-")[0].split("_")[0]; trk.src = vUrl;
-        try { trk.track.mode = "hidden"; } catch (e) {}
+        try { trk.track.mode = "disabled"; } catch (e) {}
         loadLiveSubtitlesFromUrl(vUrl);
         applyLiveSubStyle();
     }
-    requestUpdatedFilename();
+    if (typeof disableNativeTextTracks === "function") disableNativeTextTracks();
     syncStateToBridge();
+    requestUpdatedFilename();
 }
 
 function onModeChange() {
@@ -288,7 +290,12 @@ function requestUpdatedFilename() {
     if (!sid || !destInput) return;
     fetch(`${bridgeBase}/api/update_filename?sid=${encodeURIComponent(sid)}`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ q_idx: selected_q_idx, sub_mode: modeSelect ? modeSelect.value : "hard_burn", current_dest: destInput.value })
+        body: JSON.stringify({
+            q_idx: selected_q_idx,
+            s_idx: subSelect ? parseInt(subSelect.value) : 0,
+            sub_mode: modeSelect ? modeSelect.value : "hard_burn",
+            current_dest: destInput.value
+        })
     }).then(r => r.json()).then(d => { if (d && d.dest_path) destInput.value = d.dest_path; }).catch(e => {});
 }
 
@@ -317,6 +324,7 @@ __STUDIO_JS__
 subPreset = __SUB_PRESET__; subScale = __SUB_SCALE__; subColor = __SUB_COLOR__;
 subBgMode = __SUB_BG__; subPosX = __SUB_PX__; subPosY = __SUB_PY__;
 initLiveSubDragDrop();
+if (typeof disableNativeTextTracks === "function") disableNativeTextTracks();
 applyLiveSubStyle();
 if (sid && subtitleTracks && __SEL_S_IDX__ > 0) {
     loadLiveSubtitlesFromUrl(`${bridgeBase}/subtitle.vtt?sid=${encodeURIComponent(sid)}&s_idx=${__SEL_S_IDX__}`);

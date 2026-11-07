@@ -402,6 +402,12 @@ class YouTubeFormatBuilderMixin:
                 sub_pos = get_setting("subtitle_position", "bottom")
             except Exception:
                 sub_pos = "bottom"
+        sub_preset = getattr(opt, "subtitle_preset", None) or "youtube"
+        sub_scale = float(getattr(opt, "subtitle_font_scale", 1.0) or 1.0)
+        sub_color = getattr(opt, "subtitle_text_color", None) or "#FFFFFF"
+        sub_bg = getattr(opt, "subtitle_bg_mode", None) or "box"
+        sub_px = float(getattr(opt, "subtitle_pos_x", 50.0) or 50.0)
+        sub_py = float(getattr(opt, "subtitle_pos_y", 86.0) or 86.0)
         audio_lang = sel_audio.get("language") if sel_audio else None
 
         is_dubbed_selection = bool(
@@ -462,6 +468,9 @@ class YouTubeFormatBuilderMixin:
                 audio_language=audio_lang,
                 subtitle_embed_mode=sub_mode,
                 subtitle_position=sub_pos,
+                subtitle_preset=sub_preset, subtitle_font_scale=sub_scale,
+                subtitle_text_color=sub_color, subtitle_bg_mode=sub_bg,
+                subtitle_pos_x=sub_px, subtitle_pos_y=sub_py,
                 webpage_url=webpage_url,
             )
         elif opt.is_progressive or not opt.audio_url:
@@ -487,6 +496,9 @@ class YouTubeFormatBuilderMixin:
                 audio_language=audio_lang,
                 subtitle_embed_mode=sub_mode,
                 subtitle_position=sub_pos,
+                subtitle_preset=sub_preset, subtitle_font_scale=sub_scale,
+                subtitle_text_color=sub_color, subtitle_bg_mode=sub_bg,
+                subtitle_pos_x=sub_px, subtitle_pos_y=sub_py,
                 webpage_url=webpage_url,
             )
         else:
@@ -513,6 +525,9 @@ class YouTubeFormatBuilderMixin:
                 audio_language=audio_lang,
                 subtitle_embed_mode=sub_mode,
                 subtitle_position=sub_pos,
+                subtitle_preset=sub_preset, subtitle_font_scale=sub_scale,
+                subtitle_text_color=sub_color, subtitle_bg_mode=sub_bg,
+                subtitle_pos_x=sub_px, subtitle_pos_y=sub_py,
                 webpage_url=webpage_url,
                 audio_format_id=str(opt.selected_audio_track.get("format_id") or "") if isinstance(opt.selected_audio_track, dict) else "",
             )

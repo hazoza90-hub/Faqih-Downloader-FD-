@@ -141,10 +141,6 @@ def unregister_preview_session(sid: str) -> None:
         _SESSIONS.pop(sid, None)
 
 
-
-
-
-
 def _apply_session_sub_styles(opt: Any, session: PreviewSession) -> None:
     if not opt: return
     opt.subtitle_preset, opt.subtitle_font_scale = session.subtitle_preset, session.subtitle_font_scale
@@ -321,12 +317,16 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
     def _handle_api_update_filename(self, session: PreviewSession, body: Dict[str, Any]) -> None:
         """Updates the destination filename with quality and burn-in tags live."""
         q_idx = _safe_int(body.get("q_idx", 0))
+        s_idx = _safe_int(body.get("s_idx", -1))
         sub_mode = str(body.get("sub_mode", "soft_embed"))
         cur_dest = str(body.get("current_dest", "")).strip() or session.default_dest_path
 
         opt = session.options[q_idx] if 0 <= q_idx < len(session.options) else (session.options[0] if session.options else None)
         if opt:
-            has_subs = (bool(session.subtitle_tracks) and len(session.subtitle_tracks) > 1) if (session.selected_sub_track is None) else (session.selected_sub_track.get("sub_id") not in (None, "none"))
+            if s_idx >= 0:
+                has_subs = (s_idx > 0)
+            else:
+                has_subs = (bool(session.subtitle_tracks) and len(session.subtitle_tracks) > 1) if (session.selected_sub_track is None) else (session.selected_sub_track.get("sub_id") not in (None, "none"))
             is_burned = (sub_mode == "hard_burn") and has_subs
             updated = apply_media_filename_tags(
                 cur_dest,

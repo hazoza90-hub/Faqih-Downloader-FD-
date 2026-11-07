@@ -55,8 +55,25 @@ def _extract_cue_item(item: Any) -> Optional[Tuple[float, float, str]]:
     return None
 
 
+def _balance_single_line(text: str) -> str:
+    """If text is a single line and has > 38 chars or > 5 words, splits at nearest space to center."""
+    stripped = text.strip()
+    if not stripped or "\n" in stripped:
+        return text
+    words = stripped.split()
+    if len(stripped) > 38 or len(words) > 5:
+        mid = len(stripped) // 2
+        spaces = [i for i, ch in enumerate(stripped) if ch == " "]
+        if spaces:
+            best_space = min(spaces, key=lambda idx: abs(idx - mid))
+            p1, p2 = stripped[:best_space].strip(), stripped[best_space + 1:].strip()
+            if p1 and p2:
+                return f"{p1}\n{p2}"
+    return text
+
+
 def _split_single_cue(
-    s: float, e: float, text: str, max_words: int
+    s: float, e: float, text: str, max_words: int = 10
 ) -> List[Tuple[float, float, str]]:
     """Recursively splits a cue until it satisfies max 2 lines AND max_words."""
     dur = max(0.2, e - s)
@@ -77,12 +94,12 @@ def _split_single_cue(
         p1, p2 = " ".join(words[:mid]), " ".join(words[mid:])
         return _split_single_cue(s, t_mid, p1, max_words) + _split_single_cue(t_mid, e, p2, max_words)
 
-    return [(s, e, text)]
+    return [(s, e, _balance_single_line(text))]
 
 
 def normalize_and_dedupe_cues(
     cues: Any,
-    max_words: int = 14
+    max_words: int = 10
 ) -> Any:
     """Deduplicates roll-up lines, prevents overlaps, and caps cues at 2 lines / max_words."""
     if not cues: return []
@@ -121,6 +138,7 @@ def normalize_and_dedupe_cues(
     final_cues: List[Tuple[float, float, str]] = []
     for i in range(len(split_cues)):
         cur_s, cur_e, cur_t = split_cues[i]
+        cur_t = _balance_single_line(cur_t)
         if i + 1 < len(split_cues):
             next_s = split_cues[i + 1][0]
             cur_e = min(cur_e, next_s - 0.02)
@@ -269,7 +287,7 @@ def generate_styled_ass_file(
                 cues = _parse_srt_text_to_cues(f.read())
         else: cues = _parse_srt_text_to_cues(srt_source)
 
-    norm_cues = normalize_and_dedupe_cues(cues, max_words=8 if p_name == "tiktok" else 14)
+    norm_cues = normalize_and_dedupe_cues(cues, max_words=7 if p_name == "tiktok" else 10)
     lines = [
         "[Script Info]", "Title: Faqih Downloader Styled Subtitle", "ScriptType: v4.00+", "WrapStyle: 0",
         "ScaledBorderAndShadow: yes", "YCbCr Matrix: TV.601", f"PlayResX: {vid_w}", f"PlayResY: {vid_h}", "",
