@@ -240,23 +240,24 @@ function onSubChange() {
     if (!subSelect) return;
     const s = parseInt(subSelect.value);
     if (s > 0 && !window._userTouchedMode && modeSelect) modeSelect.value = "hard_burn";
-    let trk = document.getElementById("vttTrack");
+    let trk = document.getElementById("vttTrack"), loadP = null;
     if (s <= 0 || s >= subtitleTracks.length) {
         if (trk) { trk.src = ""; try { trk.track.mode = "disabled"; } catch (e) {} }
         if (subBadge) { subBadge.textContent = "💬 No Subtitles"; subBadge.className = "badge badge-dim"; }
-        loadLiveSubtitlesFromUrl(null);
+        loadP = loadLiveSubtitlesFromUrl(null);
     } else {
         const t = subtitleTracks[s], lbl = t.label || t.language || "Subtitles", vUrl = sid ? `${bridgeBase}/subtitle.vtt?sid=${encodeURIComponent(sid)}&s_idx=${s}` : (t.url || "");
         if (subBadge) { subBadge.textContent = "💬 " + lbl; subBadge.className = "badge badge-sub"; }
         if (!trk) { trk = document.createElement("track"); trk.id = "vttTrack"; trk.kind = "subtitles"; trk.default = true; videoEl.appendChild(trk); }
         trk.label = lbl; trk.srclang = (t.language || "ar").split("-")[0].split("_")[0]; trk.src = vUrl;
         try { trk.track.mode = "disabled"; } catch (e) {}
-        loadLiveSubtitlesFromUrl(vUrl);
+        loadP = loadLiveSubtitlesFromUrl(vUrl);
         applyLiveSubStyle();
     }
     if (typeof disableNativeTextTracks === "function") disableNativeTextTracks();
     syncStateToBridge();
     requestUpdatedFilename();
+    return loadP;
 }
 
 function onModeChange() {

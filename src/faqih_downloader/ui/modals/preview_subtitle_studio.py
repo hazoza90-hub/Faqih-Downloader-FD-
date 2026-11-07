@@ -233,20 +233,21 @@ function parseVttToCuesArray(vttText) {
 }
 
 function loadLiveSubtitlesFromUrl(vttUrl) {
-    if (!vttUrl) { liveSubCues = []; updateLiveSubDisplay(); return; }
+    if (!vttUrl) { liveSubCues = []; updateLiveSubDisplay(); return Promise.resolve([]); }
     if (vttUrl.startsWith("data:")) {
         try {
             const b64 = vttUrl.split(",")[1];
             const txt = decodeURIComponent(escape(atob(b64)));
             liveSubCues = parseVttToCuesArray(txt);
             updateLiveSubDisplay();
-            return;
+            return Promise.resolve(liveSubCues);
         } catch(e) {}
     }
-    fetch(vttUrl).then(r => r.text()).then(txt => {
+    return fetch(vttUrl).then(r => r.text()).then(txt => {
         liveSubCues = parseVttToCuesArray(txt);
         updateLiveSubDisplay();
-    }).catch(() => { liveSubCues = []; updateLiveSubDisplay(); });
+        return liveSubCues;
+    }).catch(() => { liveSubCues = []; updateLiveSubDisplay(); return []; });
 }
 
 function _escapeSubHtml(s) {
