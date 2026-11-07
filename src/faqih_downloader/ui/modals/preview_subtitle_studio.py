@@ -189,7 +189,7 @@ function _decodeVttEntities(str) {
 function _balanceSingleLine(text) {
     if (!text) return "";
     const stripped = text.trim();
-    if (!stripped || stripped.indexOf("\n") !== -1) return text;
+    if (!stripped || stripped.indexOf("\\n") !== -1) return text;
     const words = stripped.split(" ").filter(Boolean);
     if (stripped.length > 38 || words.length > 5) {
         const mid = Math.floor(stripped.length / 2);
@@ -204,7 +204,7 @@ function _balanceSingleLine(text) {
             }
             const p1 = stripped.slice(0, best).trim();
             const p2 = stripped.slice(best + 1).trim();
-            if (p1 && p2) return p1 + "\n" + p2;
+            if (p1 && p2) return p1 + "\\n" + p2;
         }
     }
     return text;

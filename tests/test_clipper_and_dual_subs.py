@@ -440,6 +440,54 @@ Non-mp4 clip cue
             # 40s-45s shifted by -35s -> 5s-10s
             self.assertIn("00:00:05,000 --> 00:00:10,000", shifted_srt)
 
+    def test_generated_preview_javascript_has_zero_syntax_errors(self):
+        """Verifies that generate_preview_html produces syntactically valid JavaScript."""
+        import re
+        import shutil
+        from faqih_downloader.ui.modals.preview_html_builder import generate_preview_html
+
+        html = generate_preview_html(
+            url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            video_title="Test Video Title with 'Quotes' and Special Characters",
+            stream_url="http://127.0.0.1:9655/stream_video?sid=test_session",
+            vtt_data_uri="data:text/vtt;base64,V0VCVlRUCgoxCjAwOjAwOjAxLjAwMCAtLT4gMDA6MDA6MDUuMDAwCuinmNmF2YTYqQo=",
+            video_id="dQw4w9WgXcQ",
+            sub_label="Arabic",
+            session_id="test_session",
+            quality_options=[{"format_id": "18", "format_note": "360p", "ext": "mp4", "filesize": 1000}],
+            audio_tracks=[{"label": "Original Audio", "language": "en"}],
+            subtitle_tracks=[{"label": "None", "language": "none"}, {"label": "Arabic", "language": "ar"}],
+        )
+
+        match = re.search(r"<script>(.*?)</script>", html, re.DOTALL)
+        self.assertIsNotNone(match, "No <script> block found in generated preview HTML")
+        js_code = match.group(1)
+
+        # Check that no unescaped newlines broke string literals
+        self.assertNotIn('indexOf("\n")', js_code)
+        self.assertNotIn('indexOf(\'\n\')', js_code)
+        self.assertNotIn(' + "\n" + ', js_code)
+        self.assertNotIn(' + \'\n\' + ', js_code)
+
+        # If node is available on system, execute node --check
+        node_bin = shutil.which("node")
+        if node_bin:
+            with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as f:
+                f.write(js_code)
+                tmp_js = f.name
+            try:
+                proc = subprocess.run([node_bin, "--check", tmp_js], capture_output=True, text=True)
+                self.assertEqual(
+                    proc.returncode, 0,
+                    f"node --check failed with exit code {proc.returncode}:\n{proc.stderr}\n{proc.stdout}"
+                )
+            finally:
+                if os.path.exists(tmp_js):
+                    try:
+                        os.remove(tmp_js)
+                    except OSError:
+                        pass
+
 
 if __name__ == "__main__":
     unittest.main()

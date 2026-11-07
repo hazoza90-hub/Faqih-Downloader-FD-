@@ -20,9 +20,9 @@ def get_clipper_css() -> str:
 }
 .clipper-input:focus { border-color: #38bdf8; box-shadow: 0 0 0 1px #38bdf8; }
 .sub-edit-modal {
-    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
     background: #0f172a; border: 1px solid #38bdf8; border-radius: 8px;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.85); padding: 12px 14px; z-index: 60;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.85); padding: 12px 14px; z-index: 9999;
     width: 88%; max-width: 460px; display: flex; flex-direction: column; gap: 8px;
     box-sizing: border-box;
 }
@@ -118,9 +118,13 @@ function updateClipUI() {
 }
 
 function setClipStartFromCurrent() {
-    if (videoEl && !isNaN(videoEl.currentTime)) {
-        clipStartSec = parseFloat(videoEl.currentTime.toFixed(2));
-        if (clipEndSec > 0 && clipEndSec <= clipStartSec) clipEndSec = 0.0;
+    clipStartSec = parseFloat((videoEl && !isNaN(videoEl.currentTime) ? videoEl.currentTime : 0).toFixed(2));
+    if (clipEndSec <= clipStartSec) {
+        if (videoEl && !isNaN(videoEl.duration) && videoEl.duration > clipStartSec) {
+            clipEndSec = parseFloat(videoEl.duration.toFixed(2));
+        } else {
+            clipEndSec = parseFloat((clipStartSec + 30.0).toFixed(2));
+        }
     }
     updateClipUI();
     if (typeof syncStateToBridge === "function") syncStateToBridge();
@@ -167,16 +171,38 @@ function openSubTextEditor() {
     const modal = document.getElementById("subEditModal"), txtArea = document.getElementById("subEditTextArea");
     const tBadge = document.getElementById("subEditTimeBadge");
     if (!modal || !txtArea) return;
+    const sEl = document.getElementById("subSelect");
+    if (sEl && parseInt(sEl.value) <= 0 && typeof subtitleTracks !== "undefined" && subtitleTracks && subtitleTracks.length > 1) {
+        let firstIdx = 1;
+        for (let i = 1; i < subtitleTracks.length; i++) {
+            if (String(subtitleTracks[i].language || "").toLowerCase().startsWith("ar")) { firstIdx = i; break; }
+        }
+        sEl.value = String(firstIdx);
+        if (typeof onSubChange === "function") onSubChange();
+    }
     const ct = (videoEl && !isNaN(videoEl.currentTime)) ? videoEl.currentTime : 0;
     let cueIdx = -1, cue = null;
-    if (liveSubCues && liveSubCues.length) {
+    if (liveSubCues && liveSubCues.length > 0) {
         cueIdx = liveSubCues.findIndex(c => ct >= c.start && ct <= c.end);
-        if (cueIdx === -1) cueIdx = liveSubCues.findIndex(c => c.start >= ct);
-        if (cueIdx === -1) cueIdx = liveSubCues.length - 1;
-        if (cueIdx < 0) cueIdx = 0;
-        cue = liveSubCues[cueIdx];
+        if (cueIdx === -1) {
+            let minDiff = Infinity;
+            for (let i = 0; i < liveSubCues.length; i++) {
+                const diff = Math.abs(liveSubCues[i].start - ct);
+                if (diff < minDiff) { minDiff = diff; cueIdx = i; }
+            }
+        }
+        if (cueIdx >= 0 && cueIdx < liveSubCues.length) {
+            cue = liveSubCues[cueIdx];
+        }
     }
-    if (!cue) return;
+    if (!cue) {
+        const startT = Math.max(0, parseFloat(ct.toFixed(2)));
+        const endT = parseFloat((startT + 4.0).toFixed(2));
+        cue = { start: startT, end: endT, text: "" };
+        if (!Array.isArray(liveSubCues)) liveSubCues = [];
+        liveSubCues.push(cue);
+        cueIdx = liveSubCues.length - 1;
+    }
     currentActiveCueIndex = cueIdx;
     if (videoEl) videoEl.pause();
     txtArea.value = cue.text || "";
@@ -212,8 +238,16 @@ function toggleDualSubtitles() {
     const btn = document.getElementById("btnDualSub");
     if (btn) btn.classList.toggle("active", dualSubEnabled);
     if (dualSubEnabled) {
-        secSubIndex = -1;
         const sEl = document.getElementById("subSelect");
+        if (sEl && parseInt(sEl.value) <= 0 && typeof subtitleTracks !== "undefined" && subtitleTracks && subtitleTracks.length > 1) {
+            let firstIdx = 1;
+            for (let i = 1; i < subtitleTracks.length; i++) {
+                if (String(subtitleTracks[i].language || "").toLowerCase().startsWith("ar")) { firstIdx = i; break; }
+            }
+            sEl.value = String(firstIdx);
+            if (typeof onSubChange === "function") onSubChange();
+        }
+        secSubIndex = -1;
         const curPrim = sEl ? parseInt(sEl.value) : 1;
         if (subtitleTracks && subtitleTracks.length > 1) {
             for (let i = 1; i < subtitleTracks.length; i++) {
@@ -250,6 +284,9 @@ function initClipperStudioHooks() {
             if (isLoopingClip && clipEndSec > clipStartSec) {
                 if (videoEl.currentTime >= clipEndSec || videoEl.currentTime < clipStartSec) {
                     videoEl.currentTime = clipStartSec;
+                    if (typeof hasDubAudio !== "undefined" && hasDubAudio && typeof dubAudioEl !== "undefined" && dubAudioEl) {
+                        try { dubAudioEl.currentTime = clipStartSec; } catch(e) {}
+                    }
                 }
             }
         });

@@ -26,10 +26,10 @@ body { background: #090d16; color: #f1f5f9; font-family: -apple-system, BlinkMac
 .player-container { flex: 52 1 0; min-height: 200px; position: relative; background: #000; display: flex; align-items: center; justify-content: center; overflow: hidden; }
 video, iframe { width: 100%; height: 100%; border: none; outline: none; background: #000; }
 video::cue, ::cue, video::-webkit-media-text-track-container, video::-webkit-media-text-track-display, video::-webkit-media-text-track-region { opacity: 0 !important; display: none !important; color: transparent !important; background: transparent !important; text-shadow: none !important; }
-.settings-panel { flex: 48 1 0; min-height: 200px; background: #0f172a; border-top: 1px solid #1e293b; padding: 8px 16px; display: flex; flex-direction: column; overflow-y: auto; gap: 6px; }
+.settings-panel { flex: 48 1 0; min-height: 200px; background: #0f172a; border-top: 1px solid #1e293b; padding: 6px 14px; display: flex; flex-direction: column; overflow-y: auto; gap: 5px; }
 .settings-header { display: flex; justify-content: space-between; align-items: center; }
 .settings-title { font-size: 11px; font-weight: 700; color: #38bdf8; text-transform: uppercase; letter-spacing: 0.5px; } .settings-count { font-size: 11px; color: #94a3b8; }
-.table-container { max-height: 105px; overflow-y: auto; background: #131d31; border: 1px solid #1e293b; border-radius: 6px; }
+.table-container { max-height: 82px; overflow-y: auto; background: #131d31; border: 1px solid #1e293b; border-radius: 6px; }
 .format-table { width: 100%; border-collapse: collapse; font-size: 12px; text-align: left; }
 .format-table th { background: #17233c; color: #94a3b8; padding: 5px 10px; font-weight: 600; position: sticky; top: 0; border-bottom: 1px solid #1e293b; }
 .format-table td { padding: 4px 10px; border-bottom: 1px solid #1e293b; color: #cbd5e1; }
@@ -40,7 +40,7 @@ video::cue, ::cue, video::-webkit-media-text-track-container, video::-webkit-med
 .ctrl-group select { background: #17233c; color: #f8fafc; border: 1px solid #334155; padding: 4px 8px; border-radius: 6px; font-size: 12px; outline: none; cursor: pointer; }
 .dest-card { display: flex; align-items: center; background: #17233c; border: 1px solid #334155; padding: 4px 10px; border-radius: 6px; gap: 8px; }
 .dest-card label { font-size: 11px; font-weight: 600; color: #94a3b8; white-space: nowrap; } .dest-card input { background: transparent; color: #f8fafc; border: none; outline: none; font-size: 12px; flex: 1; }
-.action-bar { display: flex; align-items: center; gap: 10px; margin-top: 2px; }
+.action-bar { display: flex; align-items: center; gap: 10px; margin-top: 2px; position: sticky; bottom: 0; background: #0f172a; padding-top: 4px; z-index: 10; }
 .btn-download { background: #059669; color: #fff; border: none; padding: 7px 15px; font-size: 12px; font-weight: 700; border-radius: 6px; cursor: pointer; } .btn-download:hover { background: #047857; }
 .btn-secondary { background: #1e293b; color: #cbd5e1; border: 1px solid #334155; padding: 7px 13px; font-size: 12px; font-weight: 600; border-radius: 6px; cursor: pointer; } .btn-secondary:hover { background: #334155; }
 .btn-cancel { background: transparent; color: #94a3b8; border: 1px solid #334155; padding: 7px 13px; font-size: 12px; font-weight: 600; border-radius: 6px; cursor: pointer; margin-left: auto; } .btn-cancel:hover { background: #334155; color: #fff; }
