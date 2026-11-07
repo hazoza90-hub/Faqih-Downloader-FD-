@@ -38,16 +38,62 @@ def parse_srt_timestamp_to_seconds(ts: str) -> float:
     except Exception: return 0.0
 
 
-def normalize_and_dedupe_cues(
-    cues: List[Tuple[float, float, str]],
-    max_words: int = 14
+def _extract_cue_item(item: Any) -> Optional[Tuple[float, float, str]]:
+    """Extracts (start, end, text) from a tuple, dict, or object."""
+    if isinstance(item, (tuple, list)) and len(item) >= 3:
+        try: return float(item[0]), float(item[1]), str(item[2] or "").strip()
+        except Exception: return None
+    if isinstance(item, dict):
+        s = item.get("start", item.get("start_sec", item.get("tStartMs", 0)))
+        e = item.get("end", item.get("end_sec", item.get("dDurationMs", 0)))
+        t = item.get("text", item.get("body", item.get("utf8", "")))
+        try:
+            sf = float(s) / 1000.0 if "tStartMs" in item else float(s)
+            ef = (sf + float(e) / 1000.0) if "dDurationMs" in item else float(e)
+            return sf, ef, str(t or "").strip()
+        except Exception: return None
+    return None
+
+
+def _split_single_cue(
+    s: float, e: float, text: str, max_words: int
 ) -> List[Tuple[float, float, str]]:
+    """Recursively splits a cue until it satisfies max 2 lines AND max_words."""
+    dur = max(0.2, e - s)
+    lines = [l.strip() for l in text.splitlines() if l.strip()]
+    if len(lines) > 2:
+        chunks = ["\n".join(lines[i:i + 2]) for i in range(0, len(lines), 2)]
+        chunk_dur = dur / len(chunks)
+        res: List[Tuple[float, float, str]] = []
+        for idx, ch in enumerate(chunks):
+            cs = s + idx * chunk_dur
+            res.extend(_split_single_cue(cs, cs + chunk_dur, ch, max_words))
+        return res
+
+    words = text.split()
+    if len(words) > max_words and len(words) >= 2 and dur >= 0.4:
+        mid = len(words) // 2
+        t_mid = s + dur / 2.0
+        p1, p2 = " ".join(words[:mid]), " ".join(words[mid:])
+        return _split_single_cue(s, t_mid, p1, max_words) + _split_single_cue(t_mid, e, p2, max_words)
+
+    return [(s, e, text)]
+
+
+def normalize_and_dedupe_cues(
+    cues: Any,
+    max_words: int = 14
+) -> Any:
     """Deduplicates roll-up lines, prevents overlaps, and caps cues at 2 lines / max_words."""
     if not cues: return []
+    is_dict = bool(isinstance(cues[0], dict)) if isinstance(cues, list) and cues else False
+
     cleaned: List[Tuple[float, float, str]] = []
-    for s, e, text in cues:
-        t = (text or "").strip()
-        if t and e > s: cleaned.append((float(s), float(e), t))
+    for item in cues:
+        extracted = _extract_cue_item(item)
+        if extracted:
+            s, e, t = extracted
+            if t and e > s: cleaned.append((s, e, t))
     if not cleaned: return []
     cleaned.sort(key=lambda c: (c[0], c[1]))
 
@@ -60,8 +106,8 @@ def normalize_and_dedupe_cues(
         cur_lines = [l.strip() for l in text.splitlines() if l.strip()]
         if prev_lines and cur_lines:
             if cur_lines[0] == prev_lines[-1]: cur_lines = cur_lines[1:]
-            elif len(cur_lines) > 1 and "\n".join(cur_lines).startswith(prev_text):
-                cur_lines = [l.strip() for l in "\n".join(cur_lines)[len(prev_text):].splitlines() if l.strip()]
+            elif len(cur_lines) >= len(prev_lines) and cur_lines[:len(prev_lines)] == prev_lines:
+                cur_lines = cur_lines[len(prev_lines):]
         new_text = "\n".join(cur_lines).strip()
         if not new_text:
             if e > prev_e: deduped[-1] = (prev_s, e, prev_text)
@@ -70,38 +116,26 @@ def normalize_and_dedupe_cues(
 
     split_cues: List[Tuple[float, float, str]] = []
     for s, e, text in deduped:
-        dur = max(0.2, e - s)
-        lines = [l.strip() for l in text.splitlines() if l.strip()]
-        if len(lines) > 2:
-            chunks = ["\n".join(lines[i:i + 2]) for i in range(0, len(lines), 2)]
-            chunk_dur = dur / len(chunks)
-            for idx, ch in enumerate(chunks):
-                cs = s + idx * chunk_dur
-                split_cues.append((cs, cs + chunk_dur, ch))
-            continue
-        words = text.split()
-        if len(words) > max_words:
-            mid = len(words) // 2
-            t_mid = s + dur / 2.0
-            split_cues.append((s, t_mid - 0.02, " ".join(words[:mid])))
-            split_cues.append((t_mid, e, " ".join(words[mid:])))
-            continue
-        split_cues.append((s, e, text))
+        split_cues.extend(_split_single_cue(s, e, text, max_words=max_words))
 
     final_cues: List[Tuple[float, float, str]] = []
     for i in range(len(split_cues)):
         cur_s, cur_e, cur_t = split_cues[i]
         if i + 1 < len(split_cues):
             next_s = split_cues[i + 1][0]
-            if cur_e >= next_s: cur_e = max(cur_s + 0.1, next_s - 0.02)
-        final_cues.append((cur_s, cur_e, cur_t))
+            cur_e = min(cur_e, next_s - 0.02)
+        if cur_e > cur_s + 0.03:
+            final_cues.append((round(cur_s, 3), round(cur_e, 3), cur_t))
+
+    if is_dict:
+        return [{"start": s, "end": e, "text": t} for s, e, t in final_cues]
     return final_cues
 
 
 def sanitize_arabic_subtitle_text(text: str, for_ass: bool = False) -> str:
     """Normalizes NFC, strips invisible box chars, and reorders terminal punctuation for libass."""
     if not text: return ""
-    norm = unicodedata.normalize("NFC", text)
+    norm = unicodedata.normalize("NFC", str(text))
     clean = INVISIBLE_CHARS_REGEX.sub("", norm)
     if not for_ass: return clean
 
@@ -112,8 +146,13 @@ def sanitize_arabic_subtitle_text(text: str, for_ass: bool = False) -> str:
         if stripped and ARABIC_CHAR_REGEX.search(stripped):
             m = NEUTRAL_TERMINAL_PUNCT_REGEX.search(stripped)
             if m:
-                punct, core = m.group(1).strip(), stripped[:m.start()].strip()
-                line = f"{punct}{core}" if punct and core else stripped
+                core = stripped[:m.start()].strip()
+                punct = m.group(1).strip()
+                core_trimmed = core.rstrip(" )]}»\"'”’")
+                if core_trimmed and ARABIC_CHAR_REGEX.search(core_trimmed[-1]):
+                    line = f"{punct}{core}"
+                else:
+                    line = stripped
             else:
                 line = stripped
         processed.append(line if stripped else "")
@@ -206,21 +245,21 @@ def generate_styled_ass_file(
     if p_name == "tiktok":
         border_style, outline, shadow = 1, 4, 2
         prim_col, back_col, out_col = "&H00FFFFFF", "&H00000000", "&H00000000"
-        font_size = int(ref_dim * 0.045 * scale)
+        font_size = max(14, int(ref_dim * 0.045 * scale))
     elif p_name == "golden":
         border_style, outline, shadow = 3, 10, 0
         prim_col, back_col, out_col = "&H0000D7FF", "&H64000000", "&H64000000"
-        font_size = int(ref_dim * 0.042 * scale)
+        font_size = max(14, int(ref_dim * 0.042 * scale))
     elif p_name == "custom":
         prim_col = hex_to_ass_color(text_color, alpha=0)
         is_box = str(bg_mode or "box").lower() == "box"
         border_style, outline, shadow = (3, 10, 0) if is_box else (1, 4, 2)
         back_col, out_col = ("&H64000000", "&H64000000") if is_box else ("&H00000000", "&H00000000")
-        font_size = int(ref_dim * 0.042 * scale)
+        font_size = max(14, int(ref_dim * 0.042 * scale))
     else:  # youtube
         border_style, outline, shadow = 3, 10, 0
         prim_col, back_col, out_col = "&H00FFFFFF", "&H64000000", "&H64000000"
-        font_size = int(ref_dim * 0.042 * scale)
+        font_size = max(14, int(ref_dim * 0.042 * scale))
 
     cues: List[Tuple[float, float, str]] = []
     if isinstance(srt_source, list): cues = srt_source
@@ -239,10 +278,13 @@ def generate_styled_ass_file(
         f"Style: Default,{font_name},{font_size},{prim_col},&H000000FF,{out_col},{back_col},1,0,0,0,100,100,0,0,{border_style},{outline},{shadow},5,20,20,20,1",
         "", "[Events]", "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
     ]
-    for s, e, body in norm_cues:
+    for item in norm_cues:
+        ext = _extract_cue_item(item)
+        if not ext: continue
+        s, e, body = ext
         s_str, e_str = format_ass_timestamp(s), format_ass_timestamp(e)
         sanitized = sanitize_arabic_subtitle_text(body, for_ass=True)
-        ass_body = sanitized.replace("\r\n", "\\N").replace("\n", "\\N")
+        ass_body = sanitized.replace("{", "｛").replace("}", "｝").replace("\r\n", "\\N").replace("\n", "\\N")
         lines.append(f"Dialogue: 0,{s_str},{e_str},Default,,0,0,0,,{{\\an5\\pos({px},{py})}}{ass_body}")
 
     try:

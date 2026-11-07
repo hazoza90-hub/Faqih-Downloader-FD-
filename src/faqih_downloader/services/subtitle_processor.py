@@ -499,8 +499,11 @@ def handle_subtitles_post_download(
             burn_kwargs = dict(sub_kwargs)
             if sub_pos and isinstance(sub_pos, str) and sub_pos != "bottom":
                 burn_kwargs["subtitle_position"] = sub_pos
-            if not hasattr(stream_info, "_mock_name") and (getattr(stream_info, "subtitle_preset", None) or getattr(stream_info, "style_config", None)):
-                burn_kwargs["style_config"] = getattr(stream_info, "style_config", None) or {
+            sub_st = getattr(stream_info, "subtitle_track", None)
+            cfg_from_track = sub_st.get("style_config") if isinstance(sub_st, dict) else None
+            eff_cfg = getattr(stream_info, "style_config", None) or cfg_from_track
+            if not hasattr(stream_info, "_mock_name") and (eff_cfg or getattr(stream_info, "subtitle_preset", None)):
+                burn_kwargs["style_config"] = eff_cfg or {
                     "preset": getattr(stream_info, "subtitle_preset", "youtube"),
                     "font_scale": getattr(stream_info, "subtitle_font_scale", 1.0),
                     "text_color": getattr(stream_info, "subtitle_text_color", "#FFFFFF"),

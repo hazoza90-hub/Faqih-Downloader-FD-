@@ -358,6 +358,7 @@ class DummyMockApp(
         self.logs = []
         self.entry_url = MagicMock()
         self.entry_dest = MagicMock()
+        self.entry_dest.get.return_value = ""
         self.conn_var = MagicMock()
         self.conn_var.get.return_value = "8"
         self.entry_custom_speed = MagicMock()

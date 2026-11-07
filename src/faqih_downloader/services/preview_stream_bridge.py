@@ -145,6 +145,21 @@ def unregister_preview_session(sid: str) -> None:
 
 
 
+def _apply_session_sub_styles(opt: Any, session: PreviewSession) -> None:
+    if not opt: return
+    opt.subtitle_preset, opt.subtitle_font_scale = session.subtitle_preset, session.subtitle_font_scale
+    opt.subtitle_text_color, opt.subtitle_bg_mode = session.subtitle_text_color, session.subtitle_bg_mode
+    opt.subtitle_pos_x, opt.subtitle_pos_y = session.subtitle_pos_x, session.subtitle_pos_y
+    st = getattr(opt, "selected_subtitle_track", None)
+    if st and isinstance(st, dict):
+        st["style_config"] = {
+            "preset": session.subtitle_preset, "font_scale": session.subtitle_font_scale,
+            "text_color": session.subtitle_text_color, "bg_mode": session.subtitle_bg_mode,
+            "pos_x": session.subtitle_pos_x, "pos_y": session.subtitle_pos_y,
+            "subtitle_position": session.subtitle_position,
+        }
+
+
 class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
     """Handles HTTP requests for player UI, media streaming proxy, subtitles, and control APIs."""
     timeout = 10.0
@@ -390,10 +405,8 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
             if session.audio_tracks and 0 <= a_idx < len(session.audio_tracks):
                 selected_opt.selected_audio_track = session.audio_tracks[a_idx]
             selected_opt.subtitle_embed_mode, selected_opt.subtitle_position = sub_mode or "hard_burn", sub_pos or "bottom"
-            selected_opt.subtitle_preset, selected_opt.subtitle_font_scale = session.subtitle_preset, session.subtitle_font_scale
-            selected_opt.subtitle_text_color, selected_opt.subtitle_bg_mode = session.subtitle_text_color, session.subtitle_bg_mode
-            selected_opt.subtitle_pos_x, selected_opt.subtitle_pos_y = session.subtitle_pos_x, session.subtitle_pos_y
             selected_opt.selected_subtitle_track = session.subtitle_tracks[s_idx] if (session.subtitle_tracks and 0 < s_idx < len(session.subtitle_tracks)) else None
+            _apply_session_sub_styles(selected_opt, session)
 
         final_dest = dest_path or session.default_dest_path
         if selected_opt:
@@ -462,9 +475,7 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
             opt = session.options[q_idx]
             opt.selected_audio_track, opt.selected_subtitle_track = session.selected_audio_track, session.selected_sub_track
             opt.subtitle_embed_mode, opt.subtitle_position = session.subtitle_embed_mode, session.subtitle_position
-            opt.subtitle_preset, opt.subtitle_font_scale = session.subtitle_preset, session.subtitle_font_scale
-            opt.subtitle_text_color, opt.subtitle_bg_mode = session.subtitle_text_color, session.subtitle_bg_mode
-            opt.subtitle_pos_x, opt.subtitle_pos_y = session.subtitle_pos_x, session.subtitle_pos_y
+            _apply_session_sub_styles(opt, session)
 
         try:
             from ..config import set_setting

@@ -353,6 +353,18 @@ class YouTubeStreamInfo:
     webpage_url: str = ""
     audio_format_id: str = ""
 
+    def __post_init__(self):
+        if self.subtitle_track and isinstance(self.subtitle_track, dict):
+            sc = self.subtitle_track.get("style_config")
+            if isinstance(sc, dict):
+                if "preset" in sc: self.subtitle_preset = str(sc["preset"])
+                if "font_scale" in sc: self.subtitle_font_scale = float(sc["font_scale"])
+                if "text_color" in sc: self.subtitle_text_color = str(sc["text_color"])
+                if "bg_mode" in sc: self.subtitle_bg_mode = str(sc["bg_mode"])
+                if "pos_x" in sc: self.subtitle_pos_x = float(sc["pos_x"])
+                if "pos_y" in sc: self.subtitle_pos_y = float(sc["pos_y"])
+                if "subtitle_position" in sc: self.subtitle_position = str(sc["subtitle_position"])
+
 
 # Clean alias
 MediaStreamInfo = YouTubeStreamInfo

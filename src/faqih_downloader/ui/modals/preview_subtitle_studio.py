@@ -110,6 +110,13 @@ let subPreset = "youtube", subScale = 1.0, subColor = "#FFFFFF", subBgMode = "bo
 let liveSubCues = [];
 let isDraggingSub = false, dragStartX = 0, dragStartY = 0, initialSubX = 50.0, initialSubY = 86.0;
 
+function _decodeVttEntities(str) {
+    if (!str || str.indexOf("&") === -1) return str;
+    const txt = document.createElement("textarea");
+    txt.innerHTML = str;
+    return txt.value;
+}
+
 function parseVttToCuesArray(vttText) {
     if (!vttText) return [];
     const cues = [], blocks = vttText.split(/\\r?\\n\\r?\\n+/);
@@ -126,7 +133,7 @@ function parseVttToCuesArray(vttText) {
             if (match) { tsIdx = i; m = match; break; }
         }
         if (tsIdx === -1 || !m) continue;
-        const body = lines.slice(tsIdx + 1).map(l => l.replace(/<[^>]+>/g, '').trim()).filter(Boolean).join('\\n');
+        const body = lines.slice(tsIdx + 1).map(l => _decodeVttEntities(l.replace(/<[^>]+>/g, '').trim())).filter(Boolean).join('\\n');
         if (body) cues.push({ start: toSec(m[1]), end: toSec(m[2]), text: body });
     }
     return cues;
@@ -134,6 +141,15 @@ function parseVttToCuesArray(vttText) {
 
 function loadLiveSubtitlesFromUrl(vttUrl) {
     if (!vttUrl) { liveSubCues = []; updateLiveSubDisplay(); return; }
+    if (vttUrl.startsWith("data:")) {
+        try {
+            const b64 = vttUrl.split(",")[1];
+            const txt = decodeURIComponent(escape(atob(b64)));
+            liveSubCues = parseVttToCuesArray(txt);
+            updateLiveSubDisplay();
+            return;
+        } catch(e) {}
+    }
     fetch(vttUrl).then(r => r.text()).then(txt => {
         liveSubCues = parseVttToCuesArray(txt);
         updateLiveSubDisplay();
@@ -143,12 +159,16 @@ function loadLiveSubtitlesFromUrl(vttUrl) {
 function updateLiveSubDisplay() {
     const overlay = document.getElementById("liveSubOverlay");
     if (!overlay) return;
-    const s = subSelect ? parseInt(subSelect.value) : 0;
-    if (s <= 0 || !liveSubCues.length) {
+    const sEl = document.getElementById("subSelect");
+    const subActive = sEl ? (parseInt(sEl.value) > 0) : true;
+    if (!subActive || !liveSubCues.length) {
         overlay.style.display = "none"; overlay.textContent = ""; return;
     }
     const ct = videoEl ? videoEl.currentTime : 0;
-    const cue = liveSubCues.find(c => ct >= c.start && ct <= c.end);
+    let cue = liveSubCues.find(c => ct >= c.start && ct <= c.end);
+    if (!cue && ((videoEl && videoEl.paused && ct === 0) || isDraggingSub)) {
+        cue = liveSubCues[0];
+    }
     if (cue && cue.text) {
         overlay.textContent = cue.text; overlay.style.display = "block";
     } else {
@@ -181,6 +201,7 @@ function setSubPreset(name) {
     const btn = document.getElementById(idMap[name]);
     if (btn) btn.classList.add("active");
     applyLiveSubStyle();
+    updateLiveSubDisplay();
     syncStateToBridge();
 }
 
@@ -213,6 +234,8 @@ function setSubBgMode(mode) {
 
 function resetSubPosition() {
     subPosX = 50.0; subPosY = 86.0;
+    const pSel = document.getElementById("posSelect");
+    if (pSel) pSel.value = "bottom";
     applyLiveSubStyle();
     syncStateToBridge();
 }
@@ -225,6 +248,7 @@ function initLiveSubDragDrop() {
         dragStartX = e.clientX || (e.touches && e.touches[0].clientX) || 0;
         dragStartY = e.clientY || (e.touches && e.touches[0].clientY) || 0;
         initialSubX = subPosX; initialSubY = subPosY; e.preventDefault();
+        updateLiveSubDisplay();
     };
     const onMove = (e) => {
         if (!isDraggingSub) return;
@@ -242,6 +266,7 @@ function initLiveSubDragDrop() {
         if (!isDraggingSub) return;
         isDraggingSub = false; overlay.classList.remove("dragging");
         if (guide) guide.style.display = "none";
+        updateLiveSubDisplay();
         syncStateToBridge();
     };
     overlay.addEventListener("mousedown", onStart);
@@ -250,5 +275,6 @@ function initLiveSubDragDrop() {
     overlay.addEventListener("touchstart", onStart, { passive: false });
     window.addEventListener("touchmove", onMove, { passive: false });
     window.addEventListener("touchend", onEnd);
+    window.addEventListener("resize", applyLiveSubStyle);
 }
 """.strip()
