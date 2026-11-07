@@ -8,7 +8,10 @@ from __future__ import annotations
 def get_studio_css() -> str:
     """Returns CSS rules for the live draggable subtitle overlay and styling studio bar."""
     return """
-video::cue, ::cue {
+video::cue, ::cue,
+video::-webkit-media-text-track-container,
+video::-webkit-media-text-track-display,
+video::-webkit-media-text-track-region {
     opacity: 0 !important; display: none !important; color: transparent !important;
     background: transparent !important; text-shadow: none !important;
 }
@@ -124,6 +127,11 @@ function disableNativeTextTracks() {
             for (let i = 0; i < videoEl.textTracks.length; i++) {
                 videoEl.textTracks[i].mode = "disabled";
             }
+            if (!videoEl._textTracksHooked && typeof videoEl.textTracks.addEventListener === "function") {
+                videoEl._textTracksHooked = true;
+                videoEl.textTracks.addEventListener("change", disableNativeTextTracks);
+                videoEl.textTracks.addEventListener("addtrack", disableNativeTextTracks);
+            }
         }
     } catch(e) {}
 }
@@ -178,6 +186,30 @@ function _decodeVttEntities(str) {
     return txt.value;
 }
 
+function _balanceSingleLine(text) {
+    if (!text) return "";
+    const stripped = text.trim();
+    if (!stripped || stripped.indexOf("\n") !== -1) return text;
+    const words = stripped.split(" ").filter(Boolean);
+    if (stripped.length > 38 || words.length > 5) {
+        const mid = Math.floor(stripped.length / 2);
+        const spaces = [];
+        for (let i = 0; i < stripped.length; i++) {
+            if (stripped[i] === " ") spaces.push(i);
+        }
+        if (spaces.length > 0) {
+            let best = spaces[0];
+            for (let i = 1; i < spaces.length; i++) {
+                if (Math.abs(spaces[i] - mid) < Math.abs(best - mid)) best = spaces[i];
+            }
+            const p1 = stripped.slice(0, best).trim();
+            const p2 = stripped.slice(best + 1).trim();
+            if (p1 && p2) return p1 + "\n" + p2;
+        }
+    }
+    return text;
+}
+
 function parseVttToCuesArray(vttText) {
     if (!vttText) return [];
     const cues = [], blocks = vttText.split(/\\r?\\n\\r?\\n+/);
@@ -195,7 +227,7 @@ function parseVttToCuesArray(vttText) {
         }
         if (tsIdx === -1 || !m) continue;
         const body = lines.slice(tsIdx + 1).map(l => _decodeVttEntities(l.replace(/<[^>]+>/g, '').trim())).filter(Boolean).join('\\n');
-        if (body) cues.push({ start: toSec(m[1]), end: toSec(m[2]), text: body });
+        if (body) cues.push({ start: toSec(m[1]), end: toSec(m[2]), text: _balanceSingleLine(body) });
     }
     return cues;
 }
@@ -227,11 +259,11 @@ function updateLiveSubDisplay() {
     }
     const ct = videoEl ? videoEl.currentTime : 0;
     let cue = liveSubCues.find(c => ct >= c.start && ct <= c.end);
-    if (!cue && ((videoEl && videoEl.paused && ct === 0) || isDraggingSub)) {
-        cue = liveSubCues[0];
+    if (!cue && ((videoEl && videoEl.paused) || isDraggingSub)) {
+        cue = liveSubCues.find(c => c.start >= ct) || liveSubCues[0];
     }
     if (cue && cue.text) {
-        overlay.textContent = cue.text; overlay.style.display = "block";
+        overlay.textContent = _balanceSingleLine(cue.text); overlay.style.display = "block";
     } else {
         overlay.textContent = ""; overlay.style.display = "none";
     }
@@ -308,14 +340,17 @@ function initLiveSubDragDrop() {
     if (!overlay || !container) return;
     const onStart = (e) => {
         isDraggingSub = true; overlay.classList.add("dragging");
-        dragStartX = e.clientX || (e.touches && e.touches[0].clientX) || 0;
-        dragStartY = e.clientY || (e.touches && e.touches[0].clientY) || 0;
+        const touch = e.touches && e.touches[0];
+        dragStartX = touch ? touch.clientX : (e.clientX || 0);
+        dragStartY = touch ? touch.clientY : (e.clientY || 0);
         initialSubX = subPosX; initialSubY = subPosY; e.preventDefault();
         updateLiveSubDisplay();
     };
     const onMove = (e) => {
         if (!isDraggingSub) return;
-        const cx = e.clientX || (e.touches && e.touches[0].clientX) || 0, cy = e.clientY || (e.touches && e.touches[0].clientY) || 0;
+        const touch = e.touches && e.touches[0];
+        const cx = touch ? touch.clientX : (e.clientX || 0);
+        const cy = touch ? touch.clientY : (e.clientY || 0);
         const vidRect = getRenderedVideoRect();
         if (vidRect.width <= 0 || vidRect.height <= 0) return;
         let nx = initialSubX + ((cx - dragStartX) / vidRect.width) * 100.0;
@@ -350,6 +385,8 @@ function initLiveSubDragDrop() {
         videoEl.addEventListener("timeupdate", disableNativeTextTracks);
         videoEl.addEventListener("resize", applyLiveSubStyle);
     }
+    const vt = document.getElementById("vttTrack");
+    if (vt) vt.addEventListener("load", disableNativeTextTracks);
     disableNativeTextTracks();
 }
 """.strip()

@@ -24,7 +24,7 @@ body { background: #090d16; color: #f1f5f9; font-family: -apple-system, BlinkMac
 .btn:hover { background: #0284c7; color: #fff; border-color: #0284c7; }
 .player-container { flex: 52 1 0; min-height: 200px; position: relative; background: #000; display: flex; align-items: center; justify-content: center; overflow: hidden; }
 video, iframe { width: 100%; height: 100%; border: none; outline: none; background: #000; }
-video::cue, ::cue { opacity: 0 !important; display: none !important; color: transparent !important; background: transparent !important; text-shadow: none !important; }
+video::cue, ::cue, video::-webkit-media-text-track-container, video::-webkit-media-text-track-display, video::-webkit-media-text-track-region { opacity: 0 !important; display: none !important; color: transparent !important; background: transparent !important; text-shadow: none !important; }
 .settings-panel { flex: 48 1 0; min-height: 200px; background: #0f172a; border-top: 1px solid #1e293b; padding: 8px 16px; display: flex; flex-direction: column; overflow-y: auto; gap: 6px; }
 .settings-header { display: flex; justify-content: space-between; align-items: center; }
 .settings-title { font-size: 11px; font-weight: 700; color: #38bdf8; text-transform: uppercase; letter-spacing: 0.5px; } .settings-count { font-size: 11px; color: #94a3b8; }

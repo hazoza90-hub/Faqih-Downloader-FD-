@@ -57,16 +57,18 @@ def _extract_cue_item(item: Any) -> Optional[Tuple[float, float, str]]:
 
 def _balance_single_line(text: str) -> str:
     """If text is a single line and has > 38 chars or > 5 words, splits at nearest space to center."""
-    stripped = text.strip()
-    if not stripped or "\n" in stripped:
+    if not text:
+        return ""
+    normalized = str(text).replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not normalized or "\n" in normalized:
         return text
-    words = stripped.split()
-    if len(stripped) > 38 or len(words) > 5:
-        mid = len(stripped) // 2
-        spaces = [i for i, ch in enumerate(stripped) if ch == " "]
+    words = normalized.split()
+    if len(normalized) > 38 or len(words) > 5:
+        mid = len(normalized) // 2
+        spaces = [i for i, ch in enumerate(normalized) if ch == " "]
         if spaces:
             best_space = min(spaces, key=lambda idx: abs(idx - mid))
-            p1, p2 = stripped[:best_space].strip(), stripped[best_space + 1:].strip()
+            p1, p2 = normalized[:best_space].strip(), normalized[best_space + 1:].strip()
             if p1 and p2:
                 return f"{p1}\n{p2}"
     return text
