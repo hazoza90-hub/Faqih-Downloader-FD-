@@ -11,11 +11,8 @@ import shutil
 import zipfile
 import tempfile
 import threading
-import importlib
-import importlib.abc
-import importlib.machinery
-import urllib.request
-import urllib.error
+import importlib, importlib.abc, importlib.machinery
+import urllib.request, urllib.error
 from typing import Dict, List, Optional, Tuple, Callable, Any
 
 from .updater_service import (
@@ -43,15 +40,11 @@ def is_version_ge(v1: str, v2: str) -> bool:
     """Returns True if version v1 >= v2."""
     if not v1:
         return False
-    if not v2:
-        return True
-    if is_newer_version(v1, v2):
+    if not v2 or is_newer_version(v1, v2):
         return True
     if is_newer_version(v2, v1):
         return False
-    # If neither is strictly newer, verify equality including pre-release and zero-padding
-    p1 = parse_version(v1)
-    p2 = parse_version(v2)
+    p1, p2 = parse_version(v1), parse_version(v2)
     if p1 and p2:
         max_len = max(len(p1), len(p2))
         p1_pad = p1 + (0,) * (max_len - len(p1))
@@ -122,6 +115,17 @@ def build_core_patch_zip(
                     rel_to_pkg = os.path.relpath(full_p, src_pkg)
                     zf.write(full_p, os.path.join("faqih_downloader", rel_to_pkg).replace("\\", "/"))
         zf.writestr("smart_download/__init__.py", b"from faqih_downloader import *\n")
+        for icon_name in ("app_icon.png", "app_icon.ico"):
+            for cand_dir in (
+                os.path.join(os.path.dirname(os.path.dirname(src_pkg)), "assets"),
+                os.path.join(src_pkg, "assets"), os.path.join(os.getcwd(), "assets"),
+                os.path.dirname(os.path.dirname(src_pkg)), os.getcwd(),
+            ):
+                cand_icon = os.path.join(cand_dir, icon_name)
+                if os.path.isfile(cand_icon):
+                    zf.write(cand_icon, f"assets/{icon_name}")
+                    zf.write(cand_icon, f"faqih_downloader/assets/{icon_name}")
+                    break
 
     os.replace(part_out, out_abs)
     return out_abs
@@ -508,8 +512,7 @@ def init_core_loader(force: bool = False) -> Optional[str]:
         exe_dir = os.path.dirname(os.path.abspath(sys.executable))
         candidate_dev_roots.extend([
             os.path.abspath(os.path.join(exe_dir, "..", "src")),
-            os.path.join(exe_dir, "src"),
-            exe_dir,
+            os.path.join(exe_dir, "src"), exe_dir,
             os.path.abspath(os.path.join(exe_dir, "..", "..", "src")),
         ])
 

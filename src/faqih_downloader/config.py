@@ -45,30 +45,54 @@ DEFAULT_SNIFFER_PLATFORMS: Dict[str, bool] = {
 }
 
 def get_resource_path(relative_path: str) -> str:
-    """Resolve absolute path for bundled assets in development or PyInstaller frozen bundle."""
-    if hasattr(sys, "_MEIPASS"):
-        base_path = sys._MEIPASS
-    else:
-        base_path = os.path.dirname(os.path.abspath(__file__))
-    direct = os.path.join(base_path, relative_path)
-    if os.path.exists(direct):
-        return direct
-    in_assets = os.path.join(base_path, "assets", relative_path)
-    if os.path.exists(in_assets):
-        return in_assets
-    curr = base_path
-    for _ in range(3):
-        cand = os.path.join(curr, "assets", relative_path)
-        if os.path.exists(cand):
-            return cand
-        cand_direct = os.path.join(curr, relative_path)
-        if os.path.exists(cand_direct):
-            return cand_direct
+    """Resolve absolute path for bundled assets across PyInstaller, executable dir, cwd, and source tree."""
+    # 1. sys._MEIPASS (direct and inside assets/)
+    if hasattr(sys, "_MEIPASS") and sys._MEIPASS:
+        for cand in (
+            os.path.join(sys._MEIPASS, relative_path),
+            os.path.join(sys._MEIPASS, "assets", relative_path),
+        ):
+            if os.path.exists(cand):
+                return cand
+
+    # 2. Executable directory (direct and inside assets/)
+    if hasattr(sys, "executable") and sys.executable:
+        exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+        for cand in (
+            os.path.join(exe_dir, relative_path),
+            os.path.join(exe_dir, "assets", relative_path),
+        ):
+            if os.path.exists(cand):
+                return cand
+
+    # 3. Current working directory (direct and inside assets/)
+    try:
+        cwd = os.getcwd()
+        for cand in (
+            os.path.join(cwd, relative_path),
+            os.path.join(cwd, "assets", relative_path),
+        ):
+            if os.path.exists(cand):
+                return cand
+    except Exception:
+        pass
+
+    # 4. Relative to __file__ going up to 4 levels
+    curr = os.path.dirname(os.path.abspath(__file__))
+    for _ in range(5):
+        for cand in (
+            os.path.join(curr, relative_path),
+            os.path.join(curr, "assets", relative_path),
+        ):
+            if os.path.exists(cand):
+                return cand
         parent = os.path.dirname(curr)
         if parent == curr:
             break
         curr = parent
-    return in_assets if os.path.exists(in_assets) else direct
+
+    fallback = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", relative_path)
+    return fallback if os.path.exists(fallback) else os.path.join(os.path.dirname(os.path.abspath(__file__)), relative_path)
 
 
 def is_test_environment() -> bool:

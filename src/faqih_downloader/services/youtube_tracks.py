@@ -235,6 +235,8 @@ def extract_subtitle_tracks(info: Dict[str, Any]) -> List[Dict[str, Any]]:
     for is_auto, sub_dict in ((False, manual_subs), (True, auto_subs)):
         for lang, flist in sub_dict.items():
             lang_norm = lang.lower()
+            if "live_chat" in lang_norm or "rechat" in lang_norm:
+                continue
             base_lang = lang_norm.split("-")[0].split("_")[0]
             if is_auto and lang_norm not in popular_lower and base_lang not in popular_lower and lang not in manual_subs:
                 continue

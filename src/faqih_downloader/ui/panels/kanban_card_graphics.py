@@ -77,10 +77,6 @@ def _extract_and_load_video_thumbnail(canvas: tk.Canvas, video_path: Optional[st
 
     _draw_default_video_thumbnail(canvas)
 
-    ffmpeg_bin = find_ffmpeg_bin()
-    if not ffmpeg_bin:
-        return
-
     cache_dir = os.path.join(get_config_dir(), "thumbnails_cache")
     try:
         os.makedirs(cache_dir, exist_ok=True)
@@ -113,6 +109,10 @@ def _extract_and_load_video_thumbnail(canvas: tk.Canvas, video_path: Optional[st
 
     if os.path.isfile(thumb_path) and os.path.getsize(thumb_path) > 0:
         _apply_thumb()
+        return
+
+    ffmpeg_bin = find_ffmpeg_bin()
+    if not ffmpeg_bin:
         return
 
     mod = sys.modules.get("faqih_downloader.ui.panels.kanban_cards")

@@ -168,6 +168,10 @@ def find_ffmpeg_bin() -> Optional[str]:
         user_prof = os.environ.get("USERPROFILE", "")
         local_app = os.environ.get("LOCALAPPDATA", "")
         fixed_cands = [
+            os.path.join(local_app, "Programs", "FaqihDownloader", "ffmpeg.exe") if local_app else "",
+            os.path.join(local_app, "Programs", "SmartDownload", "ffmpeg.exe") if local_app else "",
+            os.path.join(proj_root, "installer_payload", "ffmpeg.exe") if proj_root else "",
+            os.path.join(proj_root, "dist", "ffmpeg.exe") if proj_root else "",
             os.path.join(user_prof, "scoop", "apps", "ffmpeg", "current", "bin", "ffmpeg.exe"),
             r"C:\ProgramData\chocolatey\bin\ffmpeg.exe",
             r"C:\ffmpeg\bin\ffmpeg.exe",

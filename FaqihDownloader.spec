@@ -20,6 +20,7 @@ yt_hidden = collect_submodules('yt_dlp')
 yt_datas = collect_data_files('yt_dlp')
 pystray_hidden = collect_submodules('pystray')
 sd_hidden = collect_submodules('faqih_downloader')
+pil_hidden = collect_submodules('PIL')
 
 extra_binaries = []
 
@@ -55,7 +56,7 @@ a = Analysis(
         'PIL.ImageTk',
         'pystray',
         'pystray._win32',
-    ] + yt_hidden + pystray_hidden + sd_hidden,
+    ] + yt_hidden + pystray_hidden + sd_hidden + pil_hidden,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

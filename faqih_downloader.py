@@ -102,7 +102,34 @@ if "--test-startup" in sys.argv:
     except Exception:
         pass
     if not avail:
+        sys.stderr.write("[STARTUP TEST FAILED] yt-dlp is not available\n")
+        sys.stderr.flush()
         os._exit(1)
+
+    try:
+        from faqih_downloader.config import get_resource_path
+        png_path = get_resource_path("app_icon.png")
+        ico_path = get_resource_path("app_icon.ico")
+        if not (os.path.isfile(png_path) and os.path.isfile(ico_path)):
+            sys.stderr.write(
+                f"[STARTUP TEST FAILED] Icons missing: png='{png_path}' (exists={os.path.isfile(png_path)}), "
+                f"ico='{ico_path}' (exists={os.path.isfile(ico_path)})\n"
+            )
+            sys.stderr.flush()
+            os._exit(1)
+
+        from PIL import Image, ImageTk
+        with Image.open(png_path) as _img:
+            _img.load()
+
+        from faqih_downloader.ui.main_window import ModernFramelessGUI
+        from faqih_downloader.ui.panels.kanban_staged_helpers import build_staged_link_card
+        from faqih_downloader.ui.panels.kanban_card_graphics import _extract_and_load_video_thumbnail
+    except Exception as e:
+        sys.stderr.write(f"[STARTUP TEST FAILED] Integrity check error: {e}\n")
+        sys.stderr.flush()
+        os._exit(1)
+
     os._exit(0)
 
 # Subprocess handler for standalone --preview-html window

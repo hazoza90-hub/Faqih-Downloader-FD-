@@ -9,6 +9,11 @@
 
 ## 1. ⚠️ Strict Agent Workflow Rules (CRITICAL)
 
+### 0. ZERO-REGRESSION & SURGICAL EDIT RULE
+- **تعديل الملفات المحددة فقط**: يُمنع منعاً باتاً تعديل أي ملف خارج نطاق الطلب المحدد بالاسم.
+- **مراجعة التغييرات**: مراجعة `git diff` سطراً بسطر قبل أي Commit للتأكد من عدم حذف أي دالة أو عنصر واجهة أو إطار Tkinter.
+- **فحص سلامة المكونات**: تشغيل `FaqihDownloader.exe --test-startup` للتحقق الإلزامي من سلامة الأيقونات و `PIL` و `FFmpeg` والواجهة قبل الاعتماد.
+
 1. **NEVER run `PyInstaller` or `build_installer.py` automatically after code edits!**
    - Compiling `.exe` binaries takes 3–5 minutes and is **strictly forbidden** during routine edits.
    - Only build the installer if the user explicitly types: `"build installer"` or `"ابنِ المثبت"`.
@@ -123,7 +128,7 @@ YouTubeFormatBuilderMixin (services/youtube_format_builder.py)
 |:---|:---:|:---|:---|:---|
 | `src/faqih_downloader/__init__.py` | 112 | Package initialization and unified namespace re-exports for the core application. | `_SmartDownloadAliasLoader`, `_SmartDownloadAliasFinder`, `__getattr__()`, `__dir__()` | Edit when exposing new subpackages or top-level public APIs. |
 | `src/faqih_downloader/__main__.py` | 76 | Package CLI entry point and CLI dispatcher for python -m faqih_downloader. | — | Edit when modifying CLI execution arguments or package launch hooks. |
-| `src/faqih_downloader/config.py` | 279 | Configuration constants, path resolvers, and settings file I/O with caching. | `get_resource_path()`, `is_test_environment()`, `get_config_dir()` | Edit when modifying app constants, version, default settings, or storage directories. |
+| `src/faqih_downloader/config.py` | 303 | Configuration constants, path resolvers, and settings file I/O with caching. | `get_resource_path()`, `is_test_environment()`, `get_config_dir()` | Edit when modifying app constants, version, default settings, or storage directories. |
 | `src/faqih_downloader/i18n.py` | 18 | Backward-compatible i18n import shim redirecting to locales.i18n. | — | Edit if re-exporting additional translation functions. |
 | `src/faqih_downloader/main.py` | 25 | Main runtime GUI entry point initializing Tkinter and launching ModernFramelessGUI. | — | Edit when altering CLI argument parsing at launch or main window instantiation. |
 | `src/faqih_downloader/core/__init__.py` | 32 | Re-exports core download engine, chunking, and candidate resolution components. | — | Edit when adding new core download engine modules. |
@@ -148,8 +153,8 @@ YouTubeFormatBuilderMixin (services/youtube_format_builder.py)
 | `src/faqih_downloader/locales/en.json` | 364 | Complete English application translations and UI text string dictionary. | — | Edit when adding or updating English translation strings. |
 | `src/faqih_downloader/locales/i18n.py` | 144 | Thread-safe LocalizationManager singleton enabling dynamic language toggles. | `LocalizationManager`, `_load_locale()`, `tr()`, `get_current_language()` | Edit when modifying translation loading or language notification callbacks. |
 | `src/faqih_downloader/services/__init__.py` | 209 | Services package namespace re-exports. | — | Edit when exposing new background or platform service modules. |
-| `src/faqih_downloader/services/core_patch_updater.py` | 545 | OTA hot-patch packager, atomic updater, and dynamic core loader (zero-rebuild workflow). | `_ExternalCoreFinder`, `CoreHotPatchUpdater`, `get_core_plugin_dir()`, `is_version_ge()`, `build_core_patch_zip()` | Edit when modifying core patch packaging, plugin extraction, or dev source overriding. |
-| `src/faqih_downloader/services/media_env_helpers.py` | 331 | media_env_helpers.py: System environment, FFmpeg binary detection, cookie browser discovery, | `detect_installed_cookie_browsers()`, `is_ytdlp_available()`, `get_ytdlp_version()` | Edit when modifying this module's features. |
+| `src/faqih_downloader/services/core_patch_updater.py` | 548 | OTA hot-patch packager, atomic updater, and dynamic core loader (zero-rebuild workflow). | `_ExternalCoreFinder`, `CoreHotPatchUpdater`, `get_core_plugin_dir()`, `is_version_ge()`, `build_core_patch_zip()` | Edit when modifying core patch packaging, plugin extraction, or dev source overriding. |
+| `src/faqih_downloader/services/media_env_helpers.py` | 335 | media_env_helpers.py: System environment, FFmpeg binary detection, cookie browser discovery, | `detect_installed_cookie_browsers()`, `is_ytdlp_available()`, `get_ytdlp_version()` | Edit when modifying this module's features. |
 | `src/faqih_downloader/services/media_extractor.py` | 93 | Media extractor service providing lazy loading and background warmup for yt_dlp. | `warmup_yt_dlp_background()` | Edit when modifying this module's features. |
 | `src/faqih_downloader/services/preview_stream_bridge.py` | 504 | Built-In In-Memory Preview & Control Bridge HTTP server and web API routing. | `PreviewSession`, `PreviewBridgeRequestHandler`, `start_preview_bridge()`, `get_preview_bridge_port()`, `register_preview_session()` | Edit when modifying in-app preview HTTP bridge or web player controls. |
 | `src/faqih_downloader/services/preview_stream_proxy.py` | 233 | Streaming media proxy and VTT subtitle compiler for real-time video previewing. | `resolve_preview_video_target()`, `resolve_preview_audio_target()`, `stream_upstream_media()` | Edit when changing upstream byte-range streaming proxy or VTT subtitle generation. |
@@ -162,7 +167,7 @@ YouTubeFormatBuilderMixin (services/youtube_format_builder.py)
 | `src/faqih_downloader/services/youtube_models.py` | 359 | Data classes and URL regex patterns for YouTube and social media platforms. | `VideoFormatOption`, `YouTubeStreamInfo`, `is_youtube_url()`, `is_social_media_url()`, `is_ytdlp_extractor_supported()` | Edit when updating social media domain patterns or stream metadata models. |
 | `src/faqih_downloader/services/youtube_resolver.py` | 30 | Backward-compatibility alias re-exporting YouTube and media resolver interfaces. | — | Edit if re-exporting new streaming resolver functions. |
 | `src/faqih_downloader/services/youtube_service.py` | 543 | High-level YouTubeResolver and MediaResolver coordinating yt-dlp and FFmpeg. | `YouTubeResolver` | Edit when changing media stream extraction, cookie passing, or FFmpeg merging. |
-| `src/faqih_downloader/services/youtube_tracks.py` | 336 | YouTube audio dubbing and subtitle tracks extraction, language mapping, and UI track selectors. | `extract_audio_tracks()`, `extract_subtitle_tracks()`, `build_audio_subtitle_row()` | Edit when modifying audio dubbing languages, subtitle tracks parsing, or quality modal track selectors. |
+| `src/faqih_downloader/services/youtube_tracks.py` | 338 | YouTube audio dubbing and subtitle tracks extraction, language mapping, and UI track selectors. | `extract_audio_tracks()`, `extract_subtitle_tracks()`, `build_audio_subtitle_row()` | Edit when modifying audio dubbing languages, subtitle tracks parsing, or quality modal track selectors. |
 | `src/faqih_downloader/services/ytdlp_updater.py` | 529 | YtDlpAutoUpdater managing dynamic in-process yt-dlp package updates in %APPDATA%. | `_ExternalYtDlpFinder`, `YtDlpAutoUpdater` | Edit when changing yt-dlp PyPI/GitHub download logic or sys.meta_path finder hooks. |
 | `src/faqih_downloader/services/browser/__init__.py` | 62 | Browser integration package exports. | — | Edit when modifying browser service exports. |
 | `src/faqih_downloader/services/browser/bridge_server.py` | 380 | Local HTTP bridge server receiving intercepted links from browser extensions. | `ThreadedHTTPServer`, `BrowserBridgeHandler`, `BrowserBridgeServer` | Edit when altering HTTP endpoints or ports for extension communication. |
@@ -249,7 +254,7 @@ YouTubeFormatBuilderMixin (services/youtube_format_builder.py)
 | `src/faqih_downloader/utils/tk_helpers.py` | 397 | Tkinter resource cleanup preventing photo reference and callback memory leaks. | `animate_window_open()`, `animate_window_close()` | Edit when adding memory leak mitigations for Tkinter widgets. |
 | `src/faqih_downloader/utils/url_utils.py` | 393 | URL parsing, filename derivation, and Content-Disposition header extraction. | `is_downloadable_url()`, `clean_download_filename()`, `derive_download_filename()` | Edit when improving filename derivation from complex redirect URLs. |
 | `src/faqih_downloader/utils/window_effects.py` | 363 | Window effects and rounded glass Canvas styling for Smart Download (SD). | `RoundedGlassCard`, `apply_acrylic_or_mica_effect()`, `draw_rounded_rect()`, `draw_glow_border()` | Edit when modifying this module's features. |
-| `faqih_downloader.py` | 431 | Main official application entry point, CLI dispatcher, and unified symbol re-exporter. | `_SmartDownloadAliasLoader`, `_SmartDownloadAliasFinder`, `_FaqihDownloaderShim` | Edit when updating top-level launch hooks, CLI flags, or application initialization. |
+| `faqih_downloader.py` | 458 | Main official application entry point, CLI dispatcher, and unified symbol re-exporter. | `_SmartDownloadAliasLoader`, `_SmartDownloadAliasFinder`, `_FaqihDownloaderShim` | Edit when updating top-level launch hooks, CLI flags, or application initialization. |
 | `turbo_downloader.py` | 58 | Backward-compatibility root shim re-exporting all symbols from faqih_downloader. | `_TurboDownloaderCompatShim` | Edit when maintaining legacy backward-compatible import compatibility. |
 | `browser_bridge.py` | 24 | Backward-compatibility root shim re-exporting BrowserBridgeServer. | — | Edit when changing browser bridge root exports. |
 | `native_messaging_host.py` | 29 | Backward-compatibility root shim re-exporting native messaging host functions. | — | Edit when updating native messaging entry point. |
