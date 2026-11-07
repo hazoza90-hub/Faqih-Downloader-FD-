@@ -2,10 +2,12 @@
 Unit and Integration Tests for Smart Live Clipper & Dual Bilingual Subtitles.
 Tests:
 1. filter_and_shift_cues_for_clip (temporal shifting, boundary conditions, edge cases)
-2. apply_custom_cue_edits (index-based, timestamp-based, and text-based replacement)
+2. apply_custom_cue_edits (index-based, timestamp-based, text-based, and empty string replacement)
 3. merge_bilingual_cues and generate_styled_ass_file with Default & Secondary styles
-4. trim_media_file using real FFmpeg execution
-5. sync_clipper_state_from_body and process_post_download_clip_and_subtitles pipeline
+4. Long sentence bilingual cues preservation (no splitting across [[DUAL]])
+5. trim_media_file using real FFmpeg execution with probed duration accuracy
+6. prepare_post_download_subtitles and export_cues_to_srt for soft_embed / srt_only modes
+7. sync_clipper_state_from_body and process_post_download_clip_and_subtitles pipeline
 """
 import os
 import sys
@@ -22,11 +24,14 @@ from faqih_downloader.services.media_clipper_engine import (
     filter_and_shift_cues_for_clip,
     merge_bilingual_cues,
     trim_media_file,
+    probe_media_duration,
+    export_cues_to_srt,
+    prepare_post_download_subtitles,
     process_post_download_clip_and_subtitles,
     sync_clipper_state_from_body,
     enrich_stream_info_with_clip,
 )
-from faqih_downloader.services.subtitle_style_engine import generate_styled_ass_file
+from faqih_downloader.services.subtitle_style_engine import generate_styled_ass_file, normalize_and_dedupe_cues
 from faqih_downloader.services.youtube_models import VideoFormatOption, YouTubeStreamInfo
 
 
@@ -72,13 +77,14 @@ class TestClipperAndDualSubs(unittest.TestCase):
             {"start": 4.0, "end": 6.0, "text": "هذا خطأ مطبعي"},
             {"start": 7.0, "end": 9.0, "text": "النهاية"},
         ]
-        # Edit cue 1 by index and cue 2 by exact text
+        # Edit cue 1 by index, cue 2 by exact text, and cue 0 to empty string ""
         edits = {
+            "0": "",
             "1": "هذا نص مصحح بدقة",
             "النهاية": "النهاية السعيدة",
         }
         updated = apply_custom_cue_edits(cues, edits)
-        self.assertEqual(updated[0]["text"], "مرحبا بك")
+        self.assertEqual(updated[0]["text"], "")
         self.assertEqual(updated[1]["text"], "هذا نص مصحح بدقة")
         self.assertEqual(updated[2]["text"], "النهاية السعيدة")
 
@@ -108,6 +114,16 @@ class TestClipperAndDualSubs(unittest.TestCase):
         self.assertEqual(merged[0]["text"], "مرحبا بالعالم\n[[DUAL]]Hello World")
         self.assertIn("Faqih Downloader", merged[1]["text"])
         self.assertEqual(merged[2]["text"], "بدون تطابق")
+
+    def test_bilingual_cue_long_sentence_defense(self):
+        # Primary has 7 words, Secondary has 9 words -> total 16 words (> 10 words default threshold)
+        long_dual_cue = (0.0, 5.0, "هذه هي الجملة الأولى في المقطع التجريبي للترجمة\n[[DUAL]]This is the first sentence in the test subtitle clip")
+        res = normalize_and_dedupe_cues([long_dual_cue])
+        # Must NOT be split across [[DUAL]]
+        self.assertEqual(len(res), 1)
+        self.assertIn("[[DUAL]]", res[0][2])
+        self.assertIn("هذه هي الجملة الأولى", res[0][2])
+        self.assertIn("This is the first sentence", res[0][2])
 
     def test_generate_styled_ass_file_with_clip_and_dual_subs(self):
         srt_content = """1
@@ -171,18 +187,18 @@ Smart Live Clipper Test
             self.assertNotIn("مرحبا بكم جميعا", ass_text)
 
     def test_trim_media_file_with_ffmpeg(self):
-        import shutil
-        ffmpeg_bin = shutil.which("ffmpeg")
+        from faqih_downloader.services.media_env_helpers import find_ffmpeg_bin
+        ffmpeg_bin = find_ffmpeg_bin()
         if not ffmpeg_bin:
-            self.skipTest("FFmpeg not available in PATH")
+            self.skipTest("FFmpeg not available")
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             test_src = os.path.join(tmp_dir, "src_video.mp4")
-            # Generate a 3-second synthetic test video with audio
+            # Generate a 4-second synthetic test video with audio
             cmd_gen = [
                 ffmpeg_bin, "-y",
-                "-f", "lavfi", "-i", "testsrc=duration=3:size=160x120:rate=10",
-                "-f", "lavfi", "-i", "sine=frequency=440:duration=3",
+                "-f", "lavfi", "-i", "testsrc=duration=4:size=160x120:rate=10",
+                "-f", "lavfi", "-i", "sine=frequency=440:duration=4",
                 "-c:v", "libx264", "-preset", "ultrafast", "-crf", "30",
                 "-c:a", "aac", "-b:a", "64k",
                 test_src
@@ -191,15 +207,29 @@ Smart Live Clipper Test
             gen_res = subprocess.run(cmd_gen, stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=cflags)
             self.assertEqual(gen_res.returncode, 0)
             self.assertTrue(os.path.isfile(test_src))
-            orig_sz = os.path.getsize(test_src)
-            self.assertGreater(orig_sz, 0)
 
-            # Trim to [0.8s .. 2.2s]
-            ok = trim_media_file(test_src, clip_start=0.8, clip_end=2.2, ffmpeg_bin=ffmpeg_bin)
+            # Trim to [1.0s .. 2.5s] -> expected duration 1.5s
+            ok = trim_media_file(test_src, clip_start=1.0, clip_end=2.5, ffmpeg_bin=ffmpeg_bin)
             self.assertTrue(ok)
             self.assertTrue(os.path.isfile(test_src))
-            trimmed_sz = os.path.getsize(test_src)
-            self.assertGreater(trimmed_sz, 0)
+            dur = probe_media_duration(test_src, ffmpeg_bin)
+            self.assertGreater(dur, 0.0)
+            self.assertAlmostEqual(dur, 1.5, delta=0.4)
+
+    def test_export_cues_to_srt_and_dual_rendering(self):
+        cues = [
+            {"start": 0.0, "end": 3.0, "text": "مرحبا\n[[DUAL]]Hello"},
+            {"start": 4.0, "end": 7.0, "text": "العالم\n[[DUAL]]World"},
+        ]
+        with tempfile.TemporaryDirectory() as td:
+            srt_f = os.path.join(td, "test_dual.srt")
+            ok = export_cues_to_srt(cues, srt_f)
+            self.assertTrue(ok)
+            with open(srt_f, "r", encoding="utf-8") as f:
+                c = f.read()
+            self.assertIn("00:00:00,000 --> 00:00:03,000", c)
+            self.assertIn("مرحبا\nHello", c)
+            self.assertNotIn("[[DUAL]]", c)
 
     def test_sync_clipper_state_and_models(self):
         class DummySession:
@@ -250,6 +280,26 @@ Smart Live Clipper Test
         self.assertAlmostEqual(s_info.clip_end_sec, 18.2)
         self.assertTrue(s_info.dual_subtitle_enabled)
         self.assertEqual(s_info.subtitle_custom_edits, {"0": "Test Fix"})
+
+    def test_process_post_download_clip_and_companion_srt_rename(self):
+        with tempfile.TemporaryDirectory() as td:
+            vid = os.path.join(td, "MyVideo.mp4")
+            srt = os.path.join(td, "MyVideo.srt")
+            with open(vid, "wb") as f: f.write(b"video_bytes")
+            with open(srt, "w", encoding="utf-8") as f: f.write("1\n00:00:00,000 --> 00:00:01,000\nHi\n")
+
+            s_info = YouTubeStreamInfo(
+                video_id="test", title="MyVideo", clean_filename="MyVideo.mp4",
+                is_progressive=True, video_url="http://test",
+                clip_start_sec=1.0, clip_end_sec=5.0
+            )
+            # Calling process_post_download_clip_and_subtitles
+            res_path = process_post_download_clip_and_subtitles(s_info, vid)
+            self.assertIn("[Clip]", res_path)
+            self.assertTrue(os.path.isfile(res_path))
+            # Companion SRT must also be renamed
+            clip_srt = os.path.join(td, "MyVideo [Clip].srt")
+            self.assertTrue(os.path.isfile(clip_srt))
 
 
 if __name__ == "__main__":

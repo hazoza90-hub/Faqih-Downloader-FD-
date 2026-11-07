@@ -277,7 +277,7 @@ function updateLiveSubDisplay() {
                 return;
             }
         }
-        overlay.textContent = pTxt; overlay.style.display = "block";
+        overlay.innerHTML = '<span class="primary-sub-line">' + _escapeSubHtml(pTxt) + '</span>'; overlay.style.display = "block";
     } else {
         overlay.textContent = ""; overlay.style.display = "none";
     }

@@ -78,6 +78,8 @@ def _split_single_cue(
     s: float, e: float, text: str, max_words: int = 10
 ) -> List[Tuple[float, float, str]]:
     """Recursively splits a cue until it satisfies max 2 lines AND max_words."""
+    if "[[DUAL]]" in text:
+        return [(s, e, text)]
     dur = max(0.2, e - s)
     lines = [l.strip() for l in text.splitlines() if l.strip()]
     if len(lines) > 2:
@@ -293,6 +295,7 @@ def generate_styled_ass_file(
                 cues = _parse_srt_text_to_cues(f.read())
         else: cues = _parse_srt_text_to_cues(srt_source)
 
+    cues = normalize_and_dedupe_cues(cues, max_words=7 if p_name == "tiktok" else 10)
     if custom_edits:
         from .media_clipper_engine import apply_custom_cue_edits
         cues = apply_custom_cue_edits(cues, custom_edits)
@@ -306,6 +309,7 @@ def generate_styled_ass_file(
                     sec_cues = _parse_srt_text_to_cues(f.read())
             else: sec_cues = _parse_srt_text_to_cues(secondary_srt_source)
         if sec_cues:
+            sec_cues = normalize_and_dedupe_cues(sec_cues, max_words=7 if p_name == "tiktok" else 10)
             from .media_clipper_engine import merge_bilingual_cues
             cues = merge_bilingual_cues(cues, sec_cues)
 
@@ -313,7 +317,7 @@ def generate_styled_ass_file(
         from .media_clipper_engine import filter_and_shift_cues_for_clip
         cues = filter_and_shift_cues_for_clip(cues, clip_start, clip_end)
 
-    norm_cues = normalize_and_dedupe_cues(cues, max_words=7 if p_name == "tiktok" else 10)
+    norm_cues = cues
     lines = [
         "[Script Info]", "Title: Faqih Downloader Styled Subtitle", "ScriptType: v4.00+", "WrapStyle: 0",
         "ScaledBorderAndShadow: yes", "YCbCr Matrix: TV.601", f"PlayResX: {vid_w}", f"PlayResY: {vid_h}", "",

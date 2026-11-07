@@ -72,26 +72,20 @@ def run_cancellable_ffmpeg(cmd, cancel_event=None, creationflags=0, timeout=1800
     try:
         while True:
             if cancel_event and cancel_event.is_set():
-                try:
-                    proc.kill()
-                    proc.wait(timeout=2)
-                except Exception:
-                    pass
+                try: proc.kill(); proc.wait(timeout=2)
+                except Exception: pass
                 return subprocess.CompletedProcess(cmd, returncode=-1, stdout="", stderr="Cancelled or timed out")
 
             if timeout and (time.time() - start_t) > timeout:
-                try:
-                    proc.kill()
-                    proc.wait(timeout=2)
-                except Exception:
-                    pass
+                try: proc.kill(); proc.wait(timeout=2)
+                except Exception: pass
                 return subprocess.CompletedProcess(cmd, returncode=-1, stdout="", stderr="Cancelled or timed out")
 
-            if proc.poll() is not None:
-                out, err = proc.communicate()
+            try:
+                out, err = proc.communicate(timeout=0.1)
                 return subprocess.CompletedProcess(cmd, proc.returncode, out, err)
-
-            time.sleep(0.15)
+            except subprocess.TimeoutExpired:
+                pass
     finally:
         if proc and proc.poll() is None:
             try:
@@ -378,7 +372,7 @@ def burn_subtitle_into_video(
             if cancel_event and cancel_event.is_set():
                 break
             cmd = [
-                ffmpeg_path, "-y", "-i", abs_video, *clip_args, "-vf", vf,
+                ffmpeg_path, "-y", *clip_args, "-i", abs_video, "-vf", vf,
                 "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
                 "-pix_fmt", "yuv420p", "-movflags", "+faststart",
                 "-c:a", "aac", "-b:a", "192k", "-f", "mp4", temp_burn_mp4
@@ -459,6 +453,10 @@ def handle_subtitles_post_download(
         if on_log:
             on_log(f"[SUBTITLES] Saved subtitle to {os.path.basename(srt_path)}")
 
+        orig_stem = os.path.splitext(output_path)[0]
+        from .media_clipper_engine import prepare_post_download_subtitles
+        prepare_post_download_subtitles(stream_info, srt_path, orig_stem)
+
         if mode == "srt_only" or (cancel_event and cancel_event.is_set()):
             if on_log and mode == "srt_only":
                 on_log("[SUBTITLES] External .srt saved (SRT-only mode selected; skipping video mux).")
@@ -506,7 +504,8 @@ def handle_subtitles_post_download(
                 sc.setdefault("clip_end", getattr(stream_info, "clip_end_sec", 0.0))
                 sec_trk = getattr(stream_info, "secondary_subtitle_track", None) or sc.get("secondary_track")
                 if getattr(stream_info, "dual_subtitle_enabled", False) and sec_trk and isinstance(sec_trk, dict) and (sec_trk.get("url") or sec_trk.get("base_url")):
-                    sec_srt = download_subtitle_as_srt(sec_trk, f"{orig_stem}.sec.srt")
+                    sec_f = f"{orig_stem}.sec.srt"
+                    sec_srt = sec_f if os.path.isfile(sec_f) else download_subtitle_as_srt(sec_trk, sec_f)
                     if sec_srt and os.path.isfile(sec_srt): sc["secondary_srt_source"] = sec_srt
                 burn_kwargs["style_config"] = sc
             ok = burn_subtitle_into_video(output_path, srt_path, ffmpeg_bin, on_log=on_log, **burn_kwargs)

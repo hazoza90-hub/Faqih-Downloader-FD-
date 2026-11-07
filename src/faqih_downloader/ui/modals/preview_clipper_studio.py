@@ -37,7 +37,9 @@ def get_clipper_css() -> str:
 .dual-sub-secondary {
     display: block; font-size: 0.78em; color: #e2e8f0; opacity: 0.92;
     margin-top: 3px; font-weight: 500; letter-spacing: 0.2px; text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+    direction: ltr; unicode-bidi: plaintext; text-align: center;
 }
+.primary-sub-line { display: block; unicode-bidi: plaintext; text-align: center; }
 """.strip()
 
 def get_clipper_toolbar_html(clip_start: float = 0.0, clip_end: float = 0.0, dual_sub: bool = False) -> str:
@@ -170,7 +172,8 @@ function openSubTextEditor() {
     if (liveSubCues && liveSubCues.length) {
         cueIdx = liveSubCues.findIndex(c => ct >= c.start && ct <= c.end);
         if (cueIdx === -1) cueIdx = liveSubCues.findIndex(c => c.start >= ct);
-        if (cueIdx === -1) cueIdx = 0;
+        if (cueIdx === -1) cueIdx = liveSubCues.length - 1;
+        if (cueIdx < 0) cueIdx = 0;
         cue = liveSubCues[cueIdx];
     }
     if (!cue) return;
