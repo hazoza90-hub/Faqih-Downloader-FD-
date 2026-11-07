@@ -182,6 +182,10 @@ FILE_METADATA: Dict[str, Dict[str, str]] = {
         "responsibility": "Subtitle downloading, VTT/XML/JSON parsing, GTX translation, and SRT persistence.",
         "when_to_edit": "Edit when modifying subtitle fetching, timedtext parsing, or auto-translation fallbacks."
     },
+    "src/faqih_downloader/services/subtitle_style_engine.py": {
+        "responsibility": "Subtitle formatting, cue deduplication, libass Arabic text sanitization, and ASS style generator.",
+        "when_to_edit": "Edit when modifying subtitle styles, cue rollup deduplication, or libass Arabic text formatting."
+    },
     "src/faqih_downloader/services/ytdlp_updater.py": {
         "responsibility": "YtDlpAutoUpdater managing dynamic in-process yt-dlp package updates in %APPDATA%.",
         "when_to_edit": "Edit when changing yt-dlp PyPI/GitHub download logic or sys.meta_path finder hooks."
@@ -339,6 +343,10 @@ FILE_METADATA: Dict[str, Dict[str, str]] = {
     "src/faqih_downloader/ui/modals/video_preview_modal.py": {
         "responsibility": "VidMate-style in-app video preview modal with live WebVTT subtitles and chromeless player.",
         "when_to_edit": "Edit when modifying video preview playback, WebVTT subtitle overlay, or player window launcher."
+    },
+    "src/faqih_downloader/ui/modals/preview_subtitle_studio.py": {
+        "responsibility": "Interactive in-video subtitle studio providing real-time styling, positioning toolbar, and drag-and-drop.",
+        "when_to_edit": "Edit when modifying the live subtitle studio toolbar, CSS presets, or video overlay controls."
     },
     "src/faqih_downloader/ui/modals/refresh_modal.py": {
         "responsibility": "RefreshLinkModal prompting for updated download link when a session expires.",

@@ -268,9 +268,10 @@ def burn_subtitle_into_video(
     video_path: str, srt_path: str, ffmpeg_path: str,
     on_log: Optional[Callable[[str], None]] = None,
     cancel_event: Optional[Any] = None,
-    subtitle_position: str = "bottom"
+    subtitle_position: str = "bottom",
+    style_config: Optional[Dict[str, Any]] = None,
 ) -> bool:
-    """Burns subtitles directly onto video frames using a robust 3-candidate FFmpeg filter and transcode chain."""
+    """Burns subtitles directly onto video frames using ASS styling filter or robust fallback chain."""
     if cancel_event and cancel_event.is_set():
         return False
     if not ffmpeg_path or not os.path.isfile(video_path) or not os.path.isfile(srt_path):
@@ -281,6 +282,8 @@ def burn_subtitle_into_video(
     ascii_work_dir = _get_ascii_safe_temp_dir(video_dir)
     burn_srt_name = f"_sd_burn_{os.getpid()}_{int(time.time() * 1000)}.srt"
     burn_srt_path = os.path.join(ascii_work_dir, burn_srt_name)
+    burn_ass_name = f"_sd_burn_{os.getpid()}_{int(time.time() * 1000)}.ass"
+    burn_ass_path = os.path.join(ascii_work_dir, burn_ass_name)
     temp_burn_mp4 = f"{os.path.splitext(abs_video)[0]}.burn.mp4"
 
     try:
@@ -293,7 +296,8 @@ def burn_subtitle_into_video(
             on_log(f"[SUBTITLES] Warning: Failed to prepare UTF-8 SRT: {exc}")
         return False
 
-    escaped_path = burn_srt_path.replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
+    escaped_srt = burn_srt_path.replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
+    escaped_ass = burn_ass_path.replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
 
     align_styles = {
         "top": "Alignment=8,MarginV=25,FontSize=20,Outline=1,Shadow=1",
@@ -302,14 +306,27 @@ def burn_subtitle_into_video(
     }
     style_str = align_styles.get(str(subtitle_position or "bottom").strip().lower(), align_styles["bottom"])
 
-    # Candidate 1: subtitles={burn_srt_name}:charenc=UTF-8 with force_style
-    # Candidate 2: subtitles={burn_srt_name} with force_style (no libiconv dependency)
-    # Candidate 3: subtitles='{escaped_path}' with force_style
-    candidate_vfs = [
+    candidate_vfs = []
+    if style_config is not None:
+        cfg = dict(style_config)
+        if "subtitle_position" not in cfg and subtitle_position:
+            cfg["subtitle_position"] = subtitle_position
+        ass_ok = False
+        try:
+            from .subtitle_style_engine import generate_styled_ass_file
+            ass_ok = generate_styled_ass_file(
+                abs_srt, burn_ass_path, video_path=abs_video, ffmpeg_path=ffmpeg_path, **cfg
+            )
+        except Exception:
+            pass
+        if ass_ok and os.path.isfile(burn_ass_path):
+            candidate_vfs.extend([f"ass={burn_ass_name}", f"ass='{escaped_ass}'"])
+
+    candidate_vfs.extend([
         f"subtitles={burn_srt_name}:charenc=UTF-8:force_style='{style_str}'",
         f"subtitles={burn_srt_name}:force_style='{style_str}'",
-        f"subtitles='{escaped_path}':force_style='{style_str}'",
-    ]
+        f"subtitles='{escaped_srt}':force_style='{style_str}'",
+    ])
 
     p: Optional[subprocess.Popen] = None
     cflags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if IS_WINDOWS else 0
@@ -410,6 +427,9 @@ def burn_subtitle_into_video(
         if os.path.exists(burn_srt_path):
             try: os.remove(burn_srt_path)
             except Exception: pass
+        if os.path.exists(burn_ass_path):
+            try: os.remove(burn_ass_path)
+            except Exception: pass
 
 
 def handle_subtitles_post_download(
@@ -479,6 +499,16 @@ def handle_subtitles_post_download(
             burn_kwargs = dict(sub_kwargs)
             if sub_pos and isinstance(sub_pos, str) and sub_pos != "bottom":
                 burn_kwargs["subtitle_position"] = sub_pos
+            if not hasattr(stream_info, "_mock_name") and (getattr(stream_info, "subtitle_preset", None) or getattr(stream_info, "style_config", None)):
+                burn_kwargs["style_config"] = getattr(stream_info, "style_config", None) or {
+                    "preset": getattr(stream_info, "subtitle_preset", "youtube"),
+                    "font_scale": getattr(stream_info, "subtitle_font_scale", 1.0),
+                    "text_color": getattr(stream_info, "subtitle_text_color", "#FFFFFF"),
+                    "bg_mode": getattr(stream_info, "subtitle_bg_mode", "box"),
+                    "pos_x": getattr(stream_info, "subtitle_pos_x", 50.0),
+                    "pos_y": getattr(stream_info, "subtitle_pos_y", 86.0),
+                    "subtitle_position": sub_pos or "bottom",
+                }
             ok = burn_subtitle_into_video(output_path, srt_path, ffmpeg_bin, on_log=on_log, **burn_kwargs)
             if ok:
                 _cleanup_srt()

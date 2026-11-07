@@ -162,19 +162,43 @@ def _parse_timedtext_to_cues(raw_text: str) -> List[Tuple[float, float, str]]:
     raw = str(raw_text or "").lstrip("\ufeff").strip()
     if not raw:
         return []
+    cues: List[Tuple[float, float, str]] = []
     if ("\"events\"" in raw or "'events'" in raw) and raw.startswith("{"):
         cues = _parse_json_to_cues(raw)
-        if cues: return cues
-    if any(tag in raw for tag in ("<transcript", "<tt", "<text", "<p")):
+        if not cues:
+            cues = _parse_vtt_to_cues(raw)
+    elif any(tag in raw for tag in ("<transcript", "<tt", "<text", "<p")):
         cues = _parse_xml_to_cues(raw)
-        if cues: return cues
-    return _parse_vtt_to_cues(raw)
+        if not cues:
+            cues = _parse_vtt_to_cues(raw)
+    else:
+        cues = _parse_vtt_to_cues(raw)
+
+    if cues:
+        try:
+            from .subtitle_style_engine import normalize_and_dedupe_cues
+            cues = normalize_and_dedupe_cues(cues)
+        except Exception:
+            pass
+    return cues
 
 
 def _format_cues_to_srt(cues: List[Tuple[float, float, str]]) -> str:
     """Formats cues into standard SubRip (.srt) text."""
+    if not cues:
+        return ""
+    try:
+        from .subtitle_style_engine import normalize_and_dedupe_cues
+        cues = normalize_and_dedupe_cues(cues)
+    except Exception:
+        pass
     out: List[str] = []
     for idx, (start, end, body) in enumerate(cues, 1):
+        try:
+            from .subtitle_style_engine import sanitize_arabic_subtitle_text
+            body = sanitize_arabic_subtitle_text(body, for_ass=False)
+        except Exception:
+            pass
         s_str = _format_seconds_to_srt(start)
         e_str = _format_seconds_to_srt(end)
         out.append(f"{idx}\n{s_str} --> {e_str}\n{body}")

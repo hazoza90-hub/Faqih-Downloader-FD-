@@ -134,6 +134,12 @@ def open_video_preview(
     subtitle_embed_mode: str = "hard_burn",
     selected_q_idx: int = 0,
     subtitle_position: str = "bottom",
+    subtitle_preset: str = "youtube",
+    subtitle_font_scale: float = 1.0,
+    subtitle_text_color: str = "#FFFFFF",
+    subtitle_bg_mode: str = "box",
+    subtitle_pos_x: float = 50.0,
+    subtitle_pos_y: float = 86.0,
 ) -> str:
     """
     Builds and opens a real, VidMate-style video preview with synchronized live audio dubbing,
@@ -143,6 +149,14 @@ def open_video_preview(
     title = str(video_title or "Video Preview").strip()
     if on_log:
         on_log(f"[PREVIEW] Preparing video preview for: {title[:40]}...")
+
+    cur_opt = options[selected_q_idx] if (options and 0 <= selected_q_idx < len(options)) else stream_info
+    eff_preset = str(getattr(cur_opt, "subtitle_preset", subtitle_preset or "youtube"))
+    eff_scale = float(getattr(cur_opt, "subtitle_font_scale", subtitle_font_scale or 1.0))
+    eff_color = str(getattr(cur_opt, "subtitle_text_color", subtitle_text_color or "#FFFFFF"))
+    eff_bg = str(getattr(cur_opt, "subtitle_bg_mode", subtitle_bg_mode or "box"))
+    eff_px = float(getattr(cur_opt, "subtitle_pos_x", subtitle_pos_x or 50.0))
+    eff_py = float(getattr(cur_opt, "subtitle_pos_y", subtitle_pos_y or 86.0))
 
     stream_url = _find_progressive_mp4_url(stream_info, info_dict, source_url=clean_url)
 
@@ -197,6 +211,12 @@ def open_video_preview(
                 subtitle_embed_mode=subtitle_embed_mode,
                 selected_q_idx=selected_q_idx,
                 subtitle_position=subtitle_position,
+                subtitle_preset=eff_preset,
+                subtitle_font_scale=eff_scale,
+                subtitle_text_color=eff_color,
+                subtitle_bg_mode=eff_bg,
+                subtitle_pos_x=eff_px,
+                subtitle_pos_y=eff_py,
             )
             target_launch_url = f"http://127.0.0.1:{port}/player?sid={sid}"
             if not stream_url:
@@ -256,6 +276,12 @@ def open_video_preview(
         subtitle_embed_mode=subtitle_embed_mode,
         selected_q_idx=selected_q_idx,
         subtitle_position=subtitle_position,
+        subtitle_preset=eff_preset,
+        subtitle_font_scale=eff_scale,
+        subtitle_text_color=eff_color,
+        subtitle_bg_mode=eff_bg,
+        subtitle_pos_x=eff_px,
+        subtitle_pos_y=eff_py,
     )
 
     temp_html = os.path.join(tempfile.gettempdir(), f"_sd_preview_{os.getpid()}_{int(time.time()*1000)}.html")

@@ -52,6 +52,12 @@ class PreviewSession:
     subtitle_embed_mode: str = "soft_embed"
     selected_q_idx: int = 0
     subtitle_position: str = "bottom"
+    subtitle_preset: str = "youtube"
+    subtitle_font_scale: float = 1.0
+    subtitle_text_color: str = "#FFFFFF"
+    subtitle_bg_mode: str = "box"
+    subtitle_pos_x: float = 50.0
+    subtitle_pos_y: float = 86.0
 
 
 def start_preview_bridge(host: str = "127.0.0.1") -> int:
@@ -95,6 +101,12 @@ def register_preview_session(
     subtitle_embed_mode: str = "hard_burn",
     selected_q_idx: int = 0,
     subtitle_position: str = "bottom",
+    subtitle_preset: str = "youtube",
+    subtitle_font_scale: float = 1.0,
+    subtitle_text_color: str = "#FFFFFF",
+    subtitle_bg_mode: str = "box",
+    subtitle_pos_x: float = 50.0,
+    subtitle_pos_y: float = 86.0,
 ) -> str:
     """Registers an active media preview session and returns its unique random session ID token."""
     start_preview_bridge()
@@ -106,7 +118,10 @@ def register_preview_session(
         on_confirm=on_confirm, on_open_in_main=on_open_in_main, on_cancel=on_cancel, parent_app=parent_app,
         modal_ref=modal_ref, selected_audio_track=selected_audio_track, selected_sub_track=selected_sub_track,
         subtitle_embed_mode=subtitle_embed_mode or "hard_burn", selected_q_idx=selected_q_idx,
-        subtitle_position=subtitle_position or "bottom",
+        subtitle_position=subtitle_position or "bottom", subtitle_preset=subtitle_preset or "youtube",
+        subtitle_font_scale=float(subtitle_font_scale or 1.0), subtitle_text_color=str(subtitle_text_color or "#FFFFFF"),
+        subtitle_bg_mode=str(subtitle_bg_mode or "box"), subtitle_pos_x=float(subtitle_pos_x or 50.0),
+        subtitle_pos_y=float(subtitle_pos_y or 86.0),
     )
     with _SESSIONS_LOCK:
         _SESSIONS[session_id] = session
@@ -272,6 +287,9 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
             sid=session.sid, bridge_port=_BRIDGE_PORT, selected_audio_track=session.selected_audio_track,
             selected_sub_track=session.selected_sub_track, subtitle_embed_mode=session.subtitle_embed_mode,
             selected_q_idx=idx, subtitle_position=session.subtitle_position, dub_audio_url=initial_dub_url,
+            subtitle_preset=session.subtitle_preset, subtitle_font_scale=session.subtitle_font_scale,
+            subtitle_text_color=session.subtitle_text_color, subtitle_bg_mode=session.subtitle_bg_mode,
+            subtitle_pos_x=session.subtitle_pos_x, subtitle_pos_y=session.subtitle_pos_y,
         )
         data = html_code.encode("utf-8")
         self.send_response(200)
@@ -360,21 +378,22 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
         sub_pos = str(body.get("sub_pos", "bottom"))
         dest_path = str(body.get("dest_path", "")).strip()
 
-        session.selected_q_idx = q_idx
-        session.subtitle_position = sub_pos
-        session.subtitle_embed_mode = sub_mode
+        session.selected_q_idx, session.subtitle_position, session.subtitle_embed_mode = q_idx, sub_pos, sub_mode
+        session.subtitle_preset = str(body.get("sub_preset", session.subtitle_preset or "youtube"))
+        session.subtitle_font_scale = float(body.get("sub_scale", session.subtitle_font_scale or 1.0))
+        session.subtitle_text_color = str(body.get("sub_color", session.subtitle_text_color or "#FFFFFF"))
+        session.subtitle_bg_mode = str(body.get("sub_bg_mode", session.subtitle_bg_mode or "box"))
+        session.subtitle_pos_x, session.subtitle_pos_y = float(body.get("sub_pos_x", session.subtitle_pos_x or 50.0)), float(body.get("sub_pos_y", session.subtitle_pos_y or 86.0))
 
         selected_opt = session.options[q_idx] if 0 <= q_idx < len(session.options) else (session.options[0] if session.options else None)
         if selected_opt:
             if session.audio_tracks and 0 <= a_idx < len(session.audio_tracks):
                 selected_opt.selected_audio_track = session.audio_tracks[a_idx]
-            selected_opt.subtitle_embed_mode = sub_mode or "hard_burn"
-            selected_opt.subtitle_position = sub_pos or "bottom"
-            if session.subtitle_tracks:
-                if 0 < s_idx < len(session.subtitle_tracks):
-                    selected_opt.selected_subtitle_track = session.subtitle_tracks[s_idx]
-                else:
-                    selected_opt.selected_subtitle_track = None
+            selected_opt.subtitle_embed_mode, selected_opt.subtitle_position = sub_mode or "hard_burn", sub_pos or "bottom"
+            selected_opt.subtitle_preset, selected_opt.subtitle_font_scale = session.subtitle_preset, session.subtitle_font_scale
+            selected_opt.subtitle_text_color, selected_opt.subtitle_bg_mode = session.subtitle_text_color, session.subtitle_bg_mode
+            selected_opt.subtitle_pos_x, selected_opt.subtitle_pos_y = session.subtitle_pos_x, session.subtitle_pos_y
+            selected_opt.selected_subtitle_track = session.subtitle_tracks[s_idx] if (session.subtitle_tracks and 0 < s_idx < len(session.subtitle_tracks)) else None
 
         final_dest = dest_path or session.default_dest_path
         if selected_opt:
@@ -427,23 +446,25 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
         sub_pos = str(body.get("sub_pos", "bottom"))
         dest_path = str(body.get("dest_path", "")).strip()
 
-        session.selected_q_idx = q_idx
-        session.subtitle_position = sub_pos
-        session.subtitle_embed_mode = sub_mode
-        if dest_path:
-            session.default_dest_path = dest_path
+        session.selected_q_idx, session.subtitle_position, session.subtitle_embed_mode = q_idx, sub_pos, sub_mode
+        session.subtitle_preset = str(body.get("sub_preset", session.subtitle_preset or "youtube"))
+        session.subtitle_font_scale = float(body.get("sub_scale", session.subtitle_font_scale or 1.0))
+        session.subtitle_text_color = str(body.get("sub_color", session.subtitle_text_color or "#FFFFFF"))
+        session.subtitle_bg_mode = str(body.get("sub_bg_mode", session.subtitle_bg_mode or "box"))
+        session.subtitle_pos_x, session.subtitle_pos_y = float(body.get("sub_pos_x", session.subtitle_pos_x or 50.0)), float(body.get("sub_pos_y", session.subtitle_pos_y or 86.0))
+        if dest_path: session.default_dest_path = dest_path
 
         if session.audio_tracks and 0 <= a_idx < len(session.audio_tracks):
             session.selected_audio_track = session.audio_tracks[a_idx]
-        if session.subtitle_tracks and 0 < s_idx < len(session.subtitle_tracks):
-            session.selected_sub_track = session.subtitle_tracks[s_idx]
-        else:
-            session.selected_sub_track = None
+        session.selected_sub_track = session.subtitle_tracks[s_idx] if (session.subtitle_tracks and 0 < s_idx < len(session.subtitle_tracks)) else None
 
         if session.options and 0 <= q_idx < len(session.options):
             opt = session.options[q_idx]
             opt.selected_audio_track, opt.selected_subtitle_track = session.selected_audio_track, session.selected_sub_track
             opt.subtitle_embed_mode, opt.subtitle_position = session.subtitle_embed_mode, session.subtitle_position
+            opt.subtitle_preset, opt.subtitle_font_scale = session.subtitle_preset, session.subtitle_font_scale
+            opt.subtitle_text_color, opt.subtitle_bg_mode = session.subtitle_text_color, session.subtitle_bg_mode
+            opt.subtitle_pos_x, opt.subtitle_pos_y = session.subtitle_pos_x, session.subtitle_pos_y
 
         try:
             from ..config import set_setting
@@ -473,6 +494,12 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
                     m.selected_option.selected_subtitle_track = session.selected_sub_track
                     m.selected_option.subtitle_embed_mode = session.subtitle_embed_mode
                     m.selected_option.subtitle_position = session.subtitle_position
+                    m.selected_option.subtitle_preset = session.subtitle_preset
+                    m.selected_option.subtitle_font_scale = session.subtitle_font_scale
+                    m.selected_option.subtitle_text_color = session.subtitle_text_color
+                    m.selected_option.subtitle_bg_mode = session.subtitle_bg_mode
+                    m.selected_option.subtitle_pos_x = session.subtitle_pos_x
+                    m.selected_option.subtitle_pos_y = session.subtitle_pos_y
                 if hasattr(m, "cb_audio") and m.cb_audio:
                     m.cb_audio.current(a_idx)
                 if hasattr(m, "cb_sub") and m.cb_sub:

@@ -295,6 +295,12 @@ class VideoFormatOption:
     selected_subtitle_track: Optional[Dict[str, Any]] = None
     subtitle_embed_mode: str = "soft_embed"
     subtitle_position: str = "bottom"
+    subtitle_preset: str = "youtube"
+    subtitle_font_scale: float = 1.0
+    subtitle_text_color: str = "#FFFFFF"
+    subtitle_bg_mode: str = "box"
+    subtitle_pos_x: float = 50.0
+    subtitle_pos_y: float = 86.0
 
 
 def format_filesize(num_bytes: int) -> str:
@@ -338,6 +344,12 @@ class YouTubeStreamInfo:
     audio_language: Optional[str] = None
     subtitle_embed_mode: str = "soft_embed"
     subtitle_position: str = "bottom"
+    subtitle_preset: str = "youtube"
+    subtitle_font_scale: float = 1.0
+    subtitle_text_color: str = "#FFFFFF"
+    subtitle_bg_mode: str = "box"
+    subtitle_pos_x: float = 50.0
+    subtitle_pos_y: float = 86.0
     webpage_url: str = ""
     audio_format_id: str = ""
 
