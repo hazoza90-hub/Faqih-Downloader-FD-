@@ -46,6 +46,11 @@ DEFAULT_SNIFFER_PLATFORMS: Dict[str, bool] = {
 
 def get_resource_path(relative_path: str) -> str:
     """Resolve absolute path for bundled assets across PyInstaller, executable dir, cwd, and source tree."""
+    if not relative_path:
+        return ""
+    if os.path.isabs(relative_path) and os.path.exists(relative_path):
+        return relative_path
+
     # 1. sys._MEIPASS (direct and inside assets/)
     if hasattr(sys, "_MEIPASS") and sys._MEIPASS:
         for cand in (

@@ -204,7 +204,12 @@ def _normalize_sub_url_and_ext(url: str, ext: str) -> Tuple[str, str]:
 def _pick_best_sub_url(sub_formats: List[Dict[str, Any]]) -> Optional[Tuple[str, str]]:
     """Selects the best subtitle URL and extension preferring srt > vtt > ttml > srv3."""
     order = {"srt": 5, "vtt": 4, "ttml": 3, "srv3": 2, "srv1": 1, "json3": 0}
-    candidates = [f for f in sub_formats if f.get("url")]
+    candidates = [
+        f for f in sub_formats
+        if f.get("url")
+        and not any(x in str(f.get("ext") or "").lower() for x in ("live_chat", "rechat", "livechat"))
+        and not any(x in str(f.get("format_id") or "").lower() for x in ("live_chat", "rechat", "livechat"))
+    ]
     if not candidates:
         return None
     best = max(candidates, key=lambda f: order.get(str(f.get("ext") or "").lower(), 0))
@@ -235,7 +240,7 @@ def extract_subtitle_tracks(info: Dict[str, Any]) -> List[Dict[str, Any]]:
     for is_auto, sub_dict in ((False, manual_subs), (True, auto_subs)):
         for lang, flist in sub_dict.items():
             lang_norm = lang.lower()
-            if "live_chat" in lang_norm or "rechat" in lang_norm:
+            if "live_chat" in lang_norm or "rechat" in lang_norm or "livechat" in lang_norm or "live-chat" in lang_norm:
                 continue
             base_lang = lang_norm.split("-")[0].split("_")[0]
             if is_auto and lang_norm not in popular_lower and base_lang not in popular_lower and lang not in manual_subs:

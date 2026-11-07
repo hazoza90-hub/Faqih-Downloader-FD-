@@ -59,6 +59,9 @@ if "--test-startup" in sys.argv:
         with Image.open(png_path) as _img:
             _img.load()
 
+        from faqih_downloader.services.media_env_helpers import find_ffmpeg_bin
+        find_ffmpeg_bin()
+
         from faqih_downloader.ui.main_window import ModernFramelessGUI
         from faqih_downloader.ui.panels.kanban_staged_helpers import build_staged_link_card
         from faqih_downloader.ui.panels.kanban_card_graphics import _extract_and_load_video_thumbnail

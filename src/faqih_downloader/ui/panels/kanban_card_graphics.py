@@ -92,9 +92,9 @@ def _extract_and_load_video_thumbnail(canvas: tk.Canvas, video_path: Optional[st
     hash_key = hashlib.md5(h_str.encode("utf-8", errors="ignore")).hexdigest()
     thumb_path = os.path.join(cache_dir, f"{hash_key}.jpg")
 
-    def _apply_thumb():
+    def _apply_thumb() -> bool:
         if not getattr(canvas, "winfo_exists", lambda: False)():
-            return
+            return False
         try:
             from PIL import Image, ImageTk
             with Image.open(thumb_path) as im:
@@ -104,12 +104,19 @@ def _extract_and_load_video_thumbnail(canvas: tk.Canvas, video_path: Optional[st
             canvas.create_image(0, 0, anchor="nw", image=photo)
             canvas._photo = photo
             _draw_video_play_overlay(canvas)
+            return True
         except Exception:
+            try:
+                if os.path.isfile(thumb_path):
+                    os.remove(thumb_path)
+            except Exception:
+                pass
             _draw_default_video_thumbnail(canvas)
+            return False
 
     if os.path.isfile(thumb_path) and os.path.getsize(thumb_path) > 0:
-        _apply_thumb()
-        return
+        if _apply_thumb():
+            return
 
     ffmpeg_bin = find_ffmpeg_bin()
     if not ffmpeg_bin:
