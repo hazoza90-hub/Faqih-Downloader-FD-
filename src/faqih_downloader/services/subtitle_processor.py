@@ -371,11 +371,14 @@ def burn_subtitle_into_video(
     try:
         success = False
         last_err = ""
+        clip_s = float(style_config.get("clip_start", 0.0) or 0.0) if style_config else 0.0
+        clip_e = float(style_config.get("clip_end", 0.0) or 0.0) if style_config else 0.0
+        clip_args = ["-ss", f"{clip_s:.3f}", "-to", f"{clip_e:.3f}"] if clip_e > clip_s >= 0 else []
         for idx, vf in enumerate(candidate_vfs, 1):
             if cancel_event and cancel_event.is_set():
                 break
             cmd = [
-                ffmpeg_path, "-y", "-i", abs_video, "-vf", vf,
+                ffmpeg_path, "-y", "-i", abs_video, *clip_args, "-vf", vf,
                 "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
                 "-pix_fmt", "yuv420p", "-movflags", "+faststart",
                 "-c:a", "aac", "-b:a", "192k", "-f", "mp4", temp_burn_mp4
@@ -478,40 +481,34 @@ def handle_subtitles_post_download(
 
         def _cleanup_srt():
             cur_stem = os.path.splitext(output_path)[0]
-            for p_path in {srt_path, default_srt, f"{cur_stem}.srt"}:
+            for p_path in {srt_path, default_srt, f"{cur_stem}.srt", f"{orig_stem}.sec.srt", f"{cur_stem}.sec.srt"}:
                 if p_path and os.path.isfile(p_path):
-                    try:
-                        os.remove(p_path)
-                    except Exception:
-                        pass
+                    try: os.remove(p_path)
+                    except Exception: pass
 
         sub_pos = getattr(stream_info, "subtitle_position", None)
-        if not sub_pos:
-            try:
-                from ..config import get_setting
-                sub_pos = get_setting("subtitle_position", "bottom")
-            except Exception:
-                sub_pos = "bottom"
-
         if mode == "hard_burn":
-            if on_log:
-                on_log("[SUBTITLES] Burning subtitles permanently onto video frames...")
+            if on_log: on_log("[SUBTITLES] Burning subtitles permanently onto video frames...")
             burn_kwargs = dict(sub_kwargs)
-            if sub_pos and isinstance(sub_pos, str) and sub_pos != "bottom":
-                burn_kwargs["subtitle_position"] = sub_pos
+            if isinstance(sub_pos, str) and sub_pos != "bottom": burn_kwargs["subtitle_position"] = sub_pos
             sub_st = getattr(stream_info, "subtitle_track", None)
             cfg_from_track = sub_st.get("style_config") if isinstance(sub_st, dict) else None
             eff_cfg = getattr(stream_info, "style_config", None) or cfg_from_track
             if not hasattr(stream_info, "_mock_name") and (eff_cfg or getattr(stream_info, "subtitle_preset", None)):
-                burn_kwargs["style_config"] = eff_cfg or {
-                    "preset": getattr(stream_info, "subtitle_preset", "youtube"),
-                    "font_scale": getattr(stream_info, "subtitle_font_scale", 1.0),
-                    "text_color": getattr(stream_info, "subtitle_text_color", "#FFFFFF"),
-                    "bg_mode": getattr(stream_info, "subtitle_bg_mode", "box"),
-                    "pos_x": getattr(stream_info, "subtitle_pos_x", 50.0),
-                    "pos_y": getattr(stream_info, "subtitle_pos_y", 86.0),
-                    "subtitle_position": sub_pos or "bottom",
+                sc = dict(eff_cfg) if eff_cfg else {
+                    "preset": getattr(stream_info, "subtitle_preset", "youtube"), "font_scale": getattr(stream_info, "subtitle_font_scale", 1.0),
+                    "text_color": getattr(stream_info, "subtitle_text_color", "#FFFFFF"), "bg_mode": getattr(stream_info, "subtitle_bg_mode", "box"),
+                    "pos_x": getattr(stream_info, "subtitle_pos_x", 50.0), "pos_y": getattr(stream_info, "subtitle_pos_y", 86.0),
+                    "subtitle_position": sub_pos,
                 }
+                sc.setdefault("custom_edits", getattr(stream_info, "subtitle_custom_edits", {}))
+                sc.setdefault("clip_start", getattr(stream_info, "clip_start_sec", 0.0))
+                sc.setdefault("clip_end", getattr(stream_info, "clip_end_sec", 0.0))
+                sec_trk = getattr(stream_info, "secondary_subtitle_track", None) or sc.get("secondary_track")
+                if getattr(stream_info, "dual_subtitle_enabled", False) and sec_trk and isinstance(sec_trk, dict) and (sec_trk.get("url") or sec_trk.get("base_url")):
+                    sec_srt = download_subtitle_as_srt(sec_trk, f"{orig_stem}.sec.srt")
+                    if sec_srt and os.path.isfile(sec_srt): sc["secondary_srt_source"] = sec_srt
+                burn_kwargs["style_config"] = sc
             ok = burn_subtitle_into_video(output_path, srt_path, ffmpeg_bin, on_log=on_log, **burn_kwargs)
             if ok:
                 _cleanup_srt()

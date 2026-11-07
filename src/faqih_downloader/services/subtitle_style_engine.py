@@ -246,9 +246,13 @@ def generate_styled_ass_file(
     pos_y: float = 86.0,
     subtitle_position: Optional[str] = None,
     font_name: str = "Arial",
+    custom_edits: Optional[Dict[str, str]] = None,
+    clip_start: float = 0.0,
+    clip_end: float = 0.0,
+    secondary_srt_source: Optional[Any] = None,
     **kwargs
 ) -> bool:
-    """Generates ASS subtitle file with 1:1 preview styling and coordinates."""
+    """Generates ASS subtitle file with 1:1 preview styling, clipping, and dual subtitles."""
     vid_w, vid_h = (width or 0), (height or 0)
     if vid_w <= 0 or vid_h <= 0:
         vid_w, vid_h = probe_video_dimensions(video_path, ffmpeg_path=ffmpeg_path) if (video_path and os.path.isfile(video_path)) else (1920, 1080)
@@ -282,12 +286,32 @@ def generate_styled_ass_file(
         font_size = max(14, int(ref_dim * 0.042 * scale))
 
     cues: List[Tuple[float, float, str]] = []
-    if isinstance(srt_source, list): cues = srt_source
+    if isinstance(srt_source, list): cues = list(srt_source)
     elif isinstance(srt_source, str):
         if os.path.isfile(srt_source):
             with open(srt_source, "r", encoding="utf-8-sig", errors="replace") as f:
                 cues = _parse_srt_text_to_cues(f.read())
         else: cues = _parse_srt_text_to_cues(srt_source)
+
+    if custom_edits:
+        from .media_clipper_engine import apply_custom_cue_edits
+        cues = apply_custom_cue_edits(cues, custom_edits)
+
+    sec_cues: List[Tuple[float, float, str]] = []
+    if secondary_srt_source:
+        if isinstance(secondary_srt_source, list): sec_cues = list(secondary_srt_source)
+        elif isinstance(secondary_srt_source, str):
+            if os.path.isfile(secondary_srt_source):
+                with open(secondary_srt_source, "r", encoding="utf-8-sig", errors="replace") as f:
+                    sec_cues = _parse_srt_text_to_cues(f.read())
+            else: sec_cues = _parse_srt_text_to_cues(secondary_srt_source)
+        if sec_cues:
+            from .media_clipper_engine import merge_bilingual_cues
+            cues = merge_bilingual_cues(cues, sec_cues)
+
+    if clip_end > clip_start >= 0:
+        from .media_clipper_engine import filter_and_shift_cues_for_clip
+        cues = filter_and_shift_cues_for_clip(cues, clip_start, clip_end)
 
     norm_cues = normalize_and_dedupe_cues(cues, max_words=7 if p_name == "tiktok" else 10)
     lines = [
@@ -296,15 +320,26 @@ def generate_styled_ass_file(
         "[V4+ Styles]",
         "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
         f"Style: Default,{font_name},{font_size},{prim_col},&H000000FF,{out_col},{back_col},1,0,0,0,100,100,0,0,{border_style},{outline},{shadow},5,20,20,20,1",
-        "", "[Events]", "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
     ]
+    has_dual = bool(secondary_srt_source) or any("[[DUAL]]" in (c[2] if isinstance(c, tuple) else c.get("text", "")) for c in norm_cues)
+    if has_dual:
+        sec_font_size = max(11, int(font_size * 0.76))
+        lines.append(f"Style: Secondary,{font_name},{sec_font_size},&H00E2E8F0,&H000000FF,{out_col},{back_col},0,0,0,0,100,100,0,0,{border_style},{outline},{shadow},5,20,20,20,1")
+
+    lines.extend(["", "[Events]", "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"])
     for item in norm_cues:
         ext = _extract_cue_item(item)
         if not ext: continue
         s, e, body = ext
         s_str, e_str = format_ass_timestamp(s), format_ass_timestamp(e)
-        sanitized = sanitize_arabic_subtitle_text(body, for_ass=True)
-        ass_body = sanitized.replace("{", "｛").replace("}", "｝").replace("\r\n", "\\N").replace("\n", "\\N")
+        if "[[DUAL]]" in body:
+            parts = body.split("[[DUAL]]", 1)
+            p_text = sanitize_arabic_subtitle_text(parts[0].strip(), for_ass=True).replace("{", "｛").replace("}", "｝").replace("\r\n", "\\N").replace("\n", "\\N")
+            s_text = sanitize_arabic_subtitle_text(parts[1].strip(), for_ass=True).replace("{", "｛").replace("}", "｝").replace("\r\n", "\\N").replace("\n", "\\N")
+            ass_body = f"{p_text}\\N{{\\rSecondary}}{s_text}"
+        else:
+            sanitized = sanitize_arabic_subtitle_text(body, for_ass=True)
+            ass_body = sanitized.replace("{", "｛").replace("}", "｝").replace("\r\n", "\\N").replace("\n", "\\N")
         lines.append(f"Dialogue: 0,{s_str},{e_str},Default,,0,0,0,,{{\\an5\\pos({px},{py})}}{ass_body}")
 
     try:

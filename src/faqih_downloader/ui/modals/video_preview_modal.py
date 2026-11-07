@@ -282,6 +282,9 @@ def open_video_preview(
         subtitle_bg_mode=eff_bg,
         subtitle_pos_x=eff_px,
         subtitle_pos_y=eff_py,
+        clip_start=getattr(options[selected_q_idx], "clip_start_sec", 0.0) if (options and 0 <= selected_q_idx < len(options)) else 0.0,
+        clip_end=getattr(options[selected_q_idx], "clip_end_sec", 0.0) if (options and 0 <= selected_q_idx < len(options)) else 0.0,
+        dual_sub=getattr(options[selected_q_idx], "dual_subtitle_enabled", False) if (options and 0 <= selected_q_idx < len(options)) else False,
     )
 
     temp_html = os.path.join(tempfile.gettempdir(), f"_sd_preview_{os.getpid()}_{int(time.time()*1000)}.html")

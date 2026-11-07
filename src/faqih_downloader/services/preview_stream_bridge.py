@@ -58,6 +58,11 @@ class PreviewSession:
     subtitle_bg_mode: str = "box"
     subtitle_pos_x: float = 50.0
     subtitle_pos_y: float = 86.0
+    clip_start: float = 0.0
+    clip_end: float = 0.0
+    sub_custom_edits: Dict[str, str] = field(default_factory=dict)
+    dual_sub: bool = False
+    sec_s_idx: int = -1
 
 
 def start_preview_bridge(host: str = "127.0.0.1") -> int:
@@ -301,6 +306,7 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
             subtitle_preset=session.subtitle_preset, subtitle_font_scale=session.subtitle_font_scale,
             subtitle_text_color=session.subtitle_text_color, subtitle_bg_mode=session.subtitle_bg_mode,
             subtitle_pos_x=session.subtitle_pos_x, subtitle_pos_y=session.subtitle_pos_y,
+            clip_start=session.clip_start, clip_end=session.clip_end, dual_sub=session.dual_sub,
         )
         data = html_code.encode("utf-8")
         self.send_response(200)
@@ -394,10 +400,8 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
         dest_path = str(body.get("dest_path", "")).strip()
 
         session.selected_q_idx, session.subtitle_position, session.subtitle_embed_mode = q_idx, sub_pos, sub_mode
-        session.subtitle_preset = str(body.get("sub_preset", session.subtitle_preset or "youtube"))
-        session.subtitle_font_scale = float(body.get("sub_scale", session.subtitle_font_scale or 1.0))
-        session.subtitle_text_color = str(body.get("sub_color", session.subtitle_text_color or "#FFFFFF"))
-        session.subtitle_bg_mode = str(body.get("sub_bg_mode", session.subtitle_bg_mode or "box"))
+        session.subtitle_preset, session.subtitle_font_scale = str(body.get("sub_preset", session.subtitle_preset or "youtube")), float(body.get("sub_scale", session.subtitle_font_scale or 1.0))
+        session.subtitle_text_color, session.subtitle_bg_mode = str(body.get("sub_color", session.subtitle_text_color or "#FFFFFF")), str(body.get("sub_bg_mode", session.subtitle_bg_mode or "box"))
         session.subtitle_pos_x, session.subtitle_pos_y = float(body.get("sub_pos_x", session.subtitle_pos_x or 50.0)), float(body.get("sub_pos_y", session.subtitle_pos_y or 86.0))
 
         selected_opt = session.options[q_idx] if 0 <= q_idx < len(session.options) else (session.options[0] if session.options else None)
@@ -407,6 +411,8 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
             selected_opt.subtitle_embed_mode, selected_opt.subtitle_position = sub_mode or "hard_burn", sub_pos or "bottom"
             selected_opt.selected_subtitle_track = session.subtitle_tracks[s_idx] if (session.subtitle_tracks and 0 < s_idx < len(session.subtitle_tracks)) else None
             _apply_session_sub_styles(selected_opt, session)
+        from .media_clipper_engine import sync_clipper_state_from_body
+        sync_clipper_state_from_body(session, body, selected_opt)
 
         final_dest = dest_path or session.default_dest_path
         if selected_opt:
@@ -460,10 +466,8 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
         dest_path = str(body.get("dest_path", "")).strip()
 
         session.selected_q_idx, session.subtitle_position, session.subtitle_embed_mode = q_idx, sub_pos, sub_mode
-        session.subtitle_preset = str(body.get("sub_preset", session.subtitle_preset or "youtube"))
-        session.subtitle_font_scale = float(body.get("sub_scale", session.subtitle_font_scale or 1.0))
-        session.subtitle_text_color = str(body.get("sub_color", session.subtitle_text_color or "#FFFFFF"))
-        session.subtitle_bg_mode = str(body.get("sub_bg_mode", session.subtitle_bg_mode or "box"))
+        session.subtitle_preset, session.subtitle_font_scale = str(body.get("sub_preset", session.subtitle_preset or "youtube")), float(body.get("sub_scale", session.subtitle_font_scale or 1.0))
+        session.subtitle_text_color, session.subtitle_bg_mode = str(body.get("sub_color", session.subtitle_text_color or "#FFFFFF")), str(body.get("sub_bg_mode", session.subtitle_bg_mode or "box"))
         session.subtitle_pos_x, session.subtitle_pos_y = float(body.get("sub_pos_x", session.subtitle_pos_x or 50.0)), float(body.get("sub_pos_y", session.subtitle_pos_y or 86.0))
         if dest_path: session.default_dest_path = dest_path
 
@@ -471,11 +475,13 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
             session.selected_audio_track = session.audio_tracks[a_idx]
         session.selected_sub_track = session.subtitle_tracks[s_idx] if (session.subtitle_tracks and 0 < s_idx < len(session.subtitle_tracks)) else None
 
-        if session.options and 0 <= q_idx < len(session.options):
-            opt = session.options[q_idx]
-            opt.selected_audio_track, opt.selected_subtitle_track = session.selected_audio_track, session.selected_sub_track
-            opt.subtitle_embed_mode, opt.subtitle_position = session.subtitle_embed_mode, session.subtitle_position
-            _apply_session_sub_styles(opt, session)
+        cur_opt = session.options[q_idx] if (session.options and 0 <= q_idx < len(session.options)) else None
+        if cur_opt:
+            cur_opt.selected_audio_track, cur_opt.selected_subtitle_track = session.selected_audio_track, session.selected_sub_track
+            cur_opt.subtitle_embed_mode, cur_opt.subtitle_position = session.subtitle_embed_mode, session.subtitle_position
+            _apply_session_sub_styles(cur_opt, session)
+        from .media_clipper_engine import sync_clipper_state_from_body
+        sync_clipper_state_from_body(session, body, cur_opt)
 
         try:
             from ..config import set_setting
@@ -496,28 +502,18 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
             try:
                 iid = f"opt_{q_idx}"
                 if hasattr(m, "tree") and m.tree:
-                    m.tree.selection_set(iid)
-                    m.tree.focus(iid)
-                    m.tree.see(iid)
+                    m.tree.selection_set(iid); m.tree.focus(iid); m.tree.see(iid)
                 if hasattr(m, "options") and 0 <= q_idx < len(m.options):
-                    m.selected_option = m.options[q_idx]
-                    m.selected_option.selected_audio_track = session.selected_audio_track
-                    m.selected_option.selected_subtitle_track = session.selected_sub_track
-                    m.selected_option.subtitle_embed_mode = session.subtitle_embed_mode
-                    m.selected_option.subtitle_position = session.subtitle_position
-                    m.selected_option.subtitle_preset = session.subtitle_preset
-                    m.selected_option.subtitle_font_scale = session.subtitle_font_scale
-                    m.selected_option.subtitle_text_color = session.subtitle_text_color
-                    m.selected_option.subtitle_bg_mode = session.subtitle_bg_mode
-                    m.selected_option.subtitle_pos_x = session.subtitle_pos_x
-                    m.selected_option.subtitle_pos_y = session.subtitle_pos_y
-                if hasattr(m, "cb_audio") and m.cb_audio:
-                    m.cb_audio.current(a_idx)
+                    so = m.selected_option = m.options[q_idx]
+                    so.selected_audio_track, so.selected_subtitle_track = session.selected_audio_track, session.selected_sub_track
+                    so.subtitle_embed_mode, so.subtitle_position = session.subtitle_embed_mode, session.subtitle_position
+                    so.subtitle_preset, so.subtitle_font_scale = session.subtitle_preset, session.subtitle_font_scale
+                    so.subtitle_text_color, so.subtitle_bg_mode = session.subtitle_text_color, session.subtitle_bg_mode
+                    so.subtitle_pos_x, so.subtitle_pos_y = session.subtitle_pos_x, session.subtitle_pos_y
+                if hasattr(m, "cb_audio") and m.cb_audio: m.cb_audio.current(a_idx)
                 if hasattr(m, "cb_sub") and m.cb_sub:
                     m.cb_sub.current(s_idx)
-                    m.cb_sub._selected_mode = sub_mode
-                    m.cb_sub._user_touched_mode = True
-                    m.cb_sub._selected_pos = sub_pos
+                    m.cb_sub._selected_mode, m.cb_sub._user_touched_mode, m.cb_sub._selected_pos = sub_mode, True, sub_pos
                     if hasattr(m.cb_sub, "_mode_var"): m.cb_sub._mode_var.set(sub_mode)
                     mode_cb = getattr(m.cb_sub, "_mode_combobox", None)
                     if mode_cb and hasattr(mode_cb, "current"):

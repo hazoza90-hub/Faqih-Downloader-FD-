@@ -301,6 +301,11 @@ class VideoFormatOption:
     subtitle_bg_mode: str = "box"
     subtitle_pos_x: float = 50.0
     subtitle_pos_y: float = 86.0
+    clip_start_sec: float = 0.0
+    clip_end_sec: float = 0.0
+    subtitle_custom_edits: Dict[str, str] = field(default_factory=dict)
+    dual_subtitle_enabled: bool = False
+    secondary_subtitle_track: Optional[Dict[str, Any]] = None
 
 
 def format_filesize(num_bytes: int) -> str:
@@ -352,6 +357,11 @@ class YouTubeStreamInfo:
     subtitle_pos_y: float = 86.0
     webpage_url: str = ""
     audio_format_id: str = ""
+    clip_start_sec: float = 0.0
+    clip_end_sec: float = 0.0
+    subtitle_custom_edits: Dict[str, str] = field(default_factory=dict)
+    dual_subtitle_enabled: bool = False
+    secondary_subtitle_track: Optional[Dict[str, Any]] = None
 
     def __post_init__(self):
         if self.subtitle_track and isinstance(self.subtitle_track, dict):
@@ -364,6 +374,11 @@ class YouTubeStreamInfo:
                 if "pos_x" in sc: self.subtitle_pos_x = float(sc["pos_x"])
                 if "pos_y" in sc: self.subtitle_pos_y = float(sc["pos_y"])
                 if "subtitle_position" in sc: self.subtitle_position = str(sc["subtitle_position"])
+                if "clip_start" in sc and not self.clip_start_sec: self.clip_start_sec = float(sc["clip_start"])
+                if "clip_end" in sc and not self.clip_end_sec: self.clip_end_sec = float(sc["clip_end"])
+                if "custom_edits" in sc and not self.subtitle_custom_edits: self.subtitle_custom_edits = dict(sc["custom_edits"])
+                if "dual_sub" in sc: self.dual_subtitle_enabled = bool(sc["dual_sub"])
+                if "secondary_track" in sc: self.secondary_subtitle_track = sc["secondary_track"]
 
 
 # Clean alias

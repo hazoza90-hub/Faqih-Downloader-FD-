@@ -249,6 +249,10 @@ function loadLiveSubtitlesFromUrl(vttUrl) {
     }).catch(() => { liveSubCues = []; updateLiveSubDisplay(); });
 }
 
+function _escapeSubHtml(s) {
+    return String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
 function updateLiveSubDisplay() {
     const overlay = document.getElementById("liveSubOverlay");
     if (!overlay) return;
@@ -263,7 +267,17 @@ function updateLiveSubDisplay() {
         cue = liveSubCues.find(c => c.start >= ct) || liveSubCues[0];
     }
     if (cue && cue.text) {
-        overlay.textContent = _balanceSingleLine(cue.text); overlay.style.display = "block";
+        let pTxt = _balanceSingleLine(cue.text);
+        if (typeof dualSubEnabled !== "undefined" && dualSubEnabled && typeof secondarySubCues !== "undefined" && secondarySubCues.length > 0) {
+            let sCue = secondarySubCues.find(c => ct >= c.start && ct <= c.end) || secondarySubCues.find(c => Math.max(0, Math.min(cue.end, c.end) - Math.max(cue.start, c.start)) > 0.05);
+            if (sCue && sCue.text) {
+                let sTxt = _balanceSingleLine(sCue.text);
+                overlay.innerHTML = '<span class="primary-sub-line">' + _escapeSubHtml(pTxt) + '</span><span class="dual-sub-secondary">' + _escapeSubHtml(sTxt) + '</span>';
+                overlay.style.display = "block";
+                return;
+            }
+        }
+        overlay.textContent = pTxt; overlay.style.display = "block";
     } else {
         overlay.textContent = ""; overlay.style.display = "none";
     }

@@ -9,6 +9,7 @@ import json
 from typing import Dict, List, Optional, Any
 from ...services.youtube_models import extract_media_platform, format_filesize
 from .preview_subtitle_studio import get_studio_css, get_studio_toolbar_html, get_studio_js
+from .preview_clipper_studio import get_clipper_css, get_clipper_toolbar_html, get_clipper_js
 
 _CSS = """
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -269,20 +270,25 @@ function onModeChange() {
     syncStateToBridge();
 }
 
+function getSyncPayload(extra) {
+    return Object.assign({
+        q_idx: selected_q_idx, a_idx: audioSelect ? parseInt(audioSelect.value) : 0,
+        s_idx: subSelect ? parseInt(subSelect.value) : 0, sub_mode: modeSelect ? modeSelect.value : "hard_burn",
+        sub_pos: posSelect ? posSelect.value : "bottom", sub_preset: subPreset, sub_scale: subScale, sub_color: subColor,
+        sub_bg_mode: subBgMode, sub_pos_x: subPosX, sub_pos_y: subPosY, dest_path: destInput ? destInput.value.trim() : "",
+        clip_start: (typeof clipStartSec !== "undefined" ? clipStartSec : 0.0),
+        clip_end: (typeof clipEndSec !== "undefined" ? clipEndSec : 0.0),
+        sub_custom_edits: (typeof subCustomEdits !== "undefined" ? subCustomEdits : {}),
+        dual_sub: (typeof dualSubEnabled !== "undefined" ? dualSubEnabled : false),
+        sec_s_idx: (typeof secSubIndex !== "undefined" ? secSubIndex : -1)
+    }, extra || {});
+}
+
 function syncStateToBridge() {
     if (!sid) return;
     fetch(`${bridgeBase}/api/sync_state?sid=${encodeURIComponent(sid)}`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-            q_idx: selected_q_idx,
-            a_idx: audioSelect ? parseInt(audioSelect.value) : 0,
-            s_idx: subSelect ? parseInt(subSelect.value) : 0,
-            sub_mode: modeSelect ? modeSelect.value : "hard_burn",
-            sub_pos: posSelect ? posSelect.value : "bottom",
-            sub_preset: subPreset, sub_scale: subScale, sub_color: subColor,
-            sub_bg_mode: subBgMode, sub_pos_x: subPosX, sub_pos_y: subPosY,
-            dest_path: destInput ? destInput.value.trim() : ""
-        })
+        body: JSON.stringify(getSyncPayload())
     }).catch(e => {});
 }
 
@@ -291,10 +297,8 @@ function requestUpdatedFilename() {
     fetch(`${bridgeBase}/api/update_filename?sid=${encodeURIComponent(sid)}`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-            q_idx: selected_q_idx,
-            s_idx: subSelect ? parseInt(subSelect.value) : 0,
-            sub_mode: modeSelect ? modeSelect.value : "hard_burn",
-            current_dest: destInput.value
+            q_idx: selected_q_idx, s_idx: subSelect ? parseInt(subSelect.value) : 0,
+            sub_mode: modeSelect ? modeSelect.value : "hard_burn", current_dest: destInput.value
         })
     }).then(r => r.json()).then(d => { if (d && d.dest_path) destInput.value = d.dest_path; }).catch(e => {});
 }
@@ -306,24 +310,19 @@ function doAction(actionType) {
     if (!sid) { window.close(); return; }
     fetch(`${bridgeBase}/api/action?sid=${encodeURIComponent(sid)}`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-            action: actionType, q_idx: selected_q_idx,
-            a_idx: audioSelect ? parseInt(audioSelect.value) : 0,
-            s_idx: subSelect ? parseInt(subSelect.value) : 0,
-            sub_mode: modeSelect ? modeSelect.value : "hard_burn",
-            sub_pos: posSelect ? posSelect.value : "bottom",
-            sub_preset: subPreset, sub_scale: subScale, sub_color: subColor,
-            sub_bg_mode: subBgMode, sub_pos_x: subPosX, sub_pos_y: subPosY,
-            dest_path: destInput ? destInput.value.trim() : ""
-        })
+        body: JSON.stringify(getSyncPayload({ action: actionType }))
     }).then(r => r.json()).then(() => { setTimeout(() => { window.close(); }, 120); }).catch(() => { window.close(); });
 }
 
 __STUDIO_JS__
+__CLIPPER_JS__
 
 subPreset = __SUB_PRESET__; subScale = __SUB_SCALE__; subColor = __SUB_COLOR__;
 subBgMode = __SUB_BG__; subPosX = __SUB_PX__; subPosY = __SUB_PY__;
+clipStartSec = __CLIP_START__; clipEndSec = __CLIP_END__; dualSubEnabled = __DUAL_SUB__;
 initLiveSubDragDrop();
+if (typeof initClipperStudioHooks === "function") initClipperStudioHooks();
+if (typeof updateClipUI === "function") updateClipUI();
 if (typeof disableNativeTextTracks === "function") disableNativeTextTracks();
 applyLiveSubStyle();
 if (sid && subtitleTracks && __SEL_S_IDX__ > 0) {
@@ -371,6 +370,10 @@ def generate_preview_html(
     subtitle_bg_mode: str = "box",
     subtitle_pos_x: float = 50.0,
     subtitle_pos_y: float = 86.0,
+    clip_start: float = 0.0,
+    clip_end: float = 0.0,
+    dual_sub: bool = False,
+    **kwargs
 ) -> str:
     """Generates modern dark-themed HTML5 preview player with synchronized dubbing and controls."""
     safe_title = html.escape(video_title or "Video Preview")
@@ -456,8 +459,9 @@ def generate_preview_html(
             f'<option value="top"{" selected" if subtitle_position == "top" else ""}>Top (أعلى الشاشة)</option>',
         ]
         safe_dst = html.escape(default_dest_path or "")
+        clipper_toolbar = get_clipper_toolbar_html(clip_start=clip_start, clip_end=clip_end, dual_sub=dual_sub)
         studio_toolbar = get_studio_toolbar_html(preset=subtitle_preset, scale=subtitle_font_scale, color=subtitle_text_color, bg_mode=subtitle_bg_mode, pos_x=subtitle_pos_x, pos_y=subtitle_pos_y)
-        settings_html = f"""<div class="settings-panel"><div class="settings-header"><span class="settings-title">⚡ Download Quality &amp; Controls</span><span class="settings-count">{len(options)} Formats Detected</span></div><div class="table-container"><table class="format-table"><thead><tr><th>Resolution / Quality</th><th class="col-center">Format</th><th class="col-right">Est. Size</th><th class="col-center">FPS</th><th>Stream Details</th></tr></thead><tbody>{"".join(rows)}</tbody></table></div><div class="controls-row"><div class="ctrl-group"><label>🔊 Audio / الدبلجة</label><select id="audioSelect" onchange="onAudioChange()">{"".join(a_opts)}</select></div><div class="ctrl-group"><label>💬 Subtitles / الترجمة</label><select id="subSelect" onchange="onSubChange()">{"".join(s_opts)}</select></div><div class="ctrl-group"><label>⚙️ Mode / الطريقة</label><select id="modeSelect" onchange="onModeChange()">{"".join(m_opts)}</select></div><div class="ctrl-group"><label>📍 Position / الموضع</label><select id="posSelect" onchange="onPosChange()">{"".join(p_opts)}</select></div></div>{studio_toolbar}<div class="dest-card"><label>📁 Save As / مسار الحفظ:</label><input type="text" id="destInput" value="{safe_dst}" /><button type="button" class="btn" style="padding:4px 8px;font-size:11px;" onclick="browseDestination()">📁 Browse...</button></div><div class="action-bar"><button class="btn btn-download" onclick="doAction('download')">⚡ Download Selected Quality</button><button class="btn btn-secondary" onclick="doAction('open_in_main')">🖥️ Open in Main Window</button><button class="btn btn-cancel" onclick="doAction('cancel')">✕ Cancel</button></div></div>"""
+        settings_html = f"""<div class="settings-panel"><div class="settings-header"><span class="settings-title">⚡ Download Quality &amp; Controls</span><span class="settings-count">{len(options)} Formats Detected</span></div><div class="table-container"><table class="format-table"><thead><tr><th>Resolution / Quality</th><th class="col-center">Format</th><th class="col-right">Est. Size</th><th class="col-center">FPS</th><th>Stream Details</th></tr></thead><tbody>{"".join(rows)}</tbody></table></div><div class="controls-row"><div class="ctrl-group"><label>🔊 Audio / الدبلجة</label><select id="audioSelect" onchange="onAudioChange()">{"".join(a_opts)}</select></div><div class="ctrl-group"><label>💬 Subtitles / الترجمة</label><select id="subSelect" onchange="onSubChange()">{"".join(s_opts)}</select></div><div class="ctrl-group"><label>⚙️ Mode / الطريقة</label><select id="modeSelect" onchange="onModeChange()">{"".join(m_opts)}</select></div><div class="ctrl-group"><label>📍 Position / الموضع</label><select id="posSelect" onchange="onPosChange()">{"".join(p_opts)}</select></div></div>{clipper_toolbar}{studio_toolbar}<div class="dest-card"><label>📁 Save As / مسار الحفظ:</label><input type="text" id="destInput" value="{safe_dst}" /><button type="button" class="btn" style="padding:4px 8px;font-size:11px;" onclick="browseDestination()">📁 Browse...</button></div><div class="action-bar"><button class="btn btn-download" onclick="doAction('download')">⚡ Download Selected Quality</button><button class="btn btn-secondary" onclick="doAction('open_in_main')">🖥️ Open in Main Window</button><button class="btn btn-cancel" onclick="doAction('cancel')">✕ Cancel</button></div></div>"""
 
     opt_needs_audio = [bool(not getattr(o, "is_progressive", False) and not getattr(o, "is_audio_only", False) and getattr(o, "audio_url", None)) for o in (options or [])]
     _j = lambda v: json.dumps(v).replace("</", "<\\/")
@@ -483,6 +487,10 @@ def generate_preview_html(
         .replace("__SEL_S_IDX__", str(sel_s_idx))
         .replace("__VTT_URI__", _j(vtt_data_uri or ""))
         .replace("__STUDIO_JS__", get_studio_js())
+        .replace("__CLIPPER_JS__", get_clipper_js())
+        .replace("__CLIP_START__", str(float(clip_start or 0.0)))
+        .replace("__CLIP_END__", str(float(clip_end or 0.0)))
+        .replace("__DUAL_SUB__", "true" if dual_sub else "false")
     )
 
     player_flex = "52 1 0" if options else "1"
@@ -495,6 +503,7 @@ def generate_preview_html(
     <style>
 {_CSS}
 {get_studio_css()}
+{get_clipper_css()}
     .player-container {{ flex: {player_flex}; }}
     </style>
 </head>
