@@ -301,6 +301,63 @@ Smart Live Clipper Test
             clip_srt = os.path.join(td, "MyVideo [Clip].srt")
             self.assertTrue(os.path.isfile(clip_srt))
 
+    def test_handle_subtitles_post_download_hard_burn_with_clip_no_double_shift(self):
+        """Verifies hard_burn mode with clip does not double-shift timestamps into ASS file."""
+        from faqih_downloader.services.subtitle_processor import handle_subtitles_post_download
+        from faqih_downloader.services.subtitle_style_engine import generate_styled_ass_file as real_generate_ass
+        from unittest.mock import patch
+
+        srt_content = """1
+00:00:31,000 --> 00:00:35,000
+جملة اختبار القص مع الحرق
+"""
+        with tempfile.TemporaryDirectory() as td:
+            v_path = os.path.join(td, "Clip_Test [Burn].mp4")
+            srt_path = os.path.join(td, "Clip_Test [Burn].srt")
+            with open(v_path, "wb") as f: f.write(b"video_bytes")
+            with open(srt_path, "w", encoding="utf-8") as f: f.write(srt_content)
+
+            stream_info = YouTubeStreamInfo(
+                video_id="clip_test_1",
+                title="Clip Test",
+                clean_filename="Clip_Test [Burn].mp4",
+                is_progressive=True,
+                video_url="http://test_url",
+                clip_start_sec=30.0,
+                clip_end_sec=36.0,
+                subtitle_track={"sub_id": "ar", "language": "Arabic", "url": "http://fake.vtt"},
+                subtitle_embed_mode="hard_burn",
+                subtitle_preset="youtube",
+            )
+
+            captured_ass_texts = []
+            def spy_generate_styled_ass(srt_source, output_ass_path, **kwargs):
+                res = real_generate_ass(srt_source, output_ass_path, **kwargs)
+                if os.path.isfile(output_ass_path):
+                    with open(output_ass_path, "r", encoding="utf-8") as af:
+                        captured_ass_texts.append(af.read())
+                return res
+
+            def fake_run(cmd, *args, **kwargs):
+                out_file = cmd[-1]
+                with open(out_file, "wb") as f:
+                    f.write(b"burned_result_bytes")
+                from subprocess import CompletedProcess
+                return CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+            with patch("faqih_downloader.services.subtitle_processor.download_subtitle_as_srt", return_value=srt_path), \
+                 patch("faqih_downloader.services.subtitle_processor.find_ffmpeg_bin", return_value="ffmpeg"), \
+                 patch("faqih_downloader.services.subtitle_style_engine.generate_styled_ass_file", side_effect=spy_generate_styled_ass), \
+                 patch("faqih_downloader.services.subtitle_processor.subprocess.run", side_effect=fake_run):
+                handle_subtitles_post_download(stream_info, v_path)
+
+            self.assertTrue(len(captured_ass_texts) > 0, "generate_styled_ass_file was not called")
+            ass_text = captured_ass_texts[0]
+
+            # The cue originally at 31.0s-35.0s shifted by -30.0s must be at 1.0s-5.0s (0:00:01.00 -> 0:00:05.00)
+            self.assertIn("0:00:01.00,0:00:05.00", ass_text)
+            self.assertIn("جملة اختبار القص مع الحرق", ass_text)
+
 
 if __name__ == "__main__":
     unittest.main()

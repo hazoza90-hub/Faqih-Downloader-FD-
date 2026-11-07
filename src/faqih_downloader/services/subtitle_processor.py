@@ -455,7 +455,8 @@ def handle_subtitles_post_download(
 
         orig_stem = os.path.splitext(output_path)[0]
         from .media_clipper_engine import prepare_post_download_subtitles
-        prepare_post_download_subtitles(stream_info, srt_path, orig_stem)
+        if mode != "hard_burn":
+            prepare_post_download_subtitles(stream_info, srt_path, orig_stem)
 
         if mode == "srt_only" or (cancel_event and cancel_event.is_set()):
             if on_log and mode == "srt_only":
@@ -468,6 +469,7 @@ def handle_subtitles_post_download(
                 on_log("[SUBTITLES] FFmpeg not found; skipping video subtitle embedding/burning.")
             if mode == "hard_burn":
                 output_path = strip_burn_tag_from_filename(output_path)
+                prepare_post_download_subtitles(stream_info, srt_path, orig_stem)
             return output_path
 
         if not output_path.lower().endswith(".mp4"):
@@ -492,7 +494,7 @@ def handle_subtitles_post_download(
             sub_st = getattr(stream_info, "subtitle_track", None)
             cfg_from_track = sub_st.get("style_config") if isinstance(sub_st, dict) else None
             eff_cfg = getattr(stream_info, "style_config", None) or cfg_from_track
-            if not hasattr(stream_info, "_mock_name") and (eff_cfg or getattr(stream_info, "subtitle_preset", None)):
+            if not hasattr(stream_info, "_mock_name") and (eff_cfg or getattr(stream_info, "subtitle_preset", None) or getattr(stream_info, "clip_start_sec", None) or getattr(stream_info, "clip_end_sec", None)):
                 sc = dict(eff_cfg) if eff_cfg else {
                     "preset": getattr(stream_info, "subtitle_preset", "youtube"), "font_scale": getattr(stream_info, "subtitle_font_scale", 1.0),
                     "text_color": getattr(stream_info, "subtitle_text_color", "#FFFFFF"), "bg_mode": getattr(stream_info, "subtitle_bg_mode", "box"),
@@ -515,6 +517,8 @@ def handle_subtitles_post_download(
                 if on_log:
                     on_log("[SUBTITLES] Hard burn failed; falling back to soft subtitle embedding.")
                 output_path = strip_burn_tag_from_filename(output_path)
+                cur_stem = os.path.splitext(output_path)[0]
+                prepare_post_download_subtitles(stream_info, srt_path, cur_stem)
                 soft_ok = embed_subtitle_into_mp4(output_path, srt_path, sub.get("language", "und"), ffmpeg_bin, on_log=on_log, **sub_kwargs)
                 if soft_ok:
                     _cleanup_srt()

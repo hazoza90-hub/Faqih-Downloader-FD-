@@ -190,6 +190,9 @@ function saveSubTextEdit() {
     if (!modal || !txtArea) return;
     const newText = txtArea.value.trim();
     if (currentActiveCueIndex >= 0 && currentActiveCueIndex < liveSubCues.length) {
+        const origText = liveSubCues[currentActiveCueIndex]._origText || liveSubCues[currentActiveCueIndex].text || "";
+        liveSubCues[currentActiveCueIndex]._origText = origText;
+        if (origText.trim()) subCustomEdits[origText.trim()] = newText;
         liveSubCues[currentActiveCueIndex].text = newText;
         subCustomEdits[String(currentActiveCueIndex)] = newText;
         subCustomEdits[liveSubCues[currentActiveCueIndex].start.toFixed(2)] = newText;
