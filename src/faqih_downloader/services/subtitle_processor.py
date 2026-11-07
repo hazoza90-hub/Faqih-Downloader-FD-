@@ -469,10 +469,15 @@ def handle_subtitles_post_download(
                 on_log("[SUBTITLES] FFmpeg not found; skipping video subtitle embedding/burning.")
             if mode == "hard_burn":
                 output_path = strip_burn_tag_from_filename(output_path)
-                prepare_post_download_subtitles(stream_info, srt_path, orig_stem)
+                cur_stem = os.path.splitext(output_path)[0]
+                prepare_post_download_subtitles(stream_info, srt_path, cur_stem)
             return output_path
 
         if not output_path.lower().endswith(".mp4"):
+            if mode == "hard_burn":
+                output_path = strip_burn_tag_from_filename(output_path)
+                cur_stem = os.path.splitext(output_path)[0]
+                prepare_post_download_subtitles(stream_info, srt_path, cur_stem)
             return output_path
 
         sub_kwargs = {"cancel_event": cancel_event} if cancel_event is not None else {}

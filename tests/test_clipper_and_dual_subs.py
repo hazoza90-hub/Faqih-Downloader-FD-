@@ -358,6 +358,88 @@ Smart Live Clipper Test
             self.assertIn("0:00:01.00,0:00:05.00", ass_text)
             self.assertIn("جملة اختبار القص مع الحرق", ass_text)
 
+    def test_handle_subtitles_post_download_hard_burn_fallback_soft_embed(self):
+        """Verifies hard_burn failure falls back to soft_embed with single subtitle shift."""
+        from faqih_downloader.services.subtitle_processor import handle_subtitles_post_download
+        from unittest.mock import patch, MagicMock
+
+        srt_content = """1
+00:00:20,000 --> 00:00:25,000
+Fallback test
+"""
+        with tempfile.TemporaryDirectory() as td:
+            v_path = os.path.join(td, "Vid [Sub-Burned].mp4")
+            srt_path = os.path.join(td, "Vid [Sub-Burned].srt")
+            with open(v_path, "wb") as f: f.write(b"video_bytes")
+            with open(srt_path, "w", encoding="utf-8") as f: f.write(srt_content)
+
+            stream_info = YouTubeStreamInfo(
+                video_id="fallback_1",
+                title="Fallback Test",
+                clean_filename="Vid [Sub-Burned].mp4",
+                is_progressive=True,
+                video_url="http://test_url",
+                clip_start_sec=15.0,
+                clip_end_sec=25.0,
+                subtitle_track={"sub_id": "en", "language": "English", "url": "http://fake.vtt"},
+                subtitle_embed_mode="hard_burn",
+            )
+
+            captured_embed_srt = []
+            def spy_embed(vid, srt, *args, **kwargs):
+                with open(srt, "r", encoding="utf-8") as sf:
+                    captured_embed_srt.append(sf.read())
+                return True
+
+            with patch("faqih_downloader.services.subtitle_processor.download_subtitle_as_srt", return_value=srt_path), \
+                 patch("faqih_downloader.services.subtitle_processor.find_ffmpeg_bin", return_value="ffmpeg"), \
+                 patch("faqih_downloader.services.subtitle_processor.burn_subtitle_into_video", return_value=False), \
+                 patch("faqih_downloader.services.subtitle_processor.embed_subtitle_into_mp4", side_effect=spy_embed):
+                final_path = handle_subtitles_post_download(stream_info, v_path)
+
+            self.assertNotIn("[Sub-Burned]", final_path)
+            self.assertEqual(len(captured_embed_srt), 1)
+            # The SRT content passed to embed should have been shifted by -15s (20s-25s -> 5s-10s)
+            self.assertIn("00:00:05,000 --> 00:00:10,000", captured_embed_srt[0])
+            self.assertIn("Fallback test", captured_embed_srt[0])
+
+    def test_handle_subtitles_post_download_hard_burn_non_mp4(self):
+        """Verifies hard_burn on non-mp4 files strips burn tag and shifts standalone SRT."""
+        from faqih_downloader.services.subtitle_processor import handle_subtitles_post_download
+        from unittest.mock import patch
+
+        srt_content = """1
+00:00:40,000 --> 00:00:45,000
+Non-mp4 clip cue
+"""
+        with tempfile.TemporaryDirectory() as td:
+            v_path = os.path.join(td, "NonMp4 [Sub-Burned].mkv")
+            srt_path = os.path.join(td, "NonMp4 [Sub-Burned].srt")
+            with open(v_path, "wb") as f: f.write(b"mkv_bytes")
+            with open(srt_path, "w", encoding="utf-8") as f: f.write(srt_content)
+
+            stream_info = YouTubeStreamInfo(
+                video_id="mkv_1",
+                title="MKV Test",
+                clean_filename="NonMp4 [Sub-Burned].mkv",
+                is_progressive=True,
+                video_url="http://test_url",
+                clip_start_sec=35.0,
+                clip_end_sec=50.0,
+                subtitle_track={"sub_id": "en", "language": "English", "url": "http://fake.vtt"},
+                subtitle_embed_mode="hard_burn",
+            )
+
+            with patch("faqih_downloader.services.subtitle_processor.download_subtitle_as_srt", return_value=srt_path), \
+                 patch("faqih_downloader.services.subtitle_processor.find_ffmpeg_bin", return_value="ffmpeg"):
+                final_path = handle_subtitles_post_download(stream_info, v_path)
+
+            self.assertNotIn("[Sub-Burned]", final_path)
+            with open(srt_path, "r", encoding="utf-8") as sf:
+                shifted_srt = sf.read()
+            # 40s-45s shifted by -35s -> 5s-10s
+            self.assertIn("00:00:05,000 --> 00:00:10,000", shifted_srt)
+
 
 if __name__ == "__main__":
     unittest.main()
