@@ -57,16 +57,18 @@ def get_clipper_toolbar_html(
         s, m, h = int(sec % 60), int((sec / 60) % 60), int(sec / 3600)
         return f"{h}:{m:02d}:{s:02d}" if h > 0 else f"{m:02d}:{s:02d}"
 
-    chapters_html = ""
     if chapters and isinstance(chapters, list) and len(chapters) > 0:
-        opts = [f'<option value="-1">📑 الفصول ({len(chapters)})...</option>']
+        opts = [f'<option value="">📑 الفصول ({len(chapters)} فصل متاح - اختر لتحميله)</option>']
         for idx, ch in enumerate(chapters):
             s_t = float(ch.get("start_time", 0.0) or 0.0)
             e_t = float(ch.get("end_time", 0.0) or 0.0)
-            t_str = _fmt_ts(s_t)
+            s_str = _fmt_ts(s_t)
+            e_str = _fmt_ts(e_t)
             t_label = _html.escape(str(ch.get("title", f"فصل {idx+1}") or f"فصل {idx+1}").strip())
-            opts.append(f'<option value="{idx}" data-start="{s_t:.2f}" data-end="{e_t:.2f}" data-title="{t_label}">{t_str} - {t_label}</option>')
-        chapters_html = f'<div class="clipper-group"><select id="chapterSelect" class="clipper-input" style="width:150px;text-align:right;" onchange="onChapterSelectChange()">{"".join(opts)}</select></div>'
+            opts.append(f'<option value="{idx}" data-start="{s_t:.2f}" data-end="{e_t:.2f}" data-title="{t_label}">[{s_str} - {e_str}] {t_label}</option>')
+    else:
+        opts = ['<option value="">📑 الفصول (تقسيم ذكي للمقطع...)</option>']
+    chapters_html = f'<div class="clipper-group"><select id="chapterSelect" class="clipper-input" style="width:165px;text-align:right;" onchange="onChapterSelectChange()">{"".join(opts)}</select></div>'
 
     boost_cls = " active" if audio_boost else ""
     return f"""<div class="clipper-bar" id="clipperBar">
@@ -126,6 +128,31 @@ function timeStrToSec(str) {
     return 0.0;
 }
 
+function populateAutoChaptersIfNeeded() {
+    const sel = document.getElementById("chapterSelect");
+    if (!sel || sel.options.length > 1) return;
+    if (typeof videoEl === "undefined" || !videoEl || isNaN(videoEl.duration) || !isFinite(videoEl.duration) || videoEl.duration <= 0) return;
+    const dur = videoEl.duration;
+    if (dur >= 120) {
+        let step = (dur > 3600) ? 900 : ((dur > 900) ? 600 : 300), curr = 0, idx = 1;
+        while (curr < dur) {
+            const end = Math.min(curr + step, dur), opt = document.createElement("option");
+            opt.value = "auto_" + idx; opt.setAttribute("data-start", curr.toFixed(2)); opt.setAttribute("data-end", end.toFixed(2));
+            const title = "الجزء " + idx + " (تقسيم تلقائي)";
+            opt.setAttribute("data-title", title); opt.textContent = "[" + secToTimeStr(curr) + " - " + secToTimeStr(end) + "] " + title;
+            sel.appendChild(opt); curr += step; idx++;
+        }
+    } else {
+        const mid = dur / 2, opt1 = document.createElement("option"), opt2 = document.createElement("option");
+        opt1.value = "auto_1"; opt1.setAttribute("data-start", "0.00"); opt1.setAttribute("data-end", mid.toFixed(2));
+        opt1.setAttribute("data-title", "النصف الأول من الفيديو"); opt1.textContent = "[00:00 - " + secToTimeStr(mid) + "] النصف الأول من الفيديو";
+        sel.appendChild(opt1);
+        opt2.value = "auto_2"; opt2.setAttribute("data-start", mid.toFixed(2)); opt2.setAttribute("data-end", dur.toFixed(2));
+        opt2.setAttribute("data-title", "النصف الثاني من الفيديو"); opt2.textContent = "[" + secToTimeStr(mid) + " - " + secToTimeStr(dur) + "] النصف الثاني من الفيديو";
+        sel.appendChild(opt2);
+    }
+}
+
 function updateClipUI() {
     const sIn = document.getElementById("clipStartInput"), eIn = document.getElementById("clipEndInput");
     const bDur = document.getElementById("clipDurationBadge"), bLoop = document.getElementById("btnLoopClip");
@@ -133,11 +160,10 @@ function updateClipUI() {
     if (eIn && !eIn._focused) eIn.value = secToTimeStr(clipEndSec);
     if (bDur) {
         if (clipEndSec > clipStartSec) {
-            bDur.textContent = `✂️ المقطع: ${secToTimeStr(clipEndSec - clipStartSec)}`;
+            bDur.textContent = selectedChapterTitle ? `📑 ${selectedChapterTitle.slice(0, 22)} (${secToTimeStr(clipEndSec - clipStartSec)})` : `✂️ المقطع: ${secToTimeStr(clipEndSec - clipStartSec)}`;
             bDur.className = "badge badge-res";
         } else {
-            bDur.textContent = "المقطع: كامل الفيديو";
-            bDur.className = "badge badge-dim";
+            bDur.textContent = "المقطع: كامل الفيديو"; bDur.className = "badge badge-dim";
         }
     }
     if (bLoop) bLoop.classList.toggle("active", isLoopingClip);
@@ -146,14 +172,12 @@ function updateClipUI() {
 function setClipStartFromCurrent() {
     clipStartSec = parseFloat((videoEl && !isNaN(videoEl.currentTime) ? videoEl.currentTime : 0).toFixed(2));
     if (clipEndSec <= clipStartSec) {
-        if (videoEl && !isNaN(videoEl.duration) && isFinite(videoEl.duration) && videoEl.duration > clipStartSec) {
-            clipEndSec = parseFloat(videoEl.duration.toFixed(2));
-        } else {
-            clipEndSec = parseFloat((clipStartSec + 30.0).toFixed(2));
-        }
+        clipEndSec = (videoEl && !isNaN(videoEl.duration) && isFinite(videoEl.duration) && videoEl.duration > clipStartSec) ? parseFloat(videoEl.duration.toFixed(2)) : parseFloat((clipStartSec + 30.0).toFixed(2));
     }
+    selectedChapterTitle = ""; const sel = document.getElementById("chapterSelect"); if (sel) sel.selectedIndex = 0;
     updateClipUI();
     if (typeof syncStateToBridge === "function") syncStateToBridge();
+    if (typeof requestUpdatedFilename === "function") requestUpdatedFilename();
 }
 
 function setClipEndFromCurrent() {
@@ -161,16 +185,20 @@ function setClipEndFromCurrent() {
         clipEndSec = parseFloat(videoEl.currentTime.toFixed(2));
         if (clipEndSec <= clipStartSec) clipStartSec = 0.0;
     }
+    selectedChapterTitle = ""; const sel = document.getElementById("chapterSelect"); if (sel) sel.selectedIndex = 0;
     updateClipUI();
     if (typeof syncStateToBridge === "function") syncStateToBridge();
+    if (typeof requestUpdatedFilename === "function") requestUpdatedFilename();
 }
 
 function onClipInputChange() {
     const sIn = document.getElementById("clipStartInput"), eIn = document.getElementById("clipEndInput");
     if (sIn) clipStartSec = timeStrToSec(sIn.value);
     if (eIn) clipEndSec = timeStrToSec(eIn.value);
+    selectedChapterTitle = ""; const sel = document.getElementById("chapterSelect"); if (sel) sel.selectedIndex = 0;
     updateClipUI();
     if (typeof syncStateToBridge === "function") syncStateToBridge();
+    if (typeof requestUpdatedFilename === "function") requestUpdatedFilename();
 }
 
 function toggleClipLoop() {
@@ -200,6 +228,7 @@ function resetClipRange() {
     if (sel) sel.selectedIndex = 0;
     updateClipUI();
     if (typeof syncStateToBridge === "function") syncStateToBridge();
+    if (typeof requestUpdatedFilename === "function") requestUpdatedFilename();
 }
 
 function onChapterSelectChange() {
@@ -209,6 +238,7 @@ function onChapterSelectChange() {
         selectedChapterTitle = "";
         updateClipUI();
         if (typeof syncStateToBridge === "function") syncStateToBridge();
+        if (typeof requestUpdatedFilename === "function") requestUpdatedFilename();
         return;
     }
     const opt = sel.options[sel.selectedIndex];
@@ -226,6 +256,23 @@ function onChapterSelectChange() {
     }
     updateClipUI();
     if (typeof syncStateToBridge === "function") syncStateToBridge();
+    if (typeof requestUpdatedFilename === "function") requestUpdatedFilename();
+}
+
+function requestUpdatedFilename() {
+    if (!sid || typeof destInput === "undefined" || !destInput) return;
+    const q_idx = (typeof selected_q_idx !== "undefined") ? selected_q_idx : 0;
+    const s_idx = (typeof subSelect !== "undefined" && subSelect) ? parseInt(subSelect.value) : 0;
+    const sub_mode = (typeof modeSelect !== "undefined" && modeSelect) ? modeSelect.value : "hard_burn";
+    fetch(`${bridgeBase}/api/update_filename?sid=${encodeURIComponent(sid)}`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            q_idx: q_idx, s_idx: s_idx, sub_mode: sub_mode, current_dest: destInput.value,
+            clip_start: (typeof clipStartSec !== "undefined" ? clipStartSec : 0.0),
+            clip_end: (typeof clipEndSec !== "undefined" ? clipEndSec : 0.0),
+            chapter_title: (typeof selectedChapterTitle !== "undefined" ? selectedChapterTitle : "")
+        })
+    }).then(r => r.json()).then(d => { if (d && d.dest_path) destInput.value = d.dest_path; }).catch(e => {});
 }
 
 function initStudioWebAudioBoost() {
@@ -241,24 +288,35 @@ function initStudioWebAudioBoost() {
         targets.forEach(el => {
             try {
                 const source = _studioAudioCtx.createMediaElementSource(el);
-                const hp = _studioAudioCtx.createBiquadFilter();
-                hp.type = "highpass";
-                hp.frequency.value = 80;
-                const comp = _studioAudioCtx.createDynamicsCompressor();
-                comp.threshold.value = -18;
-                comp.knee.value = 6;
-                comp.ratio.value = 2.8;
-                comp.attack.value = 0.015;
-                comp.release.value = 0.15;
-                const gain = _studioAudioCtx.createGain();
-                gain.gain.value = 1.0;
-                source.connect(hp);
-                hp.connect(comp);
-                comp.connect(gain);
-                gain.connect(_studioAudioCtx.destination);
-                _studioBoostNodes.push({ source, hp, comp, gain });
+                const hp = _studioAudioCtx.createBiquadFilter(); hp.type = "highpass"; hp.frequency.value = 80;
+                const presence = _studioAudioCtx.createBiquadFilter(); presence.type = "peaking"; presence.frequency.value = 2800; presence.Q.value = 1.0; presence.gain.value = 3.5;
+                const comp = _studioAudioCtx.createDynamicsCompressor(); comp.threshold.value = -24; comp.knee.value = 10; comp.ratio.value = 2.2; comp.attack.value = 0.01; comp.release.value = 0.15;
+                const gain = _studioAudioCtx.createGain(); gain.gain.value = 2.8;
+                _studioBoostNodes.push({ el, source, hp, presence, comp, gain, connectedBoost: false });
             } catch (e) {}
         });
+    } catch (e) {}
+}
+
+function applyStudioWebAudioRouting() {
+    try {
+        if (audioBoostEnabled) {
+            initStudioWebAudioBoost();
+            if (_studioAudioCtx && _studioAudioCtx.state === "suspended") _studioAudioCtx.resume().catch(e => {});
+            _studioBoostNodes.forEach(item => {
+                try { item.source.disconnect(); item.hp.disconnect(); item.presence.disconnect(); item.comp.disconnect(); item.gain.disconnect(); } catch(e) {}
+                try {
+                    item.source.connect(item.hp); item.hp.connect(item.presence); item.presence.connect(item.comp);
+                    item.comp.connect(item.gain); item.gain.connect(_studioAudioCtx.destination);
+                    item.gain.gain.setValueAtTime(2.8, _studioAudioCtx.currentTime); item.connectedBoost = true;
+                } catch(e) {}
+            });
+        } else if (_studioAudioCtx) {
+            _studioBoostNodes.forEach(item => {
+                try { item.source.disconnect(); item.hp.disconnect(); item.presence.disconnect(); item.comp.disconnect(); item.gain.disconnect(); } catch(e) {}
+                try { item.source.connect(_studioAudioCtx.destination); item.connectedBoost = false; } catch(e) {}
+            });
+        }
     } catch (e) {}
 }
 
@@ -266,18 +324,7 @@ function toggleStudioAudioBoost() {
     audioBoostEnabled = !audioBoostEnabled;
     const btn = document.getElementById("btnAudioBoost");
     if (btn) btn.classList.toggle("active", audioBoostEnabled);
-    try {
-        initStudioWebAudioBoost();
-        if (_studioAudioCtx && _studioAudioCtx.state === "suspended") {
-            _studioAudioCtx.resume().catch(e => {});
-        }
-        const gVal = audioBoostEnabled ? 1.65 : 1.0;
-        _studioBoostNodes.forEach(item => {
-            if (item.gain && item.gain.gain) {
-                item.gain.gain.setValueAtTime(gVal, _studioAudioCtx ? _studioAudioCtx.currentTime : 0);
-            }
-        });
-    } catch (e) {}
+    applyStudioWebAudioRouting();
     if (typeof syncStateToBridge === "function") syncStateToBridge();
 }
 
@@ -417,14 +464,13 @@ function toggleDualSubtitles() {
 
 function initClipperStudioHooks() {
     const overlay = document.getElementById("liveSubOverlay");
-    if (overlay) {
-        overlay.addEventListener("dblclick", (e) => { e.stopPropagation(); openSubTextEditor(); });
-    }
+    if (overlay) overlay.addEventListener("dblclick", (e) => { e.stopPropagation(); openSubTextEditor(); });
+    populateAutoChaptersIfNeeded();
     if (videoEl) {
+        videoEl.addEventListener("loadedmetadata", populateAutoChaptersIfNeeded);
+        videoEl.addEventListener("durationchange", populateAutoChaptersIfNeeded);
         videoEl.addEventListener("play", () => {
-            if (_studioAudioCtx && _studioAudioCtx.state === "suspended") {
-                _studioAudioCtx.resume().catch(e => {});
-            }
+            if (_studioAudioCtx && _studioAudioCtx.state === "suspended") _studioAudioCtx.resume().catch(e => {});
         });
         videoEl.addEventListener("timeupdate", () => {
             if (isLoopingClip && clipEndSec > clipStartSec) {
@@ -440,16 +486,10 @@ function initClipperStudioHooks() {
     const sIn = document.getElementById("clipStartInput"), eIn = document.getElementById("clipEndInput");
     if (sIn) { sIn.addEventListener("focus", () => { sIn._focused = true; }); sIn.addEventListener("blur", () => { sIn._focused = false; }); }
     if (eIn) { eIn.addEventListener("focus", () => { eIn._focused = true; }); eIn.addEventListener("blur", () => { eIn._focused = false; }); }
-    const bBoost = document.getElementById("btnAudioBoost");
-    if (bBoost && audioBoostEnabled) {
-        bBoost.classList.add("active");
-        try {
-            initStudioWebAudioBoost();
-            const gVal = 1.65;
-            _studioBoostNodes.forEach(item => {
-                if (item.gain && item.gain.gain) item.gain.gain.setValueAtTime(gVal, _studioAudioCtx ? _studioAudioCtx.currentTime : 0);
-            });
-        } catch(e) {}
+    if (audioBoostEnabled) {
+        const bBoost = document.getElementById("btnAudioBoost");
+        if (bBoost) bBoost.classList.add("active");
+        applyStudioWebAudioRouting();
     }
 }
 """.strip()

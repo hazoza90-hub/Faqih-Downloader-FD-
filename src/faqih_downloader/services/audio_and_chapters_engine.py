@@ -34,13 +34,46 @@ def _parse_timestamp_to_seconds(ts_str: str) -> Optional[float]:
     return None
 
 
-def extract_video_chapters(info_dict: Optional[Dict[str, Any]], total_duration: float = 0.0) -> List[Dict[str, Any]]:
+def build_smart_auto_chapters(total_duration: float = 0.0) -> List[Dict[str, Any]]:
+    """
+    Generates smart auto-split chapters for long videos/lectures lacking official timestamps.
+    - 3 to 15 min (180s - 900s): every 300s (5 min).
+    - 15 to 60 min (900s - 3600s): every 600s (10 min).
+    - > 60 min (> 3600s): every 900s (15 min).
+    """
+    tot = float(total_duration or 0.0)
+    if tot < 180.0:
+        return []
+    step = 300.0 if tot <= 900.0 else (600.0 if tot <= 3600.0 else 900.0)
+    parts: List[Dict[str, Any]] = []
+    curr, idx = 0.0, 1
+    while curr < tot:
+        end = min(curr + step, tot)
+        parts.append({
+            "title": f"الجزء {idx} (تقسيم تلقائي)",
+            "start_time": round(curr, 2),
+            "end_time": round(end, 2),
+            "is_auto": True,
+        })
+        curr += step
+        idx += 1
+    return parts
+
+
+def extract_video_chapters(
+    info_dict: Optional[Dict[str, Any]],
+    total_duration: float = 0.0,
+    auto_split_if_empty: bool = False,
+) -> List[Dict[str, Any]]:
     """
     Extracts video chapters as [{"title": str, "start_time": float, "end_time": float}, ...].
     1. Inspects official info_dict.get('chapters') if present and valid.
     2. Smart fallback: regex parses timestamps from description text (e.g. '00:00 Intro', '[03:45] Chapter 1').
+    3. Auto-split fallback: splits long videos into logical segments if auto_split_if_empty is True.
     """
     if not info_dict or not isinstance(info_dict, dict):
+        if auto_split_if_empty:
+            return build_smart_auto_chapters(total_duration)
         return []
 
     # 1. Official chapters
@@ -71,6 +104,8 @@ def extract_video_chapters(info_dict: Optional[Dict[str, Any]], total_duration: 
     # 2. Smart fallback from description
     desc = str(info_dict.get("description", "") or "").strip()
     if not desc:
+        if auto_split_if_empty:
+            return build_smart_auto_chapters(total_duration)
         return []
 
     ts_pattern = re.compile(
@@ -98,6 +133,8 @@ def extract_video_chapters(info_dict: Optional[Dict[str, Any]], total_duration: 
         candidates.append((sec, title))
 
     if not candidates:
+        if auto_split_if_empty:
+            return build_smart_auto_chapters(total_duration)
         return []
 
     # Sort by start_time
@@ -111,6 +148,8 @@ def extract_video_chapters(info_dict: Optional[Dict[str, Any]], total_duration: 
 
     # Reject if less than 2 chapters and doesn't start at 00:00 spanning duration
     if len(unique) < 2 and (not unique or unique[0][0] != 0.0 or total_duration <= 0):
+        if auto_split_if_empty:
+            return build_smart_auto_chapters(total_duration)
         return []
 
     chapters_result: List[Dict[str, Any]] = []
@@ -129,6 +168,8 @@ def extract_video_chapters(info_dict: Optional[Dict[str, Any]], total_duration: 
             "end_time": round(max(s_t + 1.0, e_t), 2),
         })
 
+    if not chapters_result and auto_split_if_empty:
+        return build_smart_auto_chapters(total_duration)
     return chapters_result
 
 
@@ -137,7 +178,7 @@ def get_studio_audio_boost_filter(preset: str = "boost") -> str:
     Returns standard studio audio normalization & vocal boost FFmpeg audio filter string.
     Supported across all standard FFmpeg releases without external plugins.
     """
-    return "highpass=f=75,acompressor=threshold=-18dB:ratio=2.8:attack=15:release=150:makeup=2.2,volume=1.45"
+    return "highpass=f=75,acompressor=threshold=-20dB:ratio=2.5:attack=15:release=150:makeup=2.5,volume=1.45,alimiter=limit=0.95:attack=5:release=50"
 
 
 def apply_audio_boost_to_file(

@@ -35,8 +35,17 @@ from faqih_downloader.services.subtitle_style_engine import generate_styled_ass_
 from faqih_downloader.services.youtube_models import VideoFormatOption, YouTubeStreamInfo
 from faqih_downloader.services.audio_and_chapters_engine import (
     extract_video_chapters,
+    build_smart_auto_chapters,
     get_studio_audio_boost_filter,
     apply_audio_boost_to_file,
+)
+from faqih_downloader.ui.modals.preview_clipper_studio import (
+    get_clipper_toolbar_html,
+    get_clipper_js,
+)
+from faqih_downloader.services.preview_stream_bridge import (
+    PreviewSession,
+    PreviewBridgeRequestHandler,
 )
 
 
@@ -567,8 +576,9 @@ Non-mp4 clip cue
     def test_get_studio_audio_boost_filter(self):
         filt = get_studio_audio_boost_filter()
         self.assertIn("highpass=f=75", filt)
-        self.assertIn("acompressor=threshold=-18dB", filt)
+        self.assertIn("acompressor=threshold=-20dB", filt)
         self.assertIn("volume=1.45", filt)
+        self.assertIn("alimiter=limit=0.95", filt)
 
     def test_apply_audio_boost_to_file_mock(self):
         from unittest.mock import patch
@@ -719,6 +729,168 @@ Non-mp4 clip cue
                 self.assertIn("[Intro]", res_path)
                 self.assertNotIn("[[Intro]]", res_path)
                 self.assertIn("[Clip]", res_path)
+
+    def test_get_clipper_toolbar_html_always_renders_chapter_select(self):
+        # Empty chapters list
+        html_empty = get_clipper_toolbar_html(chapters=[])
+        self.assertIn('<select id="chapterSelect"', html_empty)
+        self.assertIn("📑 الفصول (تقسيم ذكي للمقطع...)", html_empty)
+
+        # None chapters
+        html_none = get_clipper_toolbar_html(chapters=None)
+        self.assertIn('<select id="chapterSelect"', html_none)
+        self.assertIn("📑 الفصول (تقسيم ذكي للمقطع...)", html_none)
+
+        # Non-empty chapters list
+        chapters = [
+            {"title": "المقدمة", "start_time": 0.0, "end_time": 75.0},
+            {"title": "الشرح الرئيسي", "start_time": 75.0, "end_time": 300.0},
+        ]
+        html_ch = get_clipper_toolbar_html(chapters=chapters)
+        self.assertIn('<select id="chapterSelect"', html_ch)
+        self.assertIn("📑 الفصول (2 فصل متاح - اختر لتحميله)", html_ch)
+        self.assertIn("[00:00 - 01:15] المقدمة", html_ch)
+        self.assertIn("[01:15 - 05:00] الشرح الرئيسي", html_ch)
+        self.assertIn('data-start="0.00"', html_ch)
+        self.assertIn('data-end="75.00"', html_ch)
+
+    def test_clipper_js_audio_boost_true_bypass_and_node_check(self):
+        js = get_clipper_js()
+        # Verify function declarations
+        self.assertIn("function initStudioWebAudioBoost()", js)
+        self.assertIn("function applyStudioWebAudioRouting()", js)
+        self.assertIn("function populateAutoChaptersIfNeeded()", js)
+        self.assertIn("function requestUpdatedFilename()", js)
+
+        # Verify True Bypass routing when disabled
+        self.assertIn("item.source.connect(_studioAudioCtx.destination)", js)
+        self.assertIn("item.connectedBoost = false", js)
+
+        # Verify Presence EQ and Highpass filter in audio chain
+        self.assertIn("createBiquadFilter()", js)
+        self.assertIn("peaking", js)
+        self.assertIn("highpass", js)
+        self.assertIn("createDynamicsCompressor()", js)
+        self.assertIn("2.8", js)
+
+        # Verify JavaScript syntax via node --check
+        import shutil
+        node_bin = shutil.which("node")
+        if node_bin:
+            res = subprocess.run([node_bin, "--check"], input=js, encoding="utf-8", capture_output=True)
+            self.assertEqual(res.returncode, 0, f"Node syntax error in clipper JS: {res.stderr}")
+
+    def test_audio_boost_filter_contains_alimiter(self):
+        flt = get_studio_audio_boost_filter()
+        self.assertIn("alimiter", flt)
+        self.assertIn("limit=0.95", flt)
+        self.assertIn("highpass=f=75", flt)
+        self.assertIn("acompressor=", flt)
+        self.assertIn("makeup=2.5", flt)
+        self.assertIn("volume=1.45", flt)
+
+    def test_smart_auto_split_chapters(self):
+        # Short video < 180s returns empty
+        self.assertEqual(build_smart_auto_chapters(120.0), [])
+
+        # 3 to 15 min: split every 300s
+        ch_300 = build_smart_auto_chapters(300.0)
+        self.assertEqual(len(ch_300), 1)
+        self.assertEqual(ch_300[0]["start_time"], 0.0)
+        self.assertEqual(ch_300[0]["end_time"], 300.0)
+        self.assertTrue(ch_300[0]["is_auto"])
+
+        ch_600 = build_smart_auto_chapters(600.0)
+        self.assertEqual(len(ch_600), 2)
+        self.assertEqual(ch_600[1]["start_time"], 300.0)
+        self.assertEqual(ch_600[1]["end_time"], 600.0)
+
+        # 15 to 60 min: split every 600s
+        ch_1800 = build_smart_auto_chapters(1800.0)
+        self.assertEqual(len(ch_1800), 3)
+        self.assertEqual(ch_1800[0]["end_time"], 600.0)
+        self.assertEqual(ch_1800[1]["start_time"], 600.0)
+        self.assertEqual(ch_1800[2]["end_time"], 1800.0)
+
+        # > 60 min: split every 900s
+        ch_5400 = build_smart_auto_chapters(5400.0)
+        self.assertEqual(len(ch_5400), 6)
+        self.assertEqual(ch_5400[0]["end_time"], 900.0)
+
+        # extract_video_chapters pure behavior without flag
+        self.assertEqual(extract_video_chapters({"description": "No timestamps"}, total_duration=600.0, auto_split_if_empty=False), [])
+
+        # extract_video_chapters fallback when auto_split_if_empty=True
+        ch_fallback = extract_video_chapters({"description": "No timestamps"}, total_duration=600.0, auto_split_if_empty=True)
+        self.assertEqual(len(ch_fallback), 2)
+        self.assertTrue(ch_fallback[0]["is_auto"])
+
+    def test_preview_bridge_update_filename_with_chapter_and_clip(self):
+        class DummyHandler:
+            def __init__(self):
+                self.sent_data = None
+            def _send_json(self, data):
+                self.sent_data = data
+
+        handler = DummyHandler()
+        session = PreviewSession(
+            sid="test_sid",
+            url="http://test.com/video",
+            video_title="Lecture Video",
+            default_dest_path=r"C:\Downloads\Lecture Video.mp4",
+        )
+        opt = VideoFormatOption(
+            format_id="137+140",
+            resolution_label="1080p",
+            height=1080,
+            ext="mp4",
+            filesize_approx=1000000,
+        )
+        session.options = [opt]
+
+        # 1. Update filename with chapter title and clip range
+        body = {
+            "q_idx": 0,
+            "current_dest": session.default_dest_path,
+            "chapter_title": "مقدمة الدرس",
+            "clip_start": 0.0,
+            "clip_end": 180.0,
+        }
+        PreviewBridgeRequestHandler._handle_api_update_filename(handler, session, body)
+        self.assertIsNotNone(handler.sent_data)
+        dest1 = handler.sent_data["dest_path"]
+        self.assertIn("[1080p]", dest1)
+        self.assertIn("[مقدمة الدرس]", dest1)
+        self.assertIn("[Clip]", dest1)
+
+        # 2. Switch to another chapter
+        body2 = {
+            "q_idx": 0,
+            "current_dest": dest1,
+            "chapter_title": "القسم الثاني",
+            "clip_start": 180.0,
+            "clip_end": 450.0,
+        }
+        PreviewBridgeRequestHandler._handle_api_update_filename(handler, session, body2)
+        dest2 = handler.sent_data["dest_path"]
+        self.assertIn("[القسم الثاني]", dest2)
+        self.assertNotIn("[مقدمة الدرس]", dest2)
+        self.assertIn("[Clip]", dest2)
+
+        # 3. Reset clip back to full video (no chapter, no clip)
+        body3 = {
+            "q_idx": 0,
+            "current_dest": dest2,
+            "chapter_title": "",
+            "clip_start": 0.0,
+            "clip_end": 0.0,
+        }
+        PreviewBridgeRequestHandler._handle_api_update_filename(handler, session, body3)
+        dest3 = handler.sent_data["dest_path"]
+        self.assertNotIn("[القسم الثاني]", dest3)
+        self.assertNotIn("[Clip]", dest3)
+        self.assertIn("[1080p]", dest3)
+        self.assertTrue(dest3.endswith("Lecture Video [1080p].mp4"))
 
 
 if __name__ == "__main__":

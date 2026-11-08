@@ -316,32 +316,48 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
         compile_and_serve_vtt(self, session, s_idx)
 
     def _handle_api_update_filename(self, session: PreviewSession, body: Dict[str, Any]) -> None:
-        """Updates the destination filename with quality and burn-in tags live."""
+        """Updates the destination filename with quality, chapter, clip, and burn-in tags live."""
         q_idx = _safe_int(body.get("q_idx", 0))
         s_idx = _safe_int(body.get("s_idx", -1))
         sub_mode = str(body.get("sub_mode", "soft_embed"))
         cur_dest = str(body.get("current_dest", "")).strip() or session.default_dest_path
 
+        old_ch = str(getattr(session, "chapter_title", "") or "").strip()
+        ch_title = str(body.get("chapter_title") if "chapter_title" in body else old_ch).strip()
+        c_start = float(body.get("clip_start") if "clip_start" in body else getattr(session, "clip_start", 0.0) or 0.0)
+        c_end = float(body.get("clip_end") if "clip_end" in body else getattr(session, "clip_end", 0.0) or 0.0)
+        has_clip = (c_end > c_start >= 0.0)
+
+        if "chapter_title" in body: session.chapter_title = ch_title
+        if "clip_start" in body or "clip_end" in body: session.clip_start, session.clip_end = c_start, c_end
+
+        # Strip previous [Clip] and chapter tags from cur_dest before applying quality tags
+        d_dir, f_name = os.path.split(cur_dest)
+        stem, ext = os.path.splitext(f_name)
+        stem = re.sub(r'\s*\[Clip\]', '', stem, flags=re.IGNORECASE).strip()
+        if old_ch: stem = re.sub(r'\s*\[' + re.escape(old_ch) + r'\]', '', stem).strip()
+        for ch in (getattr(session, "chapters", []) or []):
+            if str(ch.get("title", "")).strip(): stem = re.sub(r'\s*\[' + re.escape(str(ch.get("title", "")).strip()) + r'\]', '', stem).strip()
+        stem = re.sub(r'\s*\[(?:الجزء\s*\d+\s*\(تقسيم تلقائي\)|النصف الأول من الفيديو|النصف الثاني من الفيديو)\]', '', stem).strip()
+        clean_cur_dest = os.path.join(d_dir, f"{stem}{ext}")
+
         opt = session.options[q_idx] if 0 <= q_idx < len(session.options) else (session.options[0] if session.options else None)
         if opt:
-            if s_idx >= 0:
-                has_subs = (s_idx > 0)
-            else:
-                has_subs = (bool(session.subtitle_tracks) and len(session.subtitle_tracks) > 1) if (session.selected_sub_track is None) else (session.selected_sub_track.get("sub_id") not in (None, "none"))
+            has_subs = (s_idx > 0) if s_idx >= 0 else ((bool(session.subtitle_tracks) and len(session.subtitle_tracks) > 1) if session.selected_sub_track is None else (session.selected_sub_track.get("sub_id") not in (None, "none")))
             is_burned = (sub_mode == "hard_burn") and has_subs
-            updated = apply_media_filename_tags(
-                cur_dest,
-                quality_label=getattr(opt, "resolution_label", ""),
-                is_sub_burned=is_burned,
-                ext=getattr(opt, "ext", "mp4")
-            )
+            updated = apply_media_filename_tags(clean_cur_dest, quality_label=getattr(opt, "resolution_label", ""), is_sub_burned=is_burned, ext=getattr(opt, "ext", "mp4"))
         else:
-            updated = cur_dest
+            updated = clean_cur_dest
+
+        clean_ch = re.sub(r'^[\[\(\]\)\s\-–—:|•~.]+|[\[\(\]\)\s\-–—:|•~.]+$', '', re.sub(r'[<>:"/\\|?*\x00-\x1f]', '', ch_title)).strip() if ch_title else ""
+        d_dir2, f_name2 = os.path.split(updated)
+        stem2, ext2 = os.path.splitext(f_name2)
+        if clean_ch and f"[{clean_ch}]" not in stem2: stem2 = f"{stem2} [{clean_ch}]"
+        if has_clip and "[Clip]" not in stem2: stem2 = f"{stem2} [Clip]"
+        updated = os.path.join(d_dir2, f"{stem2}{ext2}")
 
         hm = getattr(session.parent_app, "history_manager", None)
-        reserved = hm.get_active_or_queued_paths() if hm else None
-        final_dest = generate_unique_destination_path(updated, reserved_paths=reserved)
-
+        final_dest = generate_unique_destination_path(updated, reserved_paths=hm.get_active_or_queued_paths() if hm else None)
         self._send_json({"dest_path": final_dest})
 
     def _handle_api_browse(self, session: PreviewSession, body: Dict[str, Any], params: Dict[str, List[str]]) -> None:
@@ -396,8 +412,7 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
 
         session.selected_q_idx, session.subtitle_position, session.subtitle_embed_mode = q_idx, sub_pos, sub_mode
         session.subtitle_preset, session.subtitle_font_scale = str(body.get("sub_preset", session.subtitle_preset or "youtube")), float(body.get("sub_scale", session.subtitle_font_scale or 1.0))
-        session.subtitle_text_color, session.subtitle_bg_mode = str(body.get("sub_color", session.subtitle_text_color or "#FFFFFF")), str(body.get("sub_bg_mode", session.subtitle_bg_mode or "box"))
-        session.subtitle_pos_x, session.subtitle_pos_y = float(body.get("sub_pos_x", session.subtitle_pos_x or 50.0)), float(body.get("sub_pos_y", session.subtitle_pos_y or 86.0))
+        session.subtitle_text_color, session.subtitle_bg_mode, session.subtitle_pos_x, session.subtitle_pos_y = str(body.get("sub_color", session.subtitle_text_color or "#FFFFFF")), str(body.get("sub_bg_mode", session.subtitle_bg_mode or "box")), float(body.get("sub_pos_x", session.subtitle_pos_x or 50.0)), float(body.get("sub_pos_y", session.subtitle_pos_y or 86.0))
 
         selected_opt = session.options[q_idx] if 0 <= q_idx < len(session.options) else (session.options[0] if session.options else None)
         if selected_opt:
@@ -462,8 +477,7 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
 
         session.selected_q_idx, session.subtitle_position, session.subtitle_embed_mode = q_idx, sub_pos, sub_mode
         session.subtitle_preset, session.subtitle_font_scale = str(body.get("sub_preset", session.subtitle_preset or "youtube")), float(body.get("sub_scale", session.subtitle_font_scale or 1.0))
-        session.subtitle_text_color, session.subtitle_bg_mode = str(body.get("sub_color", session.subtitle_text_color or "#FFFFFF")), str(body.get("sub_bg_mode", session.subtitle_bg_mode or "box"))
-        session.subtitle_pos_x, session.subtitle_pos_y = float(body.get("sub_pos_x", session.subtitle_pos_x or 50.0)), float(body.get("sub_pos_y", session.subtitle_pos_y or 86.0))
+        session.subtitle_text_color, session.subtitle_bg_mode, session.subtitle_pos_x, session.subtitle_pos_y = str(body.get("sub_color", session.subtitle_text_color or "#FFFFFF")), str(body.get("sub_bg_mode", session.subtitle_bg_mode or "box")), float(body.get("sub_pos_x", session.subtitle_pos_x or 50.0)), float(body.get("sub_pos_y", session.subtitle_pos_y or 86.0))
         if dest_path: session.default_dest_path = dest_path
 
         if session.audio_tracks and 0 <= a_idx < len(session.audio_tracks):
