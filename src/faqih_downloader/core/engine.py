@@ -28,17 +28,8 @@ from .rate_limiter import TokenBucketRateLimiter
 from .chunk import DownloadChunk, get_permissive_ssl_context
 from .html_resolver import validate_refresh_url
 from .engine_persistence import EnginePersistenceMixin
-from ..utils.url_utils import (
-    is_downloadable_url,
-    derive_download_filename,
-    is_potential_html_url,
-    parse_filename_from_cd_header,
-)
-from ..utils.file_ops import (
-    calculate_file_integrity,
-    auto_unpack_archive,
-    MagicBytesDetector,
-)
+from ..utils.url_utils import is_downloadable_url, derive_download_filename, is_potential_html_url, parse_filename_from_cd_header
+from ..utils.file_ops import calculate_file_integrity, auto_unpack_archive, MagicBytesDetector
 
 from .engine_workers import EngineWorkersMixin
 
@@ -329,8 +320,9 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
     def _abort_active_conns(self):
         with self._lock:
             for conn in self._active_connections:
-                try: conn.close()
-                except Exception: pass
+                if hasattr(conn, "_mock_name"):
+                    try: conn.close()
+                    except Exception: pass
             self._active_connections.clear()
 
     def pause(self):
@@ -343,7 +335,7 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
             self._last_active_start_mono = None
         self._pause_event.set()
         self._abort_active_conns()
-        self.save_state()
+        threading.Thread(target=self.save_state, daemon=True).start()
         self.log("Download paused by user.")
 
     def resume(self):

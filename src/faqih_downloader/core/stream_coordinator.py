@@ -15,15 +15,9 @@ from .engine import TurboDownloadEngine
 from .chunk import DownloadChunk
 from ..config import IS_WINDOWS
 from ..services.subtitle_processor import run_cancellable_ffmpeg
-from ..services.youtube_models import (
-    YouTubeStreamInfo,
-    MediaStreamInfo,
-    is_youtube_url,
-)
-from ..services.media_env_helpers import (
-    has_ffmpeg,
-    find_ffmpeg_bin,
-)
+from ..services.youtube_models import YouTubeStreamInfo, MediaStreamInfo, is_youtube_url
+from ..services.media_env_helpers import has_ffmpeg, find_ffmpeg_bin
+from ..services.media_clipper_engine import estimate_clip_total_bytes, download_clipped_stream_direct
 
 class StreamDownloadCoordinator:
     """Coordinates multi-part YouTube & media stream downloads, dynamic chunking, and FFmpeg multiplexing."""
@@ -81,6 +75,8 @@ class StreamDownloadCoordinator:
     def get_chunks_snapshot(self) -> List[DownloadChunk]:
         """Returns snapshot combining chunks from all active engines with distinct IDs."""
         with self._lock:
+            if getattr(self, "_clip_chunks", None):
+                return list(self._clip_chunks)
             res: List[DownloadChunk] = []
             targets = list(self._active_engines) if self._active_engines else ([self.current_engine] if self.current_engine else [])
             offset = 0
@@ -101,10 +97,10 @@ class StreamDownloadCoordinator:
     def total_size(self) -> int:
         with self._lock:
             if self.stream_info.is_progressive or not self.stream_info.audio_url:
-                if self.current_engine and self.current_engine.total_size > 0:
-                    return self.current_engine.total_size
-                return self.stream_info.video_size
-            return max(1, self._v_total_size + self._a_total_size)
+                raw_tot = self.current_engine.total_size if (self.current_engine and self.current_engine.total_size > 0) else self.stream_info.video_size
+            else:
+                raw_tot = max(1, self._v_total_size + self._a_total_size)
+            return estimate_clip_total_bytes(self.stream_info, raw_tot)
 
     @property
     def is_running(self) -> bool:
@@ -136,6 +132,7 @@ class StreamDownloadCoordinator:
     def pause(self):
         with self._lock:
             self._is_paused = True
+            self._pause_event.set()
             targets = list(self._active_engines) if self._active_engines else ([self.current_engine] if self.current_engine else [])
             for eng in targets:
                 try: eng.pause()
@@ -144,6 +141,7 @@ class StreamDownloadCoordinator:
     def resume(self):
         with self._lock:
             self._is_paused = False
+            self._pause_event.clear()
             targets = list(self._active_engines) if self._active_engines else ([self.current_engine] if self.current_engine else [])
             for eng in targets:
                 try: eng.resume()
@@ -211,14 +209,13 @@ class StreamDownloadCoordinator:
             return getattr(self.current_engine, "last_http_status", 0) if self.current_engine else 0
 
     def _run_coordinator(self):
-        video_tmp = ""
-        audio_tmp = ""
-        actual_dest = ""
-        is_mp3_request = False
-        v_error: List[str] = []
-        a_error: List[str] = []
-        has_error = False
+        video_tmp, audio_tmp, actual_dest = "", "", ""
+        is_mp3_request, has_error = False, False
+        v_error, a_error = [], []
         try:
+            if getattr(self.stream_info, "clip_end_sec", 0) > getattr(self.stream_info, "clip_start_sec", 0) >= 0:
+                if download_clipped_stream_direct(self):
+                    return
             if self.stream_info.is_progressive or not self.stream_info.audio_url:
                 # Progressive single-stream download with dynamic chunking
                 # Check if this is an audio-only stream requesting MP3 conversion via FFmpeg

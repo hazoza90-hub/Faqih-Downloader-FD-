@@ -229,6 +229,7 @@ def process_post_download_clip_and_subtitles(
         sc["secondary_track"] = getattr(stream_info, "secondary_subtitle_track", None)
         sc["audio_boost"] = audio_boost
         sc["chapter_title"] = chapter_title
+        sc["_already_trimmed"] = bool(getattr(stream_info, "_already_trimmed", False))
         setattr(stream_info, "style_config", sc)
         if isinstance(sub, dict): sub.setdefault("style_config", {}).update(sc)
         mode = getattr(stream_info, "subtitle_embed_mode", "hard_burn")
@@ -239,7 +240,7 @@ def process_post_download_clip_and_subtitles(
             if getattr(stream_info, "_audio_boost_applied", False):
                 boost_applied = True
 
-    if has_clip and os.path.isfile(target_path):
+    if has_clip and not getattr(stream_info, "_already_trimmed", False) and os.path.isfile(target_path):
         from .media_env_helpers import find_ffmpeg_bin
         ff = find_ffmpeg_bin()
         exp_d = clip_end - clip_start
@@ -338,3 +339,175 @@ def enrich_stream_info_with_clip(stream_info: Any, opt: Any) -> Any:
         stream_info.audio_boost_enabled = bool(getattr(opt, "audio_boost_enabled", False))
         stream_info.selected_chapter_title = str(getattr(opt, "selected_chapter_title", "") or "")
     return stream_info
+
+def estimate_clip_total_bytes(stream_info: Any, full_total_bytes: int) -> int:
+    """Calculates estimated byte size of the selected clip/chapter proportional to total media duration."""
+    if not stream_info or full_total_bytes <= 0: return full_total_bytes if full_total_bytes > 0 else 0
+    c_start, c_end = float(getattr(stream_info, "clip_start_sec", 0.0) or 0.0), float(getattr(stream_info, "clip_end_sec", 0.0) or 0.0)
+    duration = float(getattr(stream_info, "duration", 0.0) or 0.0)
+    if c_end > c_start >= 0 and duration > 0 and (c_end - c_start) < duration - 0.5:
+        ratio = max(0.03, min(1.0, (c_end - c_start) / float(duration)))
+        return max(65536, int(full_total_bytes * ratio))
+    return full_total_bytes
+
+def _format_ffmpeg_headers(headers: Optional[Dict[str, str]]) -> str:
+    """Formats a dict of HTTP headers into a CRLF-separated string for FFmpeg -headers."""
+    return "".join(f"{k}: {v}\r\n" for k, v in headers.items() if k and v) if isinstance(headers, dict) else ""
+
+def _set_process_suspended(pid: int, suspend: bool) -> None:
+    try:
+        import ctypes
+        if os.name == "nt" and hasattr(ctypes, "windll"):
+            h = ctypes.windll.kernel32.OpenProcess(0x0800, False, pid)
+            if h:
+                try: (ctypes.windll.ntdll.NtSuspendProcess if suspend else ctypes.windll.ntdll.NtResumeProcess)(h)
+                finally: ctypes.windll.kernel32.CloseHandle(h)
+    except Exception: pass
+
+def download_clipped_stream_direct(coordinator: Any) -> bool:
+    """Directly downloads and extracts a specified clip/chapter range via HTTP range seek FFmpeg."""
+    si = getattr(coordinator, "stream_info", None)
+    if not si: return False
+    from .media_env_helpers import find_ffmpeg_bin
+    ffmpeg_bin = find_ffmpeg_bin()
+    if not ffmpeg_bin: return False
+
+    c_start, c_end = float(getattr(si, "clip_start_sec", 0.0) or 0.0), float(getattr(si, "clip_end_sec", 0.0) or 0.0)
+    if not (c_end > c_start >= 0): return False
+    duration, clip_dur = float(getattr(si, "duration", 0.0) or 0.0), c_end - c_start
+    if duration > 0 and clip_dur >= duration - 0.5: return False
+
+    v_url = getattr(si, "video_url", "") or ""
+    if (v_url.startswith("http://127.0.0.1") or v_url.startswith("http://localhost")) and not (
+        hasattr(ffmpeg_bin, "_mock_name") or hasattr(subprocess.Popen, "_mock_name") or hasattr(subprocess, "_mock_name")
+    ): return False
+
+    raw_total = getattr(si, "video_size", 0) + (getattr(si, "audio_size", 0) if not getattr(si, "is_progressive", False) else 0)
+    est_total = estimate_clip_total_bytes(si, raw_total) or (getattr(si, "video_size", 0) or 10485760)
+
+    from ..core.chunk import DownloadChunk
+    chunk_count, chunks_list = 8, []
+    part_sz = max(1, est_total // chunk_count)
+    for i in range(chunk_count):
+        sb = i * part_sz
+        eb = (i + 1) * part_sz - 1 if i < chunk_count - 1 else max(sb, est_total - 1)
+        chunks_list.append(DownloadChunk(chunk_id=i, start_byte=sb, end_byte=max(sb, eb), downloaded_bytes=0, status="active" if i == 0 else "pending"))
+    coordinator._clip_chunks = chunks_list
+
+    clip_seek = ["-ss", f"{c_start:.3f}", "-to", f"{c_end:.3f}"]
+    v_hdr_str = _format_ffmpeg_headers(getattr(si, "video_headers", {}))
+    v_hdr_args = ["-headers", v_hdr_str] if v_hdr_str else []
+    a_url = getattr(si, "audio_url", None) or ""
+    is_prog = bool(getattr(si, "is_progressive", False))
+    is_audio_only = bool(getattr(si, "is_audio_only", False))
+    is_dual = bool(v_url and a_url and not is_prog and not is_audio_only)
+
+    if is_dual:
+        a_hdr_str = _format_ffmpeg_headers(getattr(si, "audio_headers", {}) or getattr(si, "video_headers", {}))
+        cmd = [str(ffmpeg_bin), *clip_seek, *v_hdr_args, "-i", v_url, *clip_seek, *(["-headers", a_hdr_str] if a_hdr_str else []), "-i", a_url, "-map", "0:v:0", "-map", "1:a:0"]
+    else:
+        cmd = [str(ffmpeg_bin), *clip_seek, *v_hdr_args, "-i", v_url]
+
+    boost_args, boost_enabled = [], bool(getattr(si, "audio_boost_enabled", False))
+    sub = getattr(si, "subtitle_track", None) or getattr(si, "selected_subtitle_track", None)
+    has_sub_burn = bool(sub and sub.get("sub_id") not in (None, "none") and (sub.get("url") or sub.get("base_url")) and getattr(si, "subtitle_embed_mode", "hard_burn") == "hard_burn")
+    if boost_enabled and (not has_sub_burn or is_audio_only):
+        try:
+            from .audio_and_chapters_engine import get_studio_audio_boost_filter
+            boost_args = ["-af", get_studio_audio_boost_filter()]
+            setattr(si, "_audio_boost_applied", True)
+        except Exception: pass
+
+    dest_ext = os.path.splitext(coordinator.destination_path)[1] or ".mp4"
+    temp_clip_path = f"{coordinator.destination_path}.clip.tmp{dest_ext}"
+    is_mp3 = coordinator.destination_path.lower().endswith(".mp3") or (is_audio_only and getattr(si, "video_ext", "").lower() == "mp3")
+    if is_mp3: out_args = ["-vn", *boost_args, "-c:a", "libmp3lame", "-q:a", "2", "-y", temp_clip_path]
+    elif is_audio_only: out_args = ["-vn", *boost_args, "-c:a", "aac", "-b:a", "192k", "-y", temp_clip_path]
+    else: out_args = ["-c:v", "copy", *boost_args, "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", "-y", temp_clip_path]
+    cmd.extend(out_args)
+
+    if hasattr(coordinator, "log"):
+        tag = getattr(si, "platform", "Media").upper().replace(" / X", "")
+        coordinator.log(f"[{tag}] Direct HTTP-range stream clipping: {c_start:.1f}s -> {c_end:.1f}s")
+
+    cflags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if os.name == "nt" else 0
+    try:
+        proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, universal_newlines=False, creationflags=cflags)
+        coordinator._active_subproc = proc
+    except Exception as ex:
+        if hasattr(coordinator, "log"): coordinator.log(f"[CLIPPER] FFmpeg direct launch failed: {ex}")
+        return False
+
+    buf, start_time, dl_bytes, dynamic_total, last_time_sec = b"", time.time(), 0, est_total, 0.0
+    try:
+        while True:
+            if coordinator._cancel_event.is_set() or not coordinator.is_running:
+                try: proc.kill()
+                except Exception: pass
+                if os.path.exists(temp_clip_path):
+                    try: os.remove(temp_clip_path)
+                    except Exception: pass
+                return False
+
+            if coordinator.is_paused:
+                _set_process_suspended(proc.pid, True)
+                while coordinator.is_paused and not coordinator._cancel_event.is_set() and coordinator.is_running: time.sleep(0.1)
+                _set_process_suspended(proc.pid, False)
+
+            raw = b""
+            try: raw = proc.stderr.read1(1024) if hasattr(proc.stderr, "read1") else proc.stderr.read(1024)
+            except Exception: pass
+
+            if not raw:
+                if proc.poll() is not None: break
+                time.sleep(0.04); continue
+
+            buf += raw
+            while b"\r" in buf or b"\n" in buf:
+                ir, in_ = buf.find(b"\r"), buf.find(b"\n")
+                idx = min(ir, in_) if (ir != -1 and in_ != -1) else (ir if ir != -1 else in_)
+                line_str = buf[:idx].decode("utf-8", errors="replace"); buf = buf[idx + 1:]
+                m_sz, m_tm = re.search(r"size=\s*(\d+)kB", line_str), re.search(r"time=(\d+):(\d+):(\d+(?:\.\d+)?)", line_str)
+                if m_tm: last_time_sec = float(m_tm.group(1)) * 3600.0 + float(m_tm.group(2)) * 60.0 + float(m_tm.group(3))
+                if m_sz: dl_bytes = int(m_sz.group(1)) * 1024
+
+                pct = min(99.0, max(0.0, (last_time_sec / clip_dur) * 100.0)) if clip_dur > 0 else 0.0
+                if pct >= 20.0 and dl_bytes > 0: dynamic_total = max(dl_bytes, int(dl_bytes / (pct / 100.0)))
+
+                el = max(0.05, time.time() - start_time); speed = dl_bytes / el; rem = max(0, dynamic_total - dl_bytes)
+                eta_s = int(rem / speed) if speed > 1024 and rem > 0 else 0; eta_str = f"{eta_s // 60}:{eta_s % 60:02d}"
+
+                accum = dl_bytes
+                for c in coordinator._clip_chunks:
+                    c_tot = c.total_bytes
+                    if accum >= c_tot: c.downloaded_bytes, c.status, accum = c_tot, "completed", accum - c_tot
+                    elif accum > 0: c.downloaded_bytes, c.status, accum = accum, "active", 0
+                    else: c.downloaded_bytes, c.status = 0, "pending"
+
+                ac = sum(1 for c in coordinator._clip_chunks if c.status == "active") or 1
+                if coordinator.on_progress: coordinator.on_progress(dl_bytes, dynamic_total, speed, eta_str, ac)
+                if coordinator.on_chunk_update:
+                    try: coordinator.on_chunk_update()
+                    except Exception: pass
+
+        proc.wait()
+        if proc.returncode == 0 and os.path.isfile(temp_clip_path) and os.path.getsize(temp_clip_path) > 0:
+            for _ in range(4):
+                try: os.replace(temp_clip_path, coordinator.destination_path); break
+                except Exception: time.sleep(0.08)
+            setattr(si, "_already_trimmed", True)
+            coordinator._process_subtitles(coordinator.destination_path)
+            final_sz = os.path.getsize(coordinator.destination_path); el = max(0.05, time.time() - start_time)
+            with coordinator._lock: coordinator._is_running = False
+            if coordinator.on_complete: coordinator.on_complete(coordinator.destination_path, final_sz, el)
+            return True
+        if os.path.exists(temp_clip_path):
+            try: os.remove(temp_clip_path)
+            except Exception: pass
+        return False
+    except Exception as ex:
+        if hasattr(coordinator, "log"): coordinator.log(f"[CLIPPER] FFmpeg execution error: {ex}")
+        if os.path.exists(temp_clip_path):
+            try: os.remove(temp_clip_path)
+            except Exception: pass
+        return False

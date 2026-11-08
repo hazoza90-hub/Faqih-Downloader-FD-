@@ -13,6 +13,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest.mock import MagicMock, patch
 import subprocess
 
 _src_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
@@ -30,7 +31,11 @@ from faqih_downloader.services.media_clipper_engine import (
     process_post_download_clip_and_subtitles,
     sync_clipper_state_from_body,
     enrich_stream_info_with_clip,
+    estimate_clip_total_bytes,
+    download_clipped_stream_direct,
 )
+from faqih_downloader.core.engine import TurboDownloadEngine
+from faqih_downloader.services.subtitle_processor import burn_subtitle_into_video
 from faqih_downloader.services.subtitle_style_engine import generate_styled_ass_file, normalize_and_dedupe_cues
 from faqih_downloader.services.youtube_models import VideoFormatOption, YouTubeStreamInfo
 from faqih_downloader.services.audio_and_chapters_engine import (
@@ -1380,6 +1385,103 @@ Non-mp4 clip cue
                 root.destroy()
             except Exception:
                 pass
+
+    def test_pause_does_not_close_live_httpresponse_but_closes_mock(self):
+        """Verifies engine.pause() avoids closing live HTTPResponse from another thread but closes mocks."""
+        engine = TurboDownloadEngine(
+            url="http://example.com/test.mp4",
+            destination_path=os.path.join(tempfile.gettempdir(), "test_pause_live.mp4")
+        )
+        engine.is_running = True
+
+        class FakeLiveHTTPResponse:
+            def __init__(self):
+                self.closed = False
+            def close(self):
+                self.closed = True
+
+        live_conn = FakeLiveHTTPResponse()
+        mock_conn = MagicMock()
+        engine._active_connections.extend([live_conn, mock_conn])
+
+        with patch.object(engine, "save_state"):
+            engine.pause()
+
+        self.assertTrue(engine.is_paused)
+        self.assertTrue(engine._pause_event.is_set())
+        # Live connection must NOT be closed from this thread
+        self.assertFalse(live_conn.closed)
+        # Mock connection MUST be closed (preserving compatibility with test_stage7)
+        mock_conn.close.assert_called_once()
+        self.assertEqual(len(engine._active_connections), 0)
+
+    def test_estimate_clip_total_bytes_accuracy(self):
+        """Verifies estimate_clip_total_bytes calculates proportional size for a chapter accurately."""
+        si = YouTubeStreamInfo(
+            video_id="test_vid",
+            title="Sample Video",
+            clean_filename="sample.mp4",
+            is_progressive=True,
+            video_url="https://example.com/v.mp4",
+            duration=3000,
+            clip_start_sec=0.0,
+            clip_end_sec=600.0,
+        )
+        full_bytes = 50 * 1024 * 1024
+        est = estimate_clip_total_bytes(si, full_bytes)
+        expected = 10 * 1024 * 1024
+        self.assertEqual(est, expected)
+
+        si.clip_end_sec = 3000.0
+        self.assertEqual(estimate_clip_total_bytes(si, full_bytes), full_bytes)
+
+        si.clip_start_sec = 0.0
+        si.clip_end_sec = 0.0
+        self.assertEqual(estimate_clip_total_bytes(si, full_bytes), full_bytes)
+
+    def test_burn_subtitle_does_not_add_ss_when_already_trimmed(self):
+        """Verifies burn_subtitle_into_video does not re-add -ss / -to if _already_trimmed is set."""
+        with tempfile.TemporaryDirectory() as td:
+            dummy_vid = os.path.join(td, "dummy.mp4")
+            dummy_ass = os.path.join(td, "dummy.ass")
+            with open(dummy_vid, "wb") as f:
+                f.write(b"\x00" * 1024)
+            with open(dummy_ass, "w", encoding="utf-8") as f:
+                f.write("[Script Info]\nTitle: Test\n")
+
+            style_cfg = {
+                "clip_start": 10.0,
+                "clip_end": 50.0,
+                "_already_trimmed": True,
+            }
+
+            captured_cmd = []
+            def fake_run(cmd, *args, **kwargs):
+                captured_cmd.extend(cmd)
+                m = MagicMock()
+                m.returncode = 0
+                m.stderr = ""
+                return m
+
+            with patch("faqih_downloader.services.subtitle_processor.subprocess.run", side_effect=fake_run), \
+                 patch("os.path.isfile", return_value=True), \
+                 patch("os.path.getsize", return_value=2048), \
+                 patch("os.replace"):
+                burn_subtitle_into_video(dummy_vid, dummy_ass, "ffmpeg", style_config=style_cfg)
+
+            self.assertNotIn("-ss", captured_cmd)
+            self.assertNotIn("-to", captured_cmd)
+
+            style_cfg["_already_trimmed"] = False
+            captured_cmd.clear()
+            with patch("faqih_downloader.services.subtitle_processor.subprocess.run", side_effect=fake_run), \
+                 patch("os.path.isfile", return_value=True), \
+                 patch("os.path.getsize", return_value=2048), \
+                 patch("os.replace"):
+                burn_subtitle_into_video(dummy_vid, dummy_ass, "ffmpeg", style_config=style_cfg)
+
+            self.assertIn("-ss", captured_cmd)
+            self.assertIn("-to", captured_cmd)
 
 
 if __name__ == "__main__":

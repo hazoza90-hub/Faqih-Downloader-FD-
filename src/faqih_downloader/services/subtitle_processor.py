@@ -365,7 +365,7 @@ def burn_subtitle_into_video(
         last_err = ""
         clip_s = float(style_config.get("clip_start", 0.0) or 0.0) if style_config else 0.0
         clip_e = float(style_config.get("clip_end", 0.0) or 0.0) if style_config else 0.0
-        clip_args = ["-ss", f"{clip_s:.3f}", "-to", f"{clip_e:.3f}"] if clip_e > clip_s >= 0 else []
+        clip_args = ["-ss", f"{clip_s:.3f}", "-to", f"{clip_e:.3f}"] if (clip_e > clip_s >= 0 and not (style_config and style_config.get("_already_trimmed"))) else []
         af_args: List[str] = []
         if style_config and style_config.get("audio_boost"):
             try:

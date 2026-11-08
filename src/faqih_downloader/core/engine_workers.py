@@ -133,15 +133,15 @@ class EngineWorkersMixin(EngineResumerMixin):
                     with self._lock:
                         self._active_connections.append(resp)
 
-                    BUF_SIZE = 131072
+                    BUF_SIZE = 32768
                     seg_bytes_read = 0
                     expected_seg_bytes = (req_end - cur_offset + 1) if (req_end is not None) else None
 
                     with open(chunk.part_filepath, file_mode) as f:
                         while not self._cancel_event.is_set() and not self._error_abort_event.is_set() and self.is_running:
                             # Handle pause
-                            while self._pause_event.is_set() and not self._cancel_event.is_set() and not self._error_abort_event.is_set() and self.is_running:
-                                time.sleep(0.1)
+                            if self._pause_event.is_set():
+                                break
 
                             if self._cancel_event.is_set() or self._error_abort_event.is_set() or not self.is_running:
                                 return
@@ -188,6 +188,21 @@ class EngineWorkersMixin(EngineResumerMixin):
                                 if self.total_size > 0 and (chunk.start_byte + chunk.downloaded_bytes > chunk.end_byte):
                                     chunk.status = "completed"
                                     return
+
+                    if self._pause_event.is_set():
+                        with self._lock:
+                            if resp in self._active_connections:
+                                self._active_connections.remove(resp)
+                        try:
+                            resp.close()
+                        except Exception:
+                            pass
+                        resp = None
+                        while self._pause_event.is_set() and not self._cancel_event.is_set() and not self._error_abort_event.is_set() and self.is_running:
+                            time.sleep(0.1)
+                        if self._cancel_event.is_set() or self._error_abort_event.is_set() or not self.is_running:
+                            return
+                        continue
 
                     with self._lock:
                         if resp in self._active_connections:
