@@ -143,6 +143,14 @@ class KanbanActiveColumnMixin:
 
         if hasattr(self, "matrix_a1"):
             self.matrix_a1.set_levels([0.0] * 16)
+        if hasattr(self, "lbl_a1_size") and self.lbl_a1_size and self.lbl_a1_size.winfo_exists():
+            self.lbl_a1_size.configure(text="0.0 MB / 0.0 MB")
+        if hasattr(self, "lbl_a1_eta") and self.lbl_a1_eta and self.lbl_a1_eta.winfo_exists():
+            self.lbl_a1_eta.configure(text="")
+        if hasattr(self, "lbl_a1_pct") and self.lbl_a1_pct and self.lbl_a1_pct.winfo_exists():
+            self.lbl_a1_pct.configure(text="0%")
+        if hasattr(self, "lbl_a1_speed") and self.lbl_a1_speed and self.lbl_a1_speed.winfo_exists():
+            self.lbl_a1_speed.configure(text="0.0 MB/s")
 
     def update_kanban_active_stream(
         self,
@@ -162,11 +170,16 @@ class KanbanActiveColumnMixin:
             r = getattr(eng, "is_running", False)
             is_running = bool(r() if callable(r) else r)
 
-        if not is_running and pct <= 0 and (not speed_str or speed_str in ("0 B/s", "0.0 MB/s")):
+        eta_raw = str(eta or "").strip()
+        eta_lower = eta_raw.lower()
+        is_processing = any(k in eta_lower for k in ("merging", "burning", "transcoding"))
+
+        if not is_running and not is_processing and pct <= 0 and (not speed_str or speed_str in ("0 B/s", "0.0 MB/s")):
             self.reset_kanban_active_stream()
             return
 
         def _fmt_sz(b: float) -> str:
+            b = max(0.0, float(b or 0))
             if b >= 1024**3:
                 return f"{b / (1024**3):.2f} GB"
             if b >= 1024**2:
@@ -176,7 +189,11 @@ class KanbanActiveColumnMixin:
             return f"{int(b)} B"
 
         if total <= 0 and eng:
-            total = int(getattr(eng, "total_size", 0) or 0)
+            try:
+                raw_t = getattr(eng, "total_size", 0)
+                total = int(raw_t() if callable(raw_t) else raw_t or 0)
+            except Exception:
+                total = 0
 
         if downloaded <= 0 and total > 0 and pct > 0:
             downloaded = int(total * (pct / 100.0))
@@ -211,14 +228,14 @@ class KanbanActiveColumnMixin:
             self.lbl_a1_size.configure(text=sz_txt)
 
         if hasattr(self, "lbl_a1_eta") and self.lbl_a1_eta and self.lbl_a1_eta.winfo_exists():
-            if eta == "Merging..." or "Merging" in eta:
+            if "merging" in eta_lower:
                 eta_txt = "⚙️ جاري دمج الصوت والفيديو..."
-            elif eta == "Burning Subtitles..." or "Burning" in eta:
+            elif "burning" in eta_lower:
                 eta_txt = "🔥 جاري حرق الترجمة..."
-            elif eta == "Transcoding..." or "Transcoding" in eta:
+            elif "transcoding" in eta_lower:
                 eta_txt = "🎵 جاري تحويل الصوت..."
-            elif eta and eta not in ("--:--", ""):
-                eta_txt = f"⏱ {eta} • ⚡ {active_chunks}" if active_chunks > 0 else f"⏱ {eta}"
+            elif eta_raw and eta_raw not in ("--:--", ""):
+                eta_txt = f"⏱ {eta_raw} • ⚡ {active_chunks}" if active_chunks > 0 else f"⏱ {eta_raw}"
             elif active_chunks > 0:
                 eta_txt = f"⚡ {active_chunks} مسارات نشطة"
             else:

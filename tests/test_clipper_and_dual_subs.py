@@ -1283,6 +1283,41 @@ Non-mp4 clip cue
             )
             self.assertEqual(gui.lbl_a1_eta.cget("text"), "🎵 جاري تحويل الصوت...")
 
+            # Test case-insensitivity and whitespace in processing states
+            gui.update_kanban_active_stream("My_Test_Video.mp4", 95.0, "0 B/s", [], 0, downloaded=t_bytes, total=t_bytes, eta="  merging...  ")
+            self.assertEqual(gui.lbl_a1_eta.cget("text"), "⚙️ جاري دمج الصوت والفيديو...")
+            gui.update_kanban_active_stream("My_Test_Video.mp4", 95.0, "0 B/s", [], 0, downloaded=t_bytes, total=t_bytes, eta="burning subtitles...")
+            self.assertEqual(gui.lbl_a1_eta.cget("text"), "🔥 جاري حرق الترجمة...")
+            gui.update_kanban_active_stream("My_Test_Audio.mp3", 95.0, "0 B/s", [], 0, downloaded=t_bytes, total=t_bytes, eta="transcoding...")
+            self.assertEqual(gui.lbl_a1_eta.cget("text"), "🎵 جاري تحويل الصوت...")
+
+            # Test post-processing state with pct=0.0 and engine stopped does not prematurely reset card
+            mock_stopped_eng = MagicMock()
+            mock_stopped_eng.is_running = False
+            gui.engine = mock_stopped_eng
+            gui.update_kanban_active_stream("Stopped_Eng_Merge.mp4", 0.0, "0 B/s", [], 0, eta="Merging...")
+            self.assertTrue(gui._active_stream_live, "Active card should not reset while post-processing merging is active!")
+            self.assertEqual(gui.lbl_a1_eta.cget("text"), "⚙️ جاري دمج الصوت والفيديو...")
+
+            # Test safe handling when eta is None (must NOT raise TypeError)
+            gui.update_kanban_active_stream("None_Eta_Test.mp4", 50.0, "1.5 MB/s", [], 3, eta=None)
+            self.assertEqual(gui.lbl_a1_eta.cget("text"), "⚡ 3 مسارات نشطة")
+
+            # Test size formatting: GB / GB
+            g_down = int(1.25 * 1024**3)
+            g_total = int(2.50 * 1024**3)
+            gui.update_kanban_active_stream("Huge_File.iso", 50.0, "10 MB/s", [], 8, downloaded=g_down, total=g_total)
+            self.assertIn("1.25 GB / 2.50 GB", gui.lbl_a1_size.cget("text"))
+
+            # Test size formatting: downloaded only when total is 0 (streaming)
+            gui.engine = None
+            gui.update_kanban_active_stream("Stream.m3u8", 0.0, "500 KB/s", [1], 1, downloaded=int(4.2 * 1024 * 1024), total=0)
+            self.assertEqual(gui.lbl_a1_size.cget("text"), "📦 4.2 MB")
+
+            # Test size formatting: connecting state when downloaded and total are 0
+            gui.update_kanban_active_stream("Connecting.mp4", 0.0, "10 KB/s", [1], 1, downloaded=0, total=0)
+            self.assertEqual(gui.lbl_a1_size.cget("text"), "📦 جاري الاتصال...")
+
             # Test backward compatibility: call with 5 parameters only (no downloaded, total, eta)
             gui.update_kanban_active_stream("Legacy_Call.mp4", 45.0, "2.0 MB/s", [], 6)
             self.assertTrue(gui._active_stream_live)
@@ -1296,6 +1331,50 @@ Non-mp4 clip cue
             gui.update_kanban_active_stream("Engine_Probe.mp4", 20.0, "5.0 MB/s", [], 4)
             # total = 50.0 MB, downloaded = 20% of 50 MB = 10.0 MB
             self.assertIn("10.0 MB / 50.0 MB", gui.lbl_a1_size.cget("text"))
+
+            # 3. Test DownloadCallbacksMixin._engine_progress_cb integration & fallback
+            from faqih_downloader.ui.controllers.download_callbacks_mixin import DownloadCallbacksMixin
+
+            class DummyCallbacksHost(DownloadCallbacksMixin):
+                def __init__(self):
+                    self.root = MagicMock()
+                    self.root.winfo_exists.return_value = True
+                    self.root.after = lambda delay, fn: fn()
+                    self.card_speed = MagicMock()
+                    self.card_size = MagicMock()
+                    self.card_eta = MagicMock()
+                    self.card_threads = MagicMock()
+                    self.engine = MagicMock()
+                    self.engine.total_size = 80000000
+                    self.engine.dest_path = "C:/test/file.mp4"
+                    self.engine.get_chunks_snapshot.return_value = []
+                    self.received_args = None
+                    self.type_error_triggered = False
+
+                def _draw_main_progress(self, pct):
+                    pass
+
+                def update_kanban_active_stream(self, fn, pct, sp, snap, ac, **kwargs):
+                    if self.type_error_triggered:
+                        if kwargs:
+                            raise TypeError("Legacy signature does not take kwargs")
+                    self.received_args = (fn, pct, sp, snap, ac, kwargs)
+
+            host = DummyCallbacksHost()
+            # Call progress callback
+            host._engine_progress_cb(20000000, 80000000, 1048576, "00:45", 4)
+            self.assertIsNotNone(host.received_args)
+            self.assertEqual(host.received_args[0], "C:/test/file.mp4")
+            self.assertEqual(host.received_args[5].get("downloaded"), 20000000)
+            self.assertEqual(host.received_args[5].get("total"), 80000000)
+            self.assertEqual(host.received_args[5].get("eta"), "00:45")
+
+            # Test TypeError fallback when host only accepts 5 arguments
+            host.type_error_triggered = True
+            host.received_args = None
+            host._engine_progress_cb(10000000, 80000000, 1048576, "01:10", 2)
+            self.assertIsNotNone(host.received_args)
+            self.assertEqual(host.received_args[5], {})
         finally:
             try:
                 root.destroy()

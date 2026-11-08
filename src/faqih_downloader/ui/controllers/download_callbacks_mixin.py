@@ -33,7 +33,11 @@ class DownloadCallbacksMixin:
                 return
             d, t, sp, et, ac = args
             if t <= 0 and getattr(self, "engine", None):
-                t = int(getattr(self.engine, "total_size", 0) or 0)
+                try:
+                    raw_t = getattr(self.engine, "total_size", 0)
+                    t = int(raw_t() if callable(raw_t) else raw_t or 0)
+                except Exception:
+                    t = 0
                 pct = (d / t * 100.0) if t > 0 else 0.0
             else:
                 pct = (d / t * 100.0) if t > 0 else 0.0
