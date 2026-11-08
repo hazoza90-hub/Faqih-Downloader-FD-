@@ -773,6 +773,9 @@ Non-mp4 clip cue
         self.assertIn("createDynamicsCompressor()", js)
         self.assertIn("2.8", js)
 
+        # Verify chapter unselect resets clip range to full video
+        self.assertIn("clipStartSec = 0.0; clipEndSec = 0.0;", js)
+
         # Verify JavaScript syntax via node --check
         import shutil
         node_bin = shutil.which("node")
@@ -891,6 +894,63 @@ Non-mp4 clip cue
         self.assertNotIn("[Clip]", dest3)
         self.assertIn("[1080p]", dest3)
         self.assertTrue(dest3.endswith("Lecture Video [1080p].mp4"))
+
+        # 4. Chapter with colons / illegal characters (e.g. "01: Intro - Getting Started")
+        body4 = {
+            "q_idx": 0,
+            "current_dest": dest3,
+            "chapter_title": "01: Intro - Getting Started",
+            "clip_start": 0.0,
+            "clip_end": 120.0,
+        }
+        PreviewBridgeRequestHandler._handle_api_update_filename(handler, session, body4)
+        dest4 = handler.sent_data["dest_path"]
+        self.assertIn("[1080p]", dest4)
+        self.assertIn("[01 Intro - Getting Started]", dest4)
+        self.assertIn("[Clip]", dest4)
+
+        # 5. Switch to auto-split chapter: "الجزء 1 (تقسيم تلقائي)"
+        body5 = {
+            "q_idx": 0,
+            "current_dest": dest4,
+            "chapter_title": "الجزء 1 (تقسيم تلقائي)",
+            "clip_start": 0.0,
+            "clip_end": 300.0,
+        }
+        PreviewBridgeRequestHandler._handle_api_update_filename(handler, session, body5)
+        dest5 = handler.sent_data["dest_path"]
+        self.assertNotIn("01 Intro", dest5)
+        self.assertIn("[1080p]", dest5)
+        self.assertIn("الجزء 1", dest5)
+        self.assertIn("[Clip]", dest5)
+
+        # 6. Switch to next auto-split chapter: "الجزء 2 (تقسيم تلقائي)"
+        body6 = {
+            "q_idx": 0,
+            "current_dest": dest5,
+            "chapter_title": "الجزء 2 (تقسيم تلقائي)",
+            "clip_start": 300.0,
+            "clip_end": 600.0,
+        }
+        PreviewBridgeRequestHandler._handle_api_update_filename(handler, session, body6)
+        dest6 = handler.sent_data["dest_path"]
+        self.assertNotIn("الجزء 1", dest6)
+        self.assertIn("الجزء 2", dest6)
+        self.assertIn("[Clip]", dest6)
+
+        # 7. Reset to full video from auto-split chapter
+        body7 = {
+            "q_idx": 0,
+            "current_dest": dest6,
+            "chapter_title": "",
+            "clip_start": 0.0,
+            "clip_end": 0.0,
+        }
+        PreviewBridgeRequestHandler._handle_api_update_filename(handler, session, body7)
+        dest7 = handler.sent_data["dest_path"]
+        self.assertNotIn("الجزء 2", dest7)
+        self.assertNotIn("[Clip]", dest7)
+        self.assertTrue(dest7.endswith("Lecture Video [1080p].mp4"))
 
 
 if __name__ == "__main__":

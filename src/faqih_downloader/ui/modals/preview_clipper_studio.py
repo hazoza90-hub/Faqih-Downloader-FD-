@@ -235,6 +235,7 @@ function onChapterSelectChange() {
     const sel = document.getElementById("chapterSelect");
     if (!sel) return;
     if (sel.selectedIndex <= 0) {
+        clipStartSec = 0.0; clipEndSec = 0.0;
         selectedChapterTitle = "";
         updateClipUI();
         if (typeof syncStateToBridge === "function") syncStateToBridge();
@@ -486,10 +487,8 @@ function initClipperStudioHooks() {
     const sIn = document.getElementById("clipStartInput"), eIn = document.getElementById("clipEndInput");
     if (sIn) { sIn.addEventListener("focus", () => { sIn._focused = true; }); sIn.addEventListener("blur", () => { sIn._focused = false; }); }
     if (eIn) { eIn.addEventListener("focus", () => { eIn._focused = true; }); eIn.addEventListener("blur", () => { eIn._focused = false; }); }
-    if (audioBoostEnabled) {
-        const bBoost = document.getElementById("btnAudioBoost");
-        if (bBoost) bBoost.classList.add("active");
-        applyStudioWebAudioRouting();
-    }
+    const bBoost = document.getElementById("btnAudioBoost");
+    if (bBoost) bBoost.classList.toggle("active", !!audioBoostEnabled);
+    applyStudioWebAudioRouting();
 }
 """.strip()

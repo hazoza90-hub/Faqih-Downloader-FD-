@@ -335,10 +335,14 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
         d_dir, f_name = os.path.split(cur_dest)
         stem, ext = os.path.splitext(f_name)
         stem = re.sub(r'\s*\[Clip\]', '', stem, flags=re.IGNORECASE).strip()
-        if old_ch: stem = re.sub(r'\s*\[' + re.escape(old_ch) + r'\]', '', stem).strip()
+        _cl = lambda t: re.sub(r'^[\[\(\]\)\s\-–—:|•~.]+|[\[\(\]\)\s\-–—:|•~.]+$', '', re.sub(r'[<>:"/\\|?*\x00-\x1f]', '', str(t or ''))).strip()
+        cands = {old_ch, _cl(old_ch), getattr(session, "last_clean_ch", "")}
         for ch in (getattr(session, "chapters", []) or []):
-            if str(ch.get("title", "")).strip(): stem = re.sub(r'\s*\[' + re.escape(str(ch.get("title", "")).strip()) + r'\]', '', stem).strip()
-        stem = re.sub(r'\s*\[(?:الجزء\s*\d+\s*\(تقسيم تلقائي\)|النصف الأول من الفيديو|النصف الثاني من الفيديو)\]', '', stem).strip()
+            ct = str(ch.get("title", "")).strip()
+            if ct: cands.update((ct, _cl(ct)))
+        for c in cands:
+            if c: stem = re.sub(r'\s*\[' + re.escape(c) + r'\]', '', stem).strip()
+        stem = re.sub(r'\s*\[(?:الجزء\s*\d+\s*(?:\(تقسيم تلقائي\)?|\(تقسيم تلقائي)?|النصف الأول من الفيديو|النصف الثاني من الفيديو)\]', '', stem).strip()
         clean_cur_dest = os.path.join(d_dir, f"{stem}{ext}")
 
         opt = session.options[q_idx] if 0 <= q_idx < len(session.options) else (session.options[0] if session.options else None)
@@ -349,7 +353,8 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
         else:
             updated = clean_cur_dest
 
-        clean_ch = re.sub(r'^[\[\(\]\)\s\-–—:|•~.]+|[\[\(\]\)\s\-–—:|•~.]+$', '', re.sub(r'[<>:"/\\|?*\x00-\x1f]', '', ch_title)).strip() if ch_title else ""
+        clean_ch = _cl(ch_title)
+        session.last_clean_ch = clean_ch
         d_dir2, f_name2 = os.path.split(updated)
         stem2, ext2 = os.path.splitext(f_name2)
         if clean_ch and f"[{clean_ch}]" not in stem2: stem2 = f"{stem2} [{clean_ch}]"
@@ -435,14 +440,12 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
 
         try:
             from ..config import set_setting
-            set_setting("subtitle_embed_mode", sub_mode)
-            set_setting("subtitle_position", sub_pos)
+            set_setting("subtitle_embed_mode", sub_mode); set_setting("subtitle_position", sub_pos)
             if selected_opt:
                 set_setting("preferred_video_height", -1 if getattr(selected_opt, "is_audio_only", False) else getattr(selected_opt, "height", 0))
-                if getattr(selected_opt, "selected_audio_track", None):
-                    set_setting("preferred_audio_lang", selected_opt.selected_audio_track.get("language") or "original")
-                sub_lang = selected_opt.selected_subtitle_track.get("language") if getattr(selected_opt, "selected_subtitle_track", None) else "none"
-                set_setting("preferred_subtitle_lang", sub_lang or "none")
+                if getattr(selected_opt, "selected_audio_track", None): set_setting("preferred_audio_lang", selected_opt.selected_audio_track.get("language") or "original")
+                st = getattr(selected_opt, "selected_subtitle_track", None)
+                if st: set_setting("preferred_subtitle_lang", st.get("language") or "none")
         except Exception: pass
 
         def _dispatch():
@@ -495,13 +498,9 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
         try:
             from ..config import set_setting
             set_setting("subtitle_embed_mode", sub_mode); set_setting("subtitle_position", sub_pos)
-            if session.options and 0 <= q_idx < len(session.options):
-                opt = session.options[q_idx]
-                set_setting("preferred_video_height", -1 if getattr(opt, "is_audio_only", False) else getattr(opt, "height", 0))
-            if session.selected_audio_track:
-                set_setting("preferred_audio_lang", session.selected_audio_track.get("language") or "original")
-            sub_lang = session.selected_sub_track.get("language") if session.selected_sub_track else "none"
-            set_setting("preferred_subtitle_lang", sub_lang or "none")
+            if cur_opt: set_setting("preferred_video_height", -1 if getattr(cur_opt, "is_audio_only", False) else getattr(cur_opt, "height", 0))
+            if session.selected_audio_track: set_setting("preferred_audio_lang", session.selected_audio_track.get("language") or "original")
+            if session.selected_sub_track: set_setting("preferred_subtitle_lang", session.selected_sub_track.get("language") or "none")
         except Exception: pass
 
         def _sync_tk():
@@ -521,8 +520,7 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
                     so.subtitle_pos_x, so.subtitle_pos_y = session.subtitle_pos_x, session.subtitle_pos_y
                 if hasattr(m, "cb_audio") and m.cb_audio: m.cb_audio.current(a_idx)
                 if hasattr(m, "cb_sub") and m.cb_sub:
-                    m.cb_sub.current(s_idx)
-                    m.cb_sub._selected_mode, m.cb_sub._user_touched_mode, m.cb_sub._selected_pos = sub_mode, True, sub_pos
+                    m.cb_sub.current(s_idx); m.cb_sub._selected_mode, m.cb_sub._user_touched_mode, m.cb_sub._selected_pos = sub_mode, True, sub_pos
                     if hasattr(m.cb_sub, "_mode_var"): m.cb_sub._mode_var.set(sub_mode)
                     mode_cb = getattr(m.cb_sub, "_mode_combobox", None)
                     if mode_cb and hasattr(mode_cb, "current"):
@@ -530,14 +528,12 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
                         if sub_mode in codes: mode_cb.current(codes.index(sub_mode))
                         if hasattr(mode_cb, "configure"): mode_cb.configure(state="readonly" if s_idx > 0 else "disabled")
                     pos_cb = getattr(m.cb_sub, "_pos_combobox", None)
-                    if pos_cb and hasattr(pos_cb, "current"):
-                        pos_codes = ["bottom", "middle", "top"]
-                        if sub_pos in pos_codes: pos_cb.current(pos_codes.index(sub_pos))
+                    if pos_cb and hasattr(pos_cb, "current") and sub_pos in ["bottom", "middle", "top"]:
+                        pos_cb.current(["bottom", "middle", "top"].index(sub_pos))
                 if dest_path and hasattr(m, "entry_dest") and m.entry_dest:
                     m.entry_dest.delete(0, "end"); m.entry_dest.insert(0, dest_path)
                     if hasattr(m, "dest_path"): m.dest_path = dest_path
-            except Exception:
-                pass
+            except Exception: pass
 
         parent = session.parent_app or (session.modal_ref.master if session.modal_ref else None)
         target = session.modal_ref if (session.modal_ref and hasattr(session.modal_ref, "after")) else parent
