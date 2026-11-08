@@ -343,8 +343,12 @@ def enrich_stream_info_with_clip(stream_info: Any, opt: Any) -> Any:
 def estimate_clip_total_bytes(stream_info: Any, full_total_bytes: int) -> int:
     """Calculates estimated byte size of the selected clip/chapter proportional to total media duration."""
     if not stream_info or full_total_bytes <= 0: return full_total_bytes if full_total_bytes > 0 else 0
-    c_start, c_end = float(getattr(stream_info, "clip_start_sec", 0.0) or 0.0), float(getattr(stream_info, "clip_end_sec", 0.0) or 0.0)
-    duration = float(getattr(stream_info, "duration", 0.0) or 0.0)
+    if isinstance(stream_info, dict):
+        c_start, c_end = float(stream_info.get("clip_start_sec") or 0.0), float(stream_info.get("clip_end_sec") or 0.0)
+        duration = float(stream_info.get("duration") or 0.0)
+    else:
+        c_start, c_end = float(getattr(stream_info, "clip_start_sec", 0.0) or 0.0), float(getattr(stream_info, "clip_end_sec", 0.0) or 0.0)
+        duration = float(getattr(stream_info, "duration", 0.0) or 0.0)
     if c_end > c_start >= 0 and duration > 0 and (c_end - c_start) < duration - 0.5:
         ratio = max(0.03, min(1.0, (c_end - c_start) / float(duration)))
         return max(65536, int(full_total_bytes * ratio))
@@ -356,12 +360,16 @@ def _format_ffmpeg_headers(headers: Optional[Dict[str, str]]) -> str:
 
 def _set_process_suspended(pid: int, suspend: bool) -> None:
     try:
-        import ctypes
-        if os.name == "nt" and hasattr(ctypes, "windll"):
-            h = ctypes.windll.kernel32.OpenProcess(0x0800, False, pid)
-            if h:
-                try: (ctypes.windll.ntdll.NtSuspendProcess if suspend else ctypes.windll.ntdll.NtResumeProcess)(h)
-                finally: ctypes.windll.kernel32.CloseHandle(h)
+        if os.name == "nt":
+            import ctypes
+            if hasattr(ctypes, "windll"):
+                h = ctypes.windll.kernel32.OpenProcess(0x0800, False, pid)
+                if h:
+                    try: (ctypes.windll.ntdll.NtSuspendProcess if suspend else ctypes.windll.ntdll.NtResumeProcess)(h)
+                    finally: ctypes.windll.kernel32.CloseHandle(h)
+        else:
+            import signal
+            os.kill(pid, signal.SIGSTOP if suspend else signal.SIGCONT)
     except Exception: pass
 
 def download_clipped_stream_direct(coordinator: Any) -> bool:
@@ -393,6 +401,7 @@ def download_clipped_stream_direct(coordinator: Any) -> bool:
         eb = (i + 1) * part_sz - 1 if i < chunk_count - 1 else max(sb, est_total - 1)
         chunks_list.append(DownloadChunk(chunk_id=i, start_byte=sb, end_byte=max(sb, eb), downloaded_bytes=0, status="active" if i == 0 else "pending"))
     coordinator._clip_chunks = chunks_list
+    coordinator._clip_total_size = est_total
 
     clip_seek = ["-ss", f"{c_start:.3f}", "-to", f"{c_end:.3f}"]
     v_hdr_str = _format_ffmpeg_headers(getattr(si, "video_headers", {}))
@@ -418,9 +427,11 @@ def download_clipped_stream_direct(coordinator: Any) -> bool:
             setattr(si, "_audio_boost_applied", True)
         except Exception: pass
 
+    is_mp3 = coordinator.destination_path.lower().endswith(".mp3") or (is_audio_only and getattr(si, "video_ext", "").lower() == "mp3")
+    if is_mp3 and not coordinator.destination_path.lower().endswith(".mp3"):
+        coordinator.destination_path = os.path.splitext(coordinator.destination_path)[0] + ".mp3"
     dest_ext = os.path.splitext(coordinator.destination_path)[1] or ".mp4"
     temp_clip_path = f"{coordinator.destination_path}.clip.tmp{dest_ext}"
-    is_mp3 = coordinator.destination_path.lower().endswith(".mp3") or (is_audio_only and getattr(si, "video_ext", "").lower() == "mp3")
     if is_mp3: out_args = ["-vn", *boost_args, "-c:a", "libmp3lame", "-q:a", "2", "-y", temp_clip_path]
     elif is_audio_only: out_args = ["-vn", *boost_args, "-c:a", "aac", "-b:a", "192k", "-y", temp_clip_path]
     else: out_args = ["-c:v", "copy", *boost_args, "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", "-y", temp_clip_path]
@@ -442,7 +453,7 @@ def download_clipped_stream_direct(coordinator: Any) -> bool:
     try:
         while True:
             if coordinator._cancel_event.is_set() or not coordinator.is_running:
-                try: proc.kill()
+                try: proc.kill(); proc.wait(timeout=0.5)
                 except Exception: pass
                 if os.path.exists(temp_clip_path):
                     try: os.remove(temp_clip_path)
@@ -467,37 +478,58 @@ def download_clipped_stream_direct(coordinator: Any) -> bool:
                 ir, in_ = buf.find(b"\r"), buf.find(b"\n")
                 idx = min(ir, in_) if (ir != -1 and in_ != -1) else (ir if ir != -1 else in_)
                 line_str = buf[:idx].decode("utf-8", errors="replace"); buf = buf[idx + 1:]
-                m_sz, m_tm = re.search(r"size=\s*(\d+)kB", line_str), re.search(r"time=(\d+):(\d+):(\d+(?:\.\d+)?)", line_str)
+                m_sz = re.search(r"(?:size|Lsize)=\s*([0-9]+(?:\.[0-9]+)?)\s*([kKmMgG]?i?B)?", line_str, re.IGNORECASE)
+                m_tm = re.search(r"time=(\d+):(\d+):(\d+(?:\.\d+)?)", line_str)
                 if m_tm: last_time_sec = float(m_tm.group(1)) * 3600.0 + float(m_tm.group(2)) * 60.0 + float(m_tm.group(3))
-                if m_sz: dl_bytes = int(m_sz.group(1)) * 1024
+                if m_sz:
+                    val = float(m_sz.group(1)); unit = (m_sz.group(2) or "").lower()
+                    if "m" in unit: dl_bytes = int(val * 1024 * 1024)
+                    elif "g" in unit: dl_bytes = int(val * 1024 * 1024 * 1024)
+                    else: dl_bytes = int(val * 1024)
 
                 pct = min(99.0, max(0.0, (last_time_sec / clip_dur) * 100.0)) if clip_dur > 0 else 0.0
-                if pct >= 20.0 and dl_bytes > 0: dynamic_total = max(dl_bytes, int(dl_bytes / (pct / 100.0)))
+                if pct >= 20.0 and dl_bytes > 0:
+                    dynamic_total = max(dl_bytes, int(dl_bytes / (pct / 100.0)))
+                    if dynamic_total != getattr(coordinator, "_clip_total_size", 0):
+                        coordinator._clip_total_size = dynamic_total
+                        p_sz = max(1, dynamic_total // chunk_count)
+                        for i, chk in enumerate(coordinator._clip_chunks):
+                            sb = i * p_sz
+                            eb = (i + 1) * p_sz - 1 if i < chunk_count - 1 else max(sb, dynamic_total - 1)
+                            with chk.lock: chk.start_byte, chk.end_byte = sb, max(sb, eb)
 
                 el = max(0.05, time.time() - start_time); speed = dl_bytes / el; rem = max(0, dynamic_total - dl_bytes)
                 eta_s = int(rem / speed) if speed > 1024 and rem > 0 else 0; eta_str = f"{eta_s // 60}:{eta_s % 60:02d}"
 
                 accum = dl_bytes
                 for c in coordinator._clip_chunks:
-                    c_tot = c.total_bytes
-                    if accum >= c_tot: c.downloaded_bytes, c.status, accum = c_tot, "completed", accum - c_tot
-                    elif accum > 0: c.downloaded_bytes, c.status, accum = accum, "active", 0
-                    else: c.downloaded_bytes, c.status = 0, "pending"
+                    with c.lock:
+                        c_tot = c.total_bytes
+                        if accum >= c_tot: c.downloaded_bytes, c.status, accum = c_tot, "completed", accum - c_tot
+                        elif accum > 0: c.downloaded_bytes, c.status, accum = accum, "active", 0
+                        else: c.downloaded_bytes, c.status = 0, "pending"
 
                 ac = sum(1 for c in coordinator._clip_chunks if c.status == "active") or 1
                 if coordinator.on_progress: coordinator.on_progress(dl_bytes, dynamic_total, speed, eta_str, ac)
                 if coordinator.on_chunk_update:
                     try: coordinator.on_chunk_update()
                     except Exception: pass
-
         proc.wait()
         if proc.returncode == 0 and os.path.isfile(temp_clip_path) and os.path.getsize(temp_clip_path) > 0:
             for _ in range(4):
                 try: os.replace(temp_clip_path, coordinator.destination_path); break
-                except Exception: time.sleep(0.08)
+                except Exception:
+                    try: shutil.move(temp_clip_path, coordinator.destination_path); break
+                    except Exception: time.sleep(0.08)
             setattr(si, "_already_trimmed", True)
             coordinator._process_subtitles(coordinator.destination_path)
-            final_sz = os.path.getsize(coordinator.destination_path); el = max(0.05, time.time() - start_time)
+            for c in coordinator._clip_chunks:
+                with c.lock: c.downloaded_bytes, c.status = c.total_bytes, "completed"
+            if coordinator.on_chunk_update:
+                try: coordinator.on_chunk_update()
+                except Exception: pass
+            final_sz = os.path.getsize(coordinator.destination_path) if os.path.isfile(coordinator.destination_path) else dynamic_total
+            el = max(0.05, time.time() - start_time)
             with coordinator._lock: coordinator._is_running = False
             if coordinator.on_complete: coordinator.on_complete(coordinator.destination_path, final_sz, el)
             return True

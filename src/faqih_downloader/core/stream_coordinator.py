@@ -96,6 +96,8 @@ class StreamDownloadCoordinator:
     @property
     def total_size(self) -> int:
         with self._lock:
+            if getattr(self, "_clip_total_size", 0) > 0:
+                return self._clip_total_size
             if self.stream_info.is_progressive or not self.stream_info.audio_url:
                 raw_tot = self.current_engine.total_size if (self.current_engine and self.current_engine.total_size > 0) else self.stream_info.video_size
             else:
@@ -133,6 +135,11 @@ class StreamDownloadCoordinator:
         with self._lock:
             self._is_paused = True
             self._pause_event.set()
+            if self._active_subproc and getattr(self._active_subproc, "pid", None):
+                try:
+                    from ..services.media_clipper_engine import _set_process_suspended
+                    _set_process_suspended(self._active_subproc.pid, True)
+                except Exception: pass
             targets = list(self._active_engines) if self._active_engines else ([self.current_engine] if self.current_engine else [])
             for eng in targets:
                 try: eng.pause()
@@ -142,6 +149,11 @@ class StreamDownloadCoordinator:
         with self._lock:
             self._is_paused = False
             self._pause_event.clear()
+            if self._active_subproc and getattr(self._active_subproc, "pid", None):
+                try:
+                    from ..services.media_clipper_engine import _set_process_suspended
+                    _set_process_suspended(self._active_subproc.pid, False)
+                except Exception: pass
             targets = list(self._active_engines) if self._active_engines else ([self.current_engine] if self.current_engine else [])
             for eng in targets:
                 try: eng.resume()
@@ -215,6 +227,8 @@ class StreamDownloadCoordinator:
         try:
             if getattr(self.stream_info, "clip_end_sec", 0) > getattr(self.stream_info, "clip_start_sec", 0) >= 0:
                 if download_clipped_stream_direct(self):
+                    return
+                if self._cancel_event.is_set() or not self._is_running:
                     return
             if self.stream_info.is_progressive or not self.stream_info.audio_url:
                 # Progressive single-stream download with dynamic chunking
@@ -514,9 +528,8 @@ class StreamDownloadCoordinator:
                         try: os.remove(p)
                         except Exception: pass
                     for ext in (".sd_parts", ".tdm_parts"):
-                        parts_dir = p + ext
-                        if os.path.isdir(parts_dir):
-                            try: shutil.rmtree(parts_dir, ignore_errors=True)
+                        if os.path.isdir(p + ext):
+                            try: shutil.rmtree(p + ext, ignore_errors=True)
                             except Exception: pass
 
     def _process_subtitles(self, target_path: str):
@@ -531,4 +544,3 @@ class StreamDownloadCoordinator:
             if f_path and os.path.isfile(f_path): self.destination_path = f_path
         except Exception as e:
             self.log(f"[CLIP/SUBTITLES] Warning: {e}")
-

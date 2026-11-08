@@ -1483,6 +1483,136 @@ Non-mp4 clip cue
             self.assertIn("-ss", captured_cmd)
             self.assertIn("-to", captured_cmd)
 
+    def test_estimate_clip_total_bytes_dict_and_edge_cases(self):
+        """Verifies estimate_clip_total_bytes handles dict structures, boundary conditions, and invalid inputs."""
+        dict_si = {
+            "clip_start_sec": "100.0",
+            "clip_end_sec": "200.0",
+            "duration": "1000.0",
+        }
+        res = estimate_clip_total_bytes(dict_si, 100 * 1024 * 1024)
+        self.assertEqual(res, 10 * 1024 * 1024)
+
+        # Non-positive full_total_bytes
+        self.assertEqual(estimate_clip_total_bytes(dict_si, 0), 0)
+        self.assertEqual(estimate_clip_total_bytes(dict_si, -100), 0)
+
+        # None stream_info falls back to full_total_bytes
+        self.assertEqual(estimate_clip_total_bytes(None, 1000), 1000)
+
+    def test_download_clipped_stream_direct_kib_progress_and_chunk_rescaling(self):
+        """Verifies download_clipped_stream_direct parses KiB/Lsize stderr correctly and rescales chunks."""
+        from faqih_downloader.core.stream_coordinator import StreamDownloadCoordinator
+        from faqih_downloader.services.youtube_models import YouTubeStreamInfo
+
+        si = YouTubeStreamInfo(
+            video_id="direct_clip_test",
+            title="Clip Test Video",
+            clean_filename="test.mp4",
+            is_progressive=True,
+            video_url="https://example.com/stream.mp4",
+            duration=100.0,
+            clip_start_sec=10.0,
+            clip_end_sec=30.0,
+            video_size=100 * 1024 * 1024,
+        )
+
+        coord = StreamDownloadCoordinator(si, os.path.join(tempfile.gettempdir(), "test_coord_clip.mp4"))
+        coord._is_running = True
+
+        progress_calls = []
+        coord.on_progress = lambda dl, tot, spd, eta, ac: progress_calls.append((dl, tot, spd, eta, ac))
+
+        stderr_lines = [
+            b"frame=   15 fps=0.0 q=29.0 size=       0KiB time=00:00:00.43 bitrate=   0.9kbits/s\n",
+            b"frame=  112 fps=110 q=29.0 size=     500KiB time=00:00:05.00 bitrate= 100.0kbits/s\n",
+            b"frame=  300 fps=160 q=-1.0 Lsize=   2000KiB time=00:00:20.00 bitrate= 165.0kbits/s\n",
+        ]
+
+        class FakeSubproc:
+            def __init__(self):
+                self.pid = 99999
+                self.returncode = 0
+                self._lines = list(stderr_lines)
+                class FakeStderr:
+                    def __init__(self, lines):
+                        self.lines = lines
+                    def read1(self, sz):
+                        return self.lines.pop(0) if self.lines else b""
+                    def read(self, sz):
+                        return self.read1(sz)
+                self.stderr = FakeStderr(self._lines)
+            def poll(self):
+                return self.returncode if not self._lines else None
+            def wait(self, timeout=None):
+                return self.returncode
+            def kill(self):
+                pass
+
+        fake_proc = FakeSubproc()
+        with tempfile.TemporaryDirectory() as td:
+            dest = os.path.join(td, "target.mp4")
+            coord.destination_path = dest
+            tmp_clip = f"{dest}.clip.tmp.mp4"
+            with open(tmp_clip, "wb") as f:
+                f.write(b"\x00" * 2048000)
+
+            with patch("faqih_downloader.services.media_env_helpers.find_ffmpeg_bin", return_value="ffmpeg"), \
+                 patch("subprocess.Popen", return_value=fake_proc):
+                ok = download_clipped_stream_direct(coord)
+
+            self.assertTrue(ok)
+            self.assertTrue(getattr(si, "_already_trimmed", False))
+            self.assertTrue(os.path.isfile(coord.destination_path))
+            self.assertIn("[Clip]", os.path.basename(coord.destination_path))
+            self.assertGreater(len(progress_calls), 0)
+            last_dl, last_tot, _, _, _ = progress_calls[-1]
+            # 2000 KiB was parsed
+            self.assertEqual(last_dl, 2000 * 1024)
+            # All 8 chunks marked completed
+            self.assertEqual(len(coord._clip_chunks), 8)
+            for chk in coord._clip_chunks:
+                self.assertEqual(chk.status, "completed")
+                self.assertEqual(chk.downloaded_bytes, chk.total_bytes)
+
+    def test_stream_coordinator_pause_and_cancel_safeties(self):
+        """Verifies pause suspends active subproc and cancel does not fall through to full engine."""
+        from faqih_downloader.core.stream_coordinator import StreamDownloadCoordinator
+        from faqih_downloader.services.youtube_models import YouTubeStreamInfo
+
+        si = YouTubeStreamInfo(
+            video_id="pause_cancel_test",
+            title="Pause Cancel Video",
+            clean_filename="pc.mp4",
+            is_progressive=True,
+            video_url="https://example.com/v.mp4",
+            duration=200.0,
+            clip_start_sec=10.0,
+            clip_end_sec=40.0,
+            video_size=50 * 1024 * 1024,
+        )
+
+        coord = StreamDownloadCoordinator(si, os.path.join(tempfile.gettempdir(), "test_pc.mp4"))
+        coord._is_running = True
+        mock_proc = MagicMock()
+        mock_proc.pid = 54321
+        coord._active_subproc = mock_proc
+
+        with patch("faqih_downloader.services.media_clipper_engine._set_process_suspended") as mock_suspend:
+            coord.pause()
+            mock_suspend.assert_called_with(54321, True)
+
+            coord.resume()
+            mock_suspend.assert_called_with(54321, False)
+
+        # Test cancel in _run_coordinator does NOT fall through to start engines
+        with patch("faqih_downloader.core.stream_coordinator.download_clipped_stream_direct", return_value=False), \
+             patch("faqih_downloader.core.stream_coordinator.TurboDownloadEngine") as mock_engine_cls:
+            coord._cancel_event.set()
+            coord._run_coordinator()
+            mock_engine_cls.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
+

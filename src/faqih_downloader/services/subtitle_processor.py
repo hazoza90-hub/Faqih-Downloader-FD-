@@ -542,4 +542,3 @@ def handle_subtitles_post_download(
         if on_log:
             on_log(f"[SUBTITLES] Warning: Subtitle handling encountered an issue: {exc}")
         return output_path
-
