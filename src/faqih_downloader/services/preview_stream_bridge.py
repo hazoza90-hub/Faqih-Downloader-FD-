@@ -119,7 +119,10 @@ def register_preview_session(
     if not ch_list and isinstance(info_dict, dict):
         try:
             from .audio_and_chapters_engine import extract_video_chapters
-            ch_list = extract_video_chapters(info_dict, float(info_dict.get("duration") or 0.0))
+            tot_d = float(info_dict.get("duration") or 0.0)
+            if tot_d <= 0 and options:
+                tot_d = float(getattr(options[0], "duration", 0) or 0.0)
+            ch_list = extract_video_chapters(info_dict, tot_d, auto_split_if_empty=True)
         except Exception: ch_list = []
     session.chapters = list(ch_list or [])
     session.audio_boost = bool(kwargs.get("audio_boost", False))
@@ -335,14 +338,14 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
         d_dir, f_name = os.path.split(cur_dest)
         stem, ext = os.path.splitext(f_name)
         stem = re.sub(r'\s*\[Clip\]', '', stem, flags=re.IGNORECASE).strip()
-        _cl = lambda t: re.sub(r'^[\[\(\]\)\s\-–—:|•~.]+|[\[\(\]\)\s\-–—:|•~.]+$', '', re.sub(r'[<>:"/\\|?*\x00-\x1f]', '', str(t or ''))).strip()
+        _cl = lambda t: re.sub(r'^[\[\]\s\-–—:|•~.]+|[\[\]\s\-–—:|•~.]+$', '', re.sub(r'[<>:"/\\|?*\x00-\x1f]', '', str(t or ''))).strip()
         cands = {old_ch, _cl(old_ch), getattr(session, "last_clean_ch", "")}
         for ch in (getattr(session, "chapters", []) or []):
             ct = str(ch.get("title", "")).strip()
             if ct: cands.update((ct, _cl(ct)))
         for c in cands:
             if c: stem = re.sub(r'\s*\[' + re.escape(c) + r'\]', '', stem).strip()
-        stem = re.sub(r'\s*\[(?:الجزء\s*\d+\s*(?:\(تقسيم تلقائي\)?|\(تقسيم تلقائي)?|النصف الأول من الفيديو|النصف الثاني من الفيديو)\]', '', stem).strip()
+        stem = re.sub(r'\s*\[(?:الجزء\s*\d+[^\]]*|النصف الأول من الفيديو|النصف الثاني من الفيديو)\]', '', stem).strip()
         clean_cur_dest = os.path.join(d_dir, f"{stem}{ext}")
 
         opt = session.options[q_idx] if 0 <= q_idx < len(session.options) else (session.options[0] if session.options else None)

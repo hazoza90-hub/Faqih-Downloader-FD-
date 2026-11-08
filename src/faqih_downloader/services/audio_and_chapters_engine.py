@@ -50,7 +50,7 @@ def build_smart_auto_chapters(total_duration: float = 0.0) -> List[Dict[str, Any
     while curr < tot:
         end = min(curr + step, tot)
         parts.append({
-            "title": f"الجزء {idx} (تقسيم تلقائي)",
+            "title": f"الجزء {idx} - تقسيم تلقائي",
             "start_time": round(curr, 2),
             "end_time": round(end, 2),
             "is_auto": True,

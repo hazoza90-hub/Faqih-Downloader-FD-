@@ -58,7 +58,9 @@ def get_clipper_toolbar_html(
         return f"{h}:{m:02d}:{s:02d}" if h > 0 else f"{m:02d}:{s:02d}"
 
     if chapters and isinstance(chapters, list) and len(chapters) > 0:
-        opts = [f'<option value="">📑 الفصول ({len(chapters)} فصل متاح - اختر لتحميله)</option>']
+        is_auto = any(isinstance(ch, dict) and ch.get("is_auto") for ch in chapters)
+        header_title = f"📑 الفصول ({len(chapters)} جزء بالتقسيم الذكي - اختر لتحميله)" if is_auto else f"📑 الفصول ({len(chapters)} فصل متاح - اختر لتحميله)"
+        opts = [f'<option value="">{header_title}</option>']
         for idx, ch in enumerate(chapters):
             s_t = float(ch.get("start_time", 0.0) or 0.0)
             e_t = float(ch.get("end_time", 0.0) or 0.0)
@@ -138,10 +140,11 @@ function populateAutoChaptersIfNeeded() {
         while (curr < dur) {
             const end = Math.min(curr + step, dur), opt = document.createElement("option");
             opt.value = "auto_" + idx; opt.setAttribute("data-start", curr.toFixed(2)); opt.setAttribute("data-end", end.toFixed(2));
-            const title = "الجزء " + idx + " (تقسيم تلقائي)";
+            const title = "الجزء " + idx + " - تقسيم تلقائي";
             opt.setAttribute("data-title", title); opt.textContent = "[" + secToTimeStr(curr) + " - " + secToTimeStr(end) + "] " + title;
             sel.appendChild(opt); curr += step; idx++;
         }
+        if (sel.options[0]) sel.options[0].textContent = "📑 الفصول (" + (idx - 1) + " جزء بالتقسيم الذكي - اختر لتحميله)";
     } else {
         const mid = dur / 2, opt1 = document.createElement("option"), opt2 = document.createElement("option");
         opt1.value = "auto_1"; opt1.setAttribute("data-start", "0.00"); opt1.setAttribute("data-end", mid.toFixed(2));
@@ -150,6 +153,7 @@ function populateAutoChaptersIfNeeded() {
         opt2.value = "auto_2"; opt2.setAttribute("data-start", mid.toFixed(2)); opt2.setAttribute("data-end", dur.toFixed(2));
         opt2.setAttribute("data-title", "النصف الثاني من الفيديو"); opt2.textContent = "[" + secToTimeStr(mid) + " - " + secToTimeStr(dur) + "] النصف الثاني من الفيديو";
         sel.appendChild(opt2);
+        if (sel.options[0]) sel.options[0].textContent = "📑 الفصول (2 جزء بالتقسيم الذكي - اختر لتحميله)";
     }
 }
 

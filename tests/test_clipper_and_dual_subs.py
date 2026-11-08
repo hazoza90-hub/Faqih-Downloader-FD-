@@ -46,6 +46,9 @@ from faqih_downloader.ui.modals.preview_clipper_studio import (
 from faqih_downloader.services.preview_stream_bridge import (
     PreviewSession,
     PreviewBridgeRequestHandler,
+    register_preview_session,
+    get_preview_session,
+    unregister_preview_session,
 )
 
 
@@ -923,6 +926,9 @@ Non-mp4 clip cue
         self.assertIn("[1080p]", dest5)
         self.assertIn("الجزء 1", dest5)
         self.assertIn("[Clip]", dest5)
+        self.assertIn("[الجزء 1 (تقسيم تلقائي)]", dest5)
+        self.assertNotIn("[الجزء 1 (تقسيم تلقائي]", dest5)
+        self.assertEqual(dest5.count("("), dest5.count(")"))
 
         # 6. Switch to next auto-split chapter: "الجزء 2 (تقسيم تلقائي)"
         body6 = {
@@ -937,6 +943,9 @@ Non-mp4 clip cue
         self.assertNotIn("الجزء 1", dest6)
         self.assertIn("الجزء 2", dest6)
         self.assertIn("[Clip]", dest6)
+        self.assertIn("[الجزء 2 (تقسيم تلقائي)]", dest6)
+        self.assertNotIn("[الجزء 2 (تقسيم تلقائي]", dest6)
+        self.assertEqual(dest6.count("("), dest6.count(")"))
 
         # 7. Reset to full video from auto-split chapter
         body7 = {
@@ -951,6 +960,148 @@ Non-mp4 clip cue
         self.assertNotIn("الجزء 2", dest7)
         self.assertNotIn("[Clip]", dest7)
         self.assertTrue(dest7.endswith("Lecture Video [1080p].mp4"))
+
+    def test_register_preview_session_auto_split_chapters_and_clean_filename(self):
+        """
+        Verifies:
+        1. register_preview_session with 2700s video and empty chapters creates 5 auto-split segments.
+        2. Segments are named 'الجزء X - تقسيم تلقائي' without breaking parentheses.
+        3. get_clipper_toolbar_html displays '5 جزء بالتقسيم الذكي - اختر لتحميله'.
+        4. _handle_api_update_filename outputs filenames without broken parentheses.
+        5. Fallback duration from options[0].duration works if info_dict duration is 0.
+        """
+        class DummyHandler:
+            def __init__(self):
+                self.sent_data = None
+            def _send_json(self, data):
+                self.sent_data = data
+
+        info_dict = {
+            "title": "Long Lecture 2700s",
+            "duration": 2700.0,
+            "description": "Video lecture description without any timestamp chapters.",
+        }
+        opt = VideoFormatOption(
+            format_id="137+140",
+            resolution_label="1080p",
+            height=1080,
+            ext="mp4",
+            filesize_approx=50000000,
+        )
+
+        sid = register_preview_session(
+            url="https://youtube.com/watch?v=lec2700",
+            video_title="Long Lecture 2700s",
+            default_dest_path=r"C:\Downloads\Long Lecture 2700s.mp4",
+            info_dict=info_dict,
+            options=[opt],
+            chapters=[],
+        )
+        try:
+            session = get_preview_session(sid)
+            self.assertIsNotNone(session)
+            self.assertEqual(len(session.chapters), 5)
+            self.assertEqual(session.chapters[0]["title"], "الجزء 1 - تقسيم تلقائي")
+            self.assertEqual(session.chapters[1]["title"], "الجزء 2 - تقسيم تلقائي")
+            self.assertEqual(session.chapters[2]["title"], "الجزء 3 - تقسيم تلقائي")
+            self.assertEqual(session.chapters[3]["title"], "الجزء 4 - تقسيم تلقائي")
+            self.assertEqual(session.chapters[4]["title"], "الجزء 5 - تقسيم تلقائي")
+            for ch in session.chapters:
+                self.assertTrue(ch.get("is_auto"))
+                self.assertNotIn("(", ch["title"])
+                self.assertNotIn(")", ch["title"])
+
+            # Verify toolbar HTML header indicates smart split
+            html = get_clipper_toolbar_html(chapters=session.chapters)
+            self.assertIn("📑 الفصول (5 جزء بالتقسيم الذكي - اختر لتحميله)", html)
+
+            # Test _handle_api_update_filename with auto-split chapter
+            handler = DummyHandler()
+            body = {
+                "q_idx": 0,
+                "current_dest": session.default_dest_path,
+                "chapter_title": session.chapters[0]["title"],
+                "clip_start": session.chapters[0]["start_time"],
+                "clip_end": session.chapters[0]["end_time"],
+            }
+            PreviewBridgeRequestHandler._handle_api_update_filename(handler, session, body)
+            dest1 = handler.sent_data["dest_path"]
+            self.assertIn("[1080p]", dest1)
+            self.assertIn("[الجزء 1 - تقسيم تلقائي]", dest1)
+            self.assertIn("[Clip]", dest1)
+            self.assertNotIn("(", dest1)
+            self.assertNotIn(")", dest1)
+            self.assertEqual(dest1.count("["), dest1.count("]"))
+
+            # Switch to second auto chapter
+            body2 = {
+                "q_idx": 0,
+                "current_dest": dest1,
+                "chapter_title": session.chapters[1]["title"],
+                "clip_start": session.chapters[1]["start_time"],
+                "clip_end": session.chapters[1]["end_time"],
+            }
+            PreviewBridgeRequestHandler._handle_api_update_filename(handler, session, body2)
+            dest2 = handler.sent_data["dest_path"]
+            self.assertNotIn("الجزء 1", dest2)
+            self.assertIn("[الجزء 2 - تقسيم تلقائي]", dest2)
+            self.assertEqual(dest2.count("["), dest2.count("]"))
+
+            # Test that a chapter title containing parenthesis preserves closing parenthesis
+            body_paren = {
+                "q_idx": 0,
+                "current_dest": dest2,
+                "chapter_title": "الجزء 3 (تقسيم تلقائي)",
+                "clip_start": session.chapters[2]["start_time"],
+                "clip_end": session.chapters[2]["end_time"],
+            }
+            PreviewBridgeRequestHandler._handle_api_update_filename(handler, session, body_paren)
+            dest_paren = handler.sent_data["dest_path"]
+            self.assertNotIn("الجزء 2", dest_paren)
+            self.assertIn("[الجزء 3 (تقسيم تلقائي)]", dest_paren)
+            self.assertNotIn("[الجزء 3 (تقسيم تلقائي]", dest_paren)
+            self.assertEqual(dest_paren.count("("), dest_paren.count(")"))
+            self.assertEqual(dest_paren.count("["), dest_paren.count("]"))
+
+            # Reset back to full video
+            body_reset = {
+                "q_idx": 0,
+                "current_dest": dest_paren,
+                "chapter_title": "",
+                "clip_start": 0.0,
+                "clip_end": 0.0,
+            }
+            PreviewBridgeRequestHandler._handle_api_update_filename(handler, session, body_reset)
+            dest_reset = handler.sent_data["dest_path"]
+            self.assertNotIn("الجزء 3", dest_reset)
+            self.assertNotIn("[Clip]", dest_reset)
+            self.assertTrue(dest_reset.endswith("Long Lecture 2700s [1080p].mp4"))
+        finally:
+            unregister_preview_session(sid)
+
+        # Verify fallback duration from options[0].duration when info_dict duration is 0
+        opt_fb = VideoFormatOption(
+            format_id="22",
+            resolution_label="720p",
+            height=720,
+            ext="mp4",
+            filesize_approx=25000000,
+        )
+        setattr(opt_fb, "duration", 2700.0)
+        sid_fb = register_preview_session(
+            url="https://youtube.com/watch?v=fb2700",
+            video_title="Fallback Video",
+            default_dest_path=r"C:\Downloads\Fallback Video.mp4",
+            info_dict={"title": "Fallback Video", "description": ""},
+            options=[opt_fb],
+        )
+        try:
+            session_fb = get_preview_session(sid_fb)
+            self.assertIsNotNone(session_fb)
+            self.assertEqual(len(session_fb.chapters), 5)
+            self.assertEqual(session_fb.chapters[0]["title"], "الجزء 1 - تقسيم تلقائي")
+        finally:
+            unregister_preview_session(sid_fb)
 
 
 if __name__ == "__main__":
