@@ -1150,6 +1150,158 @@ Non-mp4 clip cue
         finally:
             unregister_preview_session(sid_none_info)
 
+    def test_kanban_active_card_telemetry_and_layout(self):
+        """Verifies active stream card layout (speed packed before progress canvas, row3 labels) and live telemetry updates."""
+        try:
+            import tkinter as tk
+        except Exception:
+            self.skipTest("Tkinter not available")
+
+        from unittest.mock import MagicMock
+        from faqih_downloader.ui.panels.kanban_cards import build_active_card_shell
+        from faqih_downloader.ui.panels.kanban_active_mixin import KanbanActiveColumnMixin
+        from faqih_downloader.utils.window_effects import RoundedGlassCard
+
+        try:
+            root = tk.Tk()
+            root.withdraw()
+        except Exception as e:
+            self.skipTest(f"Tkinter display not available: {e}")
+
+        try:
+            # 1. Test build_active_card_shell layout and widgets
+            card_frame = tk.Frame(root)
+            card_frame.pack()
+            dummy_app = MagicMock()
+            widgets = build_active_card_shell(card_frame, dummy_app)
+
+            # Check that lbl_size and lbl_eta are created and present in returned dict
+            self.assertIn("lbl_size", widgets)
+            self.assertIn("lbl_eta", widgets)
+            lbl_size = widgets["lbl_size"]
+            lbl_eta = widgets["lbl_eta"]
+            lbl_spd = widgets["lbl_speed"]
+            cv_prog = widgets["canvas_prog"]
+            lbl_pct = widgets["lbl_pct"]
+
+            self.assertIsInstance(lbl_size, tk.Label)
+            self.assertIsInstance(lbl_eta, tk.Label)
+            self.assertIsInstance(lbl_spd, tk.Label)
+            self.assertIsInstance(cv_prog, tk.Canvas)
+
+            # Check packing order inside row2: lbl_spd must be packed with side=RIGHT BEFORE cv_prog
+            row2 = lbl_spd.master
+            slaves = row2.pack_slaves()
+            self.assertIn(lbl_pct, slaves)
+            self.assertIn(lbl_spd, slaves)
+            self.assertIn(cv_prog, slaves)
+            self.assertLess(
+                slaves.index(lbl_spd),
+                slaves.index(cv_prog),
+                "lbl_spd must be packed before cv_prog so canvas expansion does not push speed label off-screen!",
+            )
+            self.assertEqual(lbl_spd.pack_info().get("side"), "right")
+            self.assertEqual(cv_prog.pack_info().get("side"), "left")
+
+            # 2. Test update_kanban_active_stream telemetry updates
+            class DummyActiveGUI(KanbanActiveColumnMixin):
+                def __init__(self, r):
+                    self.root = r
+                    self._active_stream_live = False
+                    self.active_stream_body = tk.Frame(r)
+                    self.active_stream_body.pack()
+                    self.lbl_col2_title = tk.Label(r)
+                    self.lbl_col2_total_speed = tk.Label(r)
+                    self.card_active_1 = RoundedGlassCard(
+                        self.active_stream_body,
+                        height=148,
+                    )
+                    self._build_active_card_shell(self.card_active_1.inner)
+
+                def _show_active_card_menu(self, btn):
+                    pass
+
+                def _draw_neon_bar(self, cv, ratio):
+                    pass
+
+            gui = DummyActiveGUI(root)
+
+            # Test updating with downloaded & total in MB (e.g. 9.0 MB / 69.4 MB)
+            d_bytes = int(9.0 * 1024 * 1024)
+            t_bytes = int(69.4 * 1024 * 1024)
+            gui.update_kanban_active_stream(
+                "My_Test_Video.mp4",
+                13.0,
+                "3.5 MB/s",
+                [],
+                4,
+                downloaded=d_bytes,
+                total=t_bytes,
+                eta="01:23",
+            )
+            self.assertTrue(gui._active_stream_live)
+            self.assertIn("9.0 MB / 69.4 MB", gui.lbl_a1_size.cget("text"))
+            self.assertIn("01:23", gui.lbl_a1_eta.cget("text"))
+            self.assertIn("4", gui.lbl_a1_eta.cget("text"))
+
+            # Test processing state: Burning Subtitles...
+            gui.update_kanban_active_stream(
+                "My_Test_Video.mp4",
+                95.0,
+                "1.0 MB/s",
+                [],
+                2,
+                downloaded=d_bytes,
+                total=t_bytes,
+                eta="Burning Subtitles...",
+            )
+            self.assertEqual(gui.lbl_a1_eta.cget("text"), "🔥 جاري حرق الترجمة...")
+
+            # Test processing state: Merging...
+            gui.update_kanban_active_stream(
+                "My_Test_Video.mp4",
+                99.0,
+                "0 B/s",
+                [],
+                1,
+                downloaded=t_bytes,
+                total=t_bytes,
+                eta="Merging...",
+            )
+            self.assertEqual(gui.lbl_a1_eta.cget("text"), "⚙️ جاري دمج الصوت والفيديو...")
+
+            # Test processing state: Transcoding...
+            gui.update_kanban_active_stream(
+                "My_Test_Audio.mp3",
+                99.0,
+                "0 B/s",
+                [],
+                1,
+                downloaded=t_bytes,
+                total=t_bytes,
+                eta="Transcoding...",
+            )
+            self.assertEqual(gui.lbl_a1_eta.cget("text"), "🎵 جاري تحويل الصوت...")
+
+            # Test backward compatibility: call with 5 parameters only (no downloaded, total, eta)
+            gui.update_kanban_active_stream("Legacy_Call.mp4", 45.0, "2.0 MB/s", [], 6)
+            self.assertTrue(gui._active_stream_live)
+            self.assertIn("6 مسارات نشطة", gui.lbl_a1_eta.cget("text"))
+
+            # Test engine fallback when downloaded/total are 0 but engine.total_size is set
+            mock_eng = MagicMock()
+            mock_eng.total_size = int(50.0 * 1024 * 1024)
+            mock_eng.is_running = True
+            gui.engine = mock_eng
+            gui.update_kanban_active_stream("Engine_Probe.mp4", 20.0, "5.0 MB/s", [], 4)
+            # total = 50.0 MB, downloaded = 20% of 50 MB = 10.0 MB
+            self.assertIn("10.0 MB / 50.0 MB", gui.lbl_a1_size.cget("text"))
+        finally:
+            try:
+                root.destroy()
+            except Exception:
+                pass
+
 
 if __name__ == "__main__":
     unittest.main()

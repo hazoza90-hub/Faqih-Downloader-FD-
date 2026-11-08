@@ -32,7 +32,11 @@ class DownloadCallbacksMixin:
             if not args:
                 return
             d, t, sp, et, ac = args
-            pct = (d / t * 100.0) if t > 0 else 0.0
+            if t <= 0 and getattr(self, "engine", None):
+                t = int(getattr(self.engine, "total_size", 0) or 0)
+                pct = (d / t * 100.0) if t > 0 else 0.0
+            else:
+                pct = (d / t * 100.0) if t > 0 else 0.0
             self._draw_main_progress(pct)
 
             speed_str = f"{sp / (1024*1024):.2f} MB/s" if sp >= 1024*1024 else (f"{sp / 1024:.1f} KB/s" if sp >= 1024 else f"{int(sp)} B/s")
@@ -56,7 +60,10 @@ class DownloadCallbacksMixin:
                 self.card_threads.configure(text=f"{ac} / {total_chunks} {tr('lbl_threads_unit', 'Threads')}")
             if hasattr(self, "update_kanban_active_stream"):
                 fn = getattr(self.engine, "dest_path", None) or getattr(self.engine, "destination_path", None) or (self.entry_url.get() if hasattr(self, "entry_url") else "")
-                self.update_kanban_active_stream(fn, pct, speed_str, snap, ac)
+                try:
+                    self.update_kanban_active_stream(fn, pct, speed_str, snap, ac, downloaded=d, total=t, eta=et)
+                except TypeError:
+                    self.update_kanban_active_stream(fn, pct, speed_str, snap, ac)
 
         try:
             if self.root.winfo_exists():

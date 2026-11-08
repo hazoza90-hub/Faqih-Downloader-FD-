@@ -95,7 +95,7 @@ class KanbanActiveColumnMixin:
             bg="#0f1520",
             card_bg="#151a24",
             border_color="#243242",
-            height=125,
+            height=148,
             inner_padx=12,
             inner_pady=10,
         )
@@ -108,6 +108,8 @@ class KanbanActiveColumnMixin:
         self.lbl_a1_pct = w["lbl_pct"]
         self.canvas_a1_prog = w["canvas_prog"]
         self.lbl_a1_speed = w["lbl_speed"]
+        self.lbl_a1_size = w.get("lbl_size")
+        self.lbl_a1_eta = w.get("lbl_eta")
         self.matrix_a1 = w["matrix"]
 
     def reset_kanban_active_stream(self):
@@ -148,7 +150,10 @@ class KanbanActiveColumnMixin:
         pct: float,
         speed_str: str,
         chunks: List[Any],
-        active_chunks: int
+        active_chunks: int,
+        downloaded: int = 0,
+        total: int = 0,
+        eta: str = "",
     ):
         """Updates the active stream card in Column 2 in real-time."""
         eng = getattr(self, "engine", None)
@@ -160,6 +165,21 @@ class KanbanActiveColumnMixin:
         if not is_running and pct <= 0 and (not speed_str or speed_str in ("0 B/s", "0.0 MB/s")):
             self.reset_kanban_active_stream()
             return
+
+        def _fmt_sz(b: float) -> str:
+            if b >= 1024**3:
+                return f"{b / (1024**3):.2f} GB"
+            if b >= 1024**2:
+                return f"{b / (1024**2):.1f} MB"
+            if b >= 1024:
+                return f"{b / 1024:.1f} KB"
+            return f"{int(b)} B"
+
+        if total <= 0 and eng:
+            total = int(getattr(eng, "total_size", 0) or 0)
+
+        if downloaded <= 0 and total > 0 and pct > 0:
+            downloaded = int(total * (pct / 100.0))
 
         if not self._active_stream_live:
             self._active_stream_live = True
@@ -180,6 +200,30 @@ class KanbanActiveColumnMixin:
 
         if hasattr(self, "lbl_a1_speed") and self.lbl_a1_speed.winfo_exists():
             self.lbl_a1_speed.configure(text=speed_str)
+
+        if hasattr(self, "lbl_a1_size") and self.lbl_a1_size and self.lbl_a1_size.winfo_exists():
+            if total > 0:
+                sz_txt = f"📦 {_fmt_sz(downloaded)} / {_fmt_sz(total)}"
+            elif downloaded > 0:
+                sz_txt = f"📦 {_fmt_sz(downloaded)}"
+            else:
+                sz_txt = "📦 جاري الاتصال..."
+            self.lbl_a1_size.configure(text=sz_txt)
+
+        if hasattr(self, "lbl_a1_eta") and self.lbl_a1_eta and self.lbl_a1_eta.winfo_exists():
+            if eta == "Merging..." or "Merging" in eta:
+                eta_txt = "⚙️ جاري دمج الصوت والفيديو..."
+            elif eta == "Burning Subtitles..." or "Burning" in eta:
+                eta_txt = "🔥 جاري حرق الترجمة..."
+            elif eta == "Transcoding..." or "Transcoding" in eta:
+                eta_txt = "🎵 جاري تحويل الصوت..."
+            elif eta and eta not in ("--:--", ""):
+                eta_txt = f"⏱ {eta} • ⚡ {active_chunks}" if active_chunks > 0 else f"⏱ {eta}"
+            elif active_chunks > 0:
+                eta_txt = f"⚡ {active_chunks} مسارات نشطة"
+            else:
+                eta_txt = ""
+            self.lbl_a1_eta.configure(text=eta_txt)
 
         if hasattr(self, "lbl_col2_total_speed") and self.lbl_col2_total_speed.winfo_exists():
             self.lbl_col2_total_speed.configure(text=speed_str)

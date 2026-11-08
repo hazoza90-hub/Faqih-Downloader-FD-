@@ -311,7 +311,7 @@ def build_vault_card(
 def build_active_card_shell(card: Any, parent_app: Any) -> Dict[str, Any]:
     """Constructs the active stream card inner widgets and returns widget dict."""
     row1 = tk.Frame(card, bg="#151a24")
-    row1.pack(fill=tk.X, pady=(0, 6))
+    row1.pack(fill=tk.X, pady=(0, 4))
 
     lbl_fn = tk.Label(row1, text="", font=("Segoe UI", 9, "bold"), bg="#151a24", fg="#f8fafc")
     lbl_fn.pack(side=tk.LEFT)
@@ -321,18 +321,27 @@ def build_active_card_shell(card: Any, parent_app: Any) -> Dict[str, Any]:
     btn_menu.bind("<Button-1>", lambda e: parent_app._show_active_card_menu(btn_menu))
 
     row2 = tk.Frame(card, bg="#151a24")
-    row2.pack(fill=tk.X, pady=(0, 8))
+    row2.pack(fill=tk.X, pady=(0, 6))
 
     lbl_pct = tk.Label(row2, text="0%", font=("Segoe UI", 9, "bold"), bg="#151a24", fg="#f8fafc", width=5, anchor="w")
     lbl_pct.pack(side=tk.LEFT)
 
-    cv_prog = tk.Canvas(row2, height=6, bg="#1c2533", bd=0, highlightthickness=0)
-    cv_prog.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=8)
-
-    lbl_spd = tk.Label(row2, text="0.0 MB/s", font=("Segoe UI", 9, "bold"), bg="#151a24", fg="#cbd5e1", width=10, anchor="e")
+    lbl_spd = tk.Label(row2, text="0.0 MB/s", font=("Segoe UI", 9, "bold"), bg="#151a24", fg="#38bdf8", anchor="e")
     lbl_spd.pack(side=tk.RIGHT)
 
-    matrix = LedEqualizerMatrix(card, height=60, bg="#151a24")
+    cv_prog = tk.Canvas(row2, width=40, height=6, bg="#1c2533", bd=0, highlightthickness=0)
+    cv_prog.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=8)
+
+    row3 = tk.Frame(card, bg="#151a24")
+    row3.pack(fill=tk.X, pady=(0, 6))
+
+    lbl_size = tk.Label(row3, text="0.0 MB / 0.0 MB", font=("Segoe UI", 8, "bold"), bg="#151a24", fg="#cbd5e1", anchor="w")
+    lbl_size.pack(side=tk.LEFT)
+
+    lbl_eta = tk.Label(row3, text="", font=("Segoe UI", 8), bg="#151a24", fg="#94a3b8", anchor="e")
+    lbl_eta.pack(side=tk.RIGHT)
+
+    matrix = LedEqualizerMatrix(card, height=52, bg="#151a24")
     matrix.pack(fill=tk.X, pady=(2, 0))
 
     return {
@@ -341,6 +350,8 @@ def build_active_card_shell(card: Any, parent_app: Any) -> Dict[str, Any]:
         "lbl_pct": lbl_pct,
         "canvas_prog": cv_prog,
         "lbl_speed": lbl_spd,
+        "lbl_size": lbl_size,
+        "lbl_eta": lbl_eta,
         "matrix": matrix,
     }
 
