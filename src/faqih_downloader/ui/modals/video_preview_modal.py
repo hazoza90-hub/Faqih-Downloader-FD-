@@ -158,6 +158,17 @@ def open_video_preview(
     eff_px = float(getattr(cur_opt, "subtitle_pos_x", subtitle_pos_x or 50.0))
     eff_py = float(getattr(cur_opt, "subtitle_pos_y", subtitle_pos_y or 86.0))
 
+    chapters = []
+    try:
+        from ...services.audio_and_chapters_engine import extract_video_chapters
+        tot_d = float((info_dict.get("duration") if isinstance(info_dict, dict) else 0) or getattr(stream_info, "duration", 0) or 0.0)
+        chapters = extract_video_chapters(info_dict or {}, total_duration=tot_d)
+    except Exception:
+        chapters = []
+
+    eff_boost = bool(getattr(cur_opt, "audio_boost_enabled", False))
+    eff_ch_title = str(getattr(cur_opt, "selected_chapter_title", "") or "")
+
     stream_url = _find_progressive_mp4_url(stream_info, info_dict, source_url=clean_url)
 
     yt_match = re.search(r'(?:v=|\/|youtu\.be\/|embed\/)([0-9A-Za-z_-]{11})', clean_url)
@@ -217,6 +228,9 @@ def open_video_preview(
                 subtitle_bg_mode=eff_bg,
                 subtitle_pos_x=eff_px,
                 subtitle_pos_y=eff_py,
+                chapters=chapters,
+                audio_boost=eff_boost,
+                chapter_title=eff_ch_title,
             )
             target_launch_url = f"http://127.0.0.1:{port}/player?sid={sid}"
             if not stream_url:
@@ -285,6 +299,9 @@ def open_video_preview(
         clip_start=getattr(options[selected_q_idx], "clip_start_sec", 0.0) if (options and 0 <= selected_q_idx < len(options)) else 0.0,
         clip_end=getattr(options[selected_q_idx], "clip_end_sec", 0.0) if (options and 0 <= selected_q_idx < len(options)) else 0.0,
         dual_sub=getattr(options[selected_q_idx], "dual_subtitle_enabled", False) if (options and 0 <= selected_q_idx < len(options)) else False,
+        audio_boost=eff_boost,
+        chapters=chapters,
+        chapter_title=eff_ch_title,
     )
 
     temp_html = os.path.join(tempfile.gettempdir(), f"_sd_preview_{os.getpid()}_{int(time.time()*1000)}.html")

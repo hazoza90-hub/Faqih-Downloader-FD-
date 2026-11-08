@@ -306,6 +306,8 @@ class VideoFormatOption:
     subtitle_custom_edits: Dict[str, str] = field(default_factory=dict)
     dual_subtitle_enabled: bool = False
     secondary_subtitle_track: Optional[Dict[str, Any]] = None
+    audio_boost_enabled: bool = False
+    selected_chapter_title: str = ""
 
 
 def format_filesize(num_bytes: int) -> str:
@@ -362,6 +364,8 @@ class YouTubeStreamInfo:
     subtitle_custom_edits: Dict[str, str] = field(default_factory=dict)
     dual_subtitle_enabled: bool = False
     secondary_subtitle_track: Optional[Dict[str, Any]] = None
+    audio_boost_enabled: bool = False
+    selected_chapter_title: str = ""
 
     def __post_init__(self):
         if self.subtitle_track and isinstance(self.subtitle_track, dict):
@@ -379,6 +383,8 @@ class YouTubeStreamInfo:
                 if "custom_edits" in sc and not self.subtitle_custom_edits: self.subtitle_custom_edits = dict(sc["custom_edits"])
                 if "dual_sub" in sc: self.dual_subtitle_enabled = bool(sc["dual_sub"])
                 if "secondary_track" in sc: self.secondary_subtitle_track = sc["secondary_track"]
+                if "audio_boost" in sc and not self.audio_boost_enabled: self.audio_boost_enabled = bool(sc["audio_boost"])
+                if "chapter_title" in sc and not self.selected_chapter_title: self.selected_chapter_title = str(sc["chapter_title"])
 
 
 # Clean alias

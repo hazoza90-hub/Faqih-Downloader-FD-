@@ -256,8 +256,6 @@ def embed_subtitle_into_mp4(
             try: os.remove(temp_srt)
             except Exception: pass
 
-
-
 def burn_subtitle_into_video(
     video_path: str, srt_path: str, ffmpeg_path: str,
     on_log: Optional[Callable[[str], None]] = None,
@@ -368,6 +366,12 @@ def burn_subtitle_into_video(
         clip_s = float(style_config.get("clip_start", 0.0) or 0.0) if style_config else 0.0
         clip_e = float(style_config.get("clip_end", 0.0) or 0.0) if style_config else 0.0
         clip_args = ["-ss", f"{clip_s:.3f}", "-to", f"{clip_e:.3f}"] if clip_e > clip_s >= 0 else []
+        af_args: List[str] = []
+        if style_config and style_config.get("audio_boost"):
+            try:
+                from .audio_and_chapters_engine import get_studio_audio_boost_filter
+                af_args = ["-af", get_studio_audio_boost_filter()]
+            except Exception: pass
         for idx, vf in enumerate(candidate_vfs, 1):
             if cancel_event and cancel_event.is_set():
                 break
@@ -375,7 +379,7 @@ def burn_subtitle_into_video(
                 ffmpeg_path, "-y", *clip_args, "-i", abs_video, "-vf", vf,
                 "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
                 "-pix_fmt", "yuv420p", "-movflags", "+faststart",
-                "-c:a", "aac", "-b:a", "192k", "-f", "mp4", temp_burn_mp4
+                *af_args, "-c:a", "aac", "-b:a", "192k", "-f", "mp4", temp_burn_mp4
             ]
             rc, err = _run_burn_cmd(cmd)
             if rc == 0:

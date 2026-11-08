@@ -190,6 +190,10 @@ FILE_METADATA: Dict[str, Dict[str, str]] = {
         "responsibility": "Media clipper engine, subtitle shift/merge, custom cue edits, and FFmpeg trimming.",
         "when_to_edit": "Edit when modifying video/audio clipping, cue editing, dual subtitles, or post-download trimming."
     },
+    "src/faqih_downloader/services/audio_and_chapters_engine.py": {
+        "responsibility": "Smart chapters extractor from metadata/description and studio audio booster/voice normalizer.",
+        "when_to_edit": "Edit when modifying chapter extraction regexes or studio audio boost filters/FFmpeg processing."
+    },
     "src/faqih_downloader/services/ytdlp_updater.py": {
         "responsibility": "YtDlpAutoUpdater managing dynamic in-process yt-dlp package updates in %APPDATA%.",
         "when_to_edit": "Edit when changing yt-dlp PyPI/GitHub download logic or sys.meta_path finder hooks."

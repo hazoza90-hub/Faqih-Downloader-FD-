@@ -63,7 +63,9 @@ class PreviewSession:
     sub_custom_edits: Dict[str, str] = field(default_factory=dict)
     dual_sub: bool = False
     sec_s_idx: int = -1
-
+    audio_boost: bool = False
+    chapter_title: str = ""
+    chapters: List[Dict[str, Any]] = field(default_factory=list)
 
 def start_preview_bridge(host: str = "127.0.0.1") -> int:
     """Starts the singleton background preview bridge HTTP server on an ephemeral loopback port."""
@@ -79,13 +81,11 @@ def start_preview_bridge(host: str = "127.0.0.1") -> int:
         t.start()
         return _BRIDGE_PORT
 
-
 def get_preview_bridge_port() -> int:
     """Returns the active preview bridge port, starting the server if necessary."""
     if _BRIDGE_PORT > 0:
         return _BRIDGE_PORT
     return start_preview_bridge()
-
 
 def register_preview_session(
     url: str,
@@ -112,6 +112,7 @@ def register_preview_session(
     subtitle_bg_mode: str = "box",
     subtitle_pos_x: float = 50.0,
     subtitle_pos_y: float = 86.0,
+    **kwargs
 ) -> str:
     """Registers an active media preview session and returns its unique random session ID token."""
     start_preview_bridge()
@@ -128,23 +129,29 @@ def register_preview_session(
         subtitle_bg_mode=str(subtitle_bg_mode or "box"), subtitle_pos_x=float(subtitle_pos_x or 50.0),
         subtitle_pos_y=float(subtitle_pos_y or 86.0),
     )
+    ch_list = kwargs.get("chapters")
+    if not ch_list and isinstance(info_dict, dict):
+        try:
+            from .audio_and_chapters_engine import extract_video_chapters
+            ch_list = extract_video_chapters(info_dict, float(info_dict.get("duration") or 0.0))
+        except Exception: ch_list = []
+    session.chapters = list(ch_list or [])
+    session.audio_boost = bool(kwargs.get("audio_boost", False))
+    session.chapter_title = str(kwargs.get("chapter_title", "") or "")
     with _SESSIONS_LOCK:
         _SESSIONS[session_id] = session
         _prune_preview_sessions(_SESSIONS, 15)
     return session_id
-
 
 def get_preview_session(sid: str) -> Optional[PreviewSession]:
     """Retrieves an active preview session by session ID."""
     with _SESSIONS_LOCK:
         return _SESSIONS.get(sid)
 
-
 def unregister_preview_session(sid: str) -> None:
     """Removes a finished preview session."""
     with _SESSIONS_LOCK:
         _SESSIONS.pop(sid, None)
-
 
 def _apply_session_sub_styles(opt: Any, session: PreviewSession) -> None:
     if not opt: return
@@ -307,6 +314,8 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
             subtitle_text_color=session.subtitle_text_color, subtitle_bg_mode=session.subtitle_bg_mode,
             subtitle_pos_x=session.subtitle_pos_x, subtitle_pos_y=session.subtitle_pos_y,
             clip_start=session.clip_start, clip_end=session.clip_end, dual_sub=session.dual_sub,
+            audio_boost=getattr(session, "audio_boost", False), chapters=getattr(session, "chapters", None),
+            chapter_title=getattr(session, "chapter_title", ""),
         )
         data = html_code.encode("utf-8")
         self.send_response(200)

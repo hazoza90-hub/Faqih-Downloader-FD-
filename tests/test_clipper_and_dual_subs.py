@@ -33,6 +33,11 @@ from faqih_downloader.services.media_clipper_engine import (
 )
 from faqih_downloader.services.subtitle_style_engine import generate_styled_ass_file, normalize_and_dedupe_cues
 from faqih_downloader.services.youtube_models import VideoFormatOption, YouTubeStreamInfo
+from faqih_downloader.services.audio_and_chapters_engine import (
+    extract_video_chapters,
+    get_studio_audio_boost_filter,
+    apply_audio_boost_to_file,
+)
 
 
 class TestClipperAndDualSubs(unittest.TestCase):
@@ -478,6 +483,18 @@ Non-mp4 clip cue
                 "audio_tracks": [],
                 "subtitle_tracks": [],
             },
+            {
+                "url": "https://www.youtube.com/watch?v=chapters_test",
+                "video_title": "Video with Chapters & Studio Boost",
+                "stream_url": "http://127.0.0.1:9655/stream",
+                "session_id": "sess_chapters",
+                "chapters": [
+                    {"title": "00:00 Intro & Welcome", "start_time": 0.0, "end_time": 45.0},
+                    {"title": "00:45 Studio Sound 'Filter'", "start_time": 45.0, "end_time": 120.0},
+                ],
+                "audio_boost": True,
+                "chapter_title": "Studio Sound 'Filter'",
+            },
         ]
 
         node_bin = shutil.which("node")
@@ -510,6 +527,112 @@ Non-mp4 clip cue
                             os.remove(tmp_js)
                         except OSError:
                             pass
+
+    def test_extract_video_chapters_official(self):
+        info_dict = {
+            "chapters": [
+                {"title": "Introduction", "start_time": 0.0, "end_time": 30.0},
+                {"title": "Main Content", "start_time": 30.0, "end_time": 0.0},
+                {"title": "Outro", "start_time": 90.0, "end_time": 0.0},
+            ]
+        }
+        chapters = extract_video_chapters(info_dict, total_duration=120.0)
+        self.assertEqual(len(chapters), 3)
+        self.assertEqual(chapters[0]["title"], "Introduction")
+        self.assertEqual(chapters[0]["start_time"], 0.0)
+        self.assertEqual(chapters[0]["end_time"], 30.0)
+        self.assertEqual(chapters[1]["end_time"], 90.0)
+        self.assertEqual(chapters[2]["end_time"], 120.0)
+
+    def test_extract_video_chapters_from_description(self):
+        desc = """
+        شاهد هذا الفيديو المفيد!
+        الفصول:
+        00:00 المقدمة
+        03:45 - الفصل الأول: الأساسيات
+        [07:15] الفصل الثاني: التطبيق العملي
+        (12:30) خاتمة وتوصيات
+        """
+        info_dict = {"description": desc}
+        chapters = extract_video_chapters(info_dict, total_duration=900.0)
+        self.assertEqual(len(chapters), 4)
+        self.assertEqual(chapters[0]["start_time"], 0.0)
+        self.assertIn("المقدمة", chapters[0]["title"])
+        self.assertEqual(chapters[1]["start_time"], 225.0)
+        self.assertIn("الأساسيات", chapters[1]["title"])
+        self.assertEqual(chapters[2]["start_time"], 435.0)
+        self.assertEqual(chapters[3]["start_time"], 750.0)
+        self.assertEqual(chapters[3]["end_time"], 900.0)
+
+    def test_get_studio_audio_boost_filter(self):
+        filt = get_studio_audio_boost_filter()
+        self.assertIn("highpass=f=75", filt)
+        self.assertIn("acompressor=threshold=-18dB", filt)
+        self.assertIn("volume=1.45", filt)
+
+    def test_apply_audio_boost_to_file_mock(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as td:
+            video_f = os.path.join(td, "test.mp4")
+            with open(video_f, "wb") as f:
+                f.write(b"fake_mp4_bytes")
+
+            def fake_ffmpeg(cmd, cancel_event=None):
+                out_path = cmd[-1]
+                with open(out_path, "wb") as out_f:
+                    out_f.write(b"boosted_mp4_bytes")
+                return subprocess.CompletedProcess(cmd, returncode=0, stdout="", stderr="")
+
+            with patch("faqih_downloader.services.subtitle_processor.run_cancellable_ffmpeg", side_effect=fake_ffmpeg):
+                ok = apply_audio_boost_to_file(video_f, ffmpeg_bin="ffmpeg")
+                self.assertTrue(ok)
+                with open(video_f, "rb") as rf:
+                    self.assertEqual(rf.read(), b"boosted_mp4_bytes")
+
+    def test_sync_clipper_state_audio_boost_and_chapter(self):
+        from unittest.mock import MagicMock
+        session = MagicMock()
+        session.clip_start = 0.0
+        session.clip_end = 0.0
+        session.subtitle_tracks = []
+        opt = VideoFormatOption(
+            format_id="18", resolution_label="360p", height=360, ext="mp4", filesize_approx=1000
+        )
+        body = {
+            "clip_start": 10.0,
+            "clip_end": 50.0,
+            "audio_boost": True,
+            "chapter_title": "First Chapter",
+        }
+        sync_clipper_state_from_body(session, body, opt=opt)
+        self.assertTrue(session.audio_boost)
+        self.assertEqual(session.chapter_title, "First Chapter")
+        self.assertTrue(opt.audio_boost_enabled)
+        self.assertEqual(opt.selected_chapter_title, "First Chapter")
+
+    def test_process_post_download_with_audio_boost_and_chapter(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as td:
+            target = os.path.join(td, "MyVideo.mp4")
+            with open(target, "wb") as f:
+                f.write(b"video_data")
+            info = YouTubeStreamInfo(
+                video_id="vid123",
+                title="MyVideo",
+                clean_filename="MyVideo.mp4",
+                is_progressive=True,
+                video_url="http://test",
+                clip_start_sec=10.0,
+                clip_end_sec=30.0,
+                audio_boost_enabled=True,
+                selected_chapter_title="Intro",
+            )
+            with patch("faqih_downloader.services.media_clipper_engine.trim_media_file", return_value=True), \
+                 patch("faqih_downloader.services.media_clipper_engine.probe_media_duration", return_value=100.0), \
+                 patch("faqih_downloader.services.media_env_helpers.find_ffmpeg_bin", return_value="ffmpeg"):
+                res_path = process_post_download_clip_and_subtitles(info, target)
+                self.assertIn("[Intro]", res_path)
+                self.assertIn("[Clip]", res_path)
 
 
 if __name__ == "__main__":

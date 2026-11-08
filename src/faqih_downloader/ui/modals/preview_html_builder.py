@@ -281,7 +281,9 @@ function getSyncPayload(extra) {
         clip_end: (typeof clipEndSec !== "undefined" ? clipEndSec : 0.0),
         sub_custom_edits: (typeof subCustomEdits !== "undefined" ? subCustomEdits : {}),
         dual_sub: (typeof dualSubEnabled !== "undefined" ? dualSubEnabled : false),
-        sec_s_idx: (typeof secSubIndex !== "undefined" ? secSubIndex : -1)
+        sec_s_idx: (typeof secSubIndex !== "undefined" ? secSubIndex : -1),
+        audio_boost: (typeof audioBoostEnabled !== "undefined" ? audioBoostEnabled : false),
+        chapter_title: (typeof selectedChapterTitle !== "undefined" ? selectedChapterTitle : "")
     }, extra || {});
 }
 
@@ -321,6 +323,7 @@ __CLIPPER_JS__
 subPreset = __SUB_PRESET__; subScale = __SUB_SCALE__; subColor = __SUB_COLOR__;
 subBgMode = __SUB_BG__; subPosX = __SUB_PX__; subPosY = __SUB_PY__;
 clipStartSec = __CLIP_START__; clipEndSec = __CLIP_END__; dualSubEnabled = __DUAL_SUB__;
+audioBoostEnabled = __AUDIO_BOOST__; selectedChapterTitle = __CHAPTER_TITLE__;
 initLiveSubDragDrop();
 if (typeof initClipperStudioHooks === "function") initClipperStudioHooks();
 if (typeof updateClipUI === "function") updateClipUI();
@@ -449,18 +452,10 @@ def generate_preview_html(
             rows.append(f'<tr class="{s_cls}" data-idx="{idx}" onclick="selectQualityRow({idx})"><td class="col-res"><strong>{r_l}</strong></td><td class="col-center">{r_e}</td><td class="col-right">{r_s}</td><td class="col-center">{r_f}</td><td class="col-note">{r_n}</td></tr>')
         a_opts = [f'<option value="{i}"{" selected" if i == sel_a_idx else ""}>{html.escape(t.get("label") or t.get("language") or f"Audio #{i}")}</option>' for i, t in enumerate(audio_tracks or [])] or ['<option value="0">Original Audio (Default)</option>']
         s_opts = [f'<option value="{i}"{" selected" if i == sel_s_idx else ""}>{html.escape(t.get("label") or t.get("language") or f"Subtitle #{i}")}</option>' for i, t in enumerate(subtitle_tracks or [])] or ['<option value="0">No Subtitles</option>']
-        m_opts = [
-            f'<option value="soft_embed"{" selected" if subtitle_embed_mode == "soft_embed" else ""}>Soft Embed (دمج ناعم)</option>',
-            f'<option value="hard_burn"{" selected" if subtitle_embed_mode == "hard_burn" else ""}>Burn into Video (حرق دائم)</option>',
-            f'<option value="srt_only"{" selected" if subtitle_embed_mode == "srt_only" else ""}>Save External .srt (ملف خارجي)</option>',
-        ]
-        p_opts = [
-            f'<option value="bottom"{" selected" if subtitle_position == "bottom" else ""}>Bottom (أسفل الشاشة)</option>',
-            f'<option value="middle"{" selected" if subtitle_position == "middle" else ""}>Middle (وسط الشاشة)</option>',
-            f'<option value="top"{" selected" if subtitle_position == "top" else ""}>Top (أعلى الشاشة)</option>',
-        ]
+        m_opts = [f'<option value="soft_embed"{" selected" if subtitle_embed_mode == "soft_embed" else ""}>Soft Embed (دمج ناعم)</option>', f'<option value="hard_burn"{" selected" if subtitle_embed_mode == "hard_burn" else ""}>Burn into Video (حرق دائم)</option>', f'<option value="srt_only"{" selected" if subtitle_embed_mode == "srt_only" else ""}>Save External .srt (ملف خارجي)</option>']
+        p_opts = [f'<option value="bottom"{" selected" if subtitle_position == "bottom" else ""}>Bottom (أسفل الشاشة)</option>', f'<option value="middle"{" selected" if subtitle_position == "middle" else ""}>Middle (وسط الشاشة)</option>', f'<option value="top"{" selected" if subtitle_position == "top" else ""}>Top (أعلى الشاشة)</option>']
         safe_dst = html.escape(default_dest_path or "")
-        clipper_toolbar = get_clipper_toolbar_html(clip_start=clip_start, clip_end=clip_end, dual_sub=dual_sub)
+        clipper_toolbar = get_clipper_toolbar_html(clip_start=clip_start, clip_end=clip_end, dual_sub=dual_sub, audio_boost=bool(kwargs.get("audio_boost", False)), chapters=kwargs.get("chapters", None))
         studio_toolbar = get_studio_toolbar_html(preset=subtitle_preset, scale=subtitle_font_scale, color=subtitle_text_color, bg_mode=subtitle_bg_mode, pos_x=subtitle_pos_x, pos_y=subtitle_pos_y)
         settings_html = f"""<div class="settings-panel"><div class="settings-header"><span class="settings-title">⚡ Download Quality &amp; Controls</span><span class="settings-count">{len(options)} Formats Detected</span></div><div class="table-container"><table class="format-table"><thead><tr><th>Resolution / Quality</th><th class="col-center">Format</th><th class="col-right">Est. Size</th><th class="col-center">FPS</th><th>Stream Details</th></tr></thead><tbody>{"".join(rows)}</tbody></table></div><div class="controls-row"><div class="ctrl-group"><label>🔊 Audio / الدبلجة</label><select id="audioSelect" onchange="onAudioChange()">{"".join(a_opts)}</select></div><div class="ctrl-group"><label>💬 Subtitles / الترجمة</label><select id="subSelect" onchange="onSubChange()">{"".join(s_opts)}</select></div><div class="ctrl-group"><label>⚙️ Mode / الطريقة</label><select id="modeSelect" onchange="onModeChange()">{"".join(m_opts)}</select></div><div class="ctrl-group"><label>📍 Position / الموضع</label><select id="posSelect" onchange="onPosChange()">{"".join(p_opts)}</select></div></div>{clipper_toolbar}{studio_toolbar}<div class="dest-card"><label>📁 Save As / مسار الحفظ:</label><input type="text" id="destInput" value="{safe_dst}" /><button type="button" class="btn" style="padding:4px 8px;font-size:11px;" onclick="browseDestination()">📁 Browse...</button></div><div class="action-bar"><button class="btn btn-download" onclick="doAction('download')">⚡ Download Selected Quality</button><button class="btn btn-secondary" onclick="doAction('open_in_main')">🖥️ Open in Main Window</button><button class="btn btn-cancel" onclick="doAction('cancel')">✕ Cancel</button></div></div>"""
 
@@ -492,6 +487,8 @@ def generate_preview_html(
         .replace("__CLIP_START__", str(float(clip_start or 0.0)))
         .replace("__CLIP_END__", str(float(clip_end or 0.0)))
         .replace("__DUAL_SUB__", "true" if dual_sub else "false")
+        .replace("__AUDIO_BOOST__", "true" if kwargs.get("audio_boost") else "false")
+        .replace("__CHAPTER_TITLE__", _j(str(kwargs.get("chapter_title", "") or "")))
     )
 
     player_flex = "52 1 0" if options else "1"
