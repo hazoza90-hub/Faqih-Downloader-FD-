@@ -634,6 +634,92 @@ Non-mp4 clip cue
                 self.assertIn("[Intro]", res_path)
                 self.assertIn("[Clip]", res_path)
 
+    def test_extract_video_chapters_official_unsorted(self):
+        info_dict = {
+            "chapters": [
+                {"title": "Outro", "start_time": 90.0, "end_time": 0.0},
+                {"title": "Introduction", "start_time": 0.0, "end_time": 0.0},
+                {"title": "Main Content", "start_time": 30.0, "end_time": 0.0},
+            ]
+        }
+        chapters = extract_video_chapters(info_dict, total_duration=120.0)
+        self.assertEqual(len(chapters), 3)
+        self.assertEqual(chapters[0]["title"], "Introduction")
+        self.assertEqual(chapters[0]["start_time"], 0.0)
+        self.assertEqual(chapters[0]["end_time"], 30.0)
+        self.assertEqual(chapters[1]["title"], "Main Content")
+        self.assertEqual(chapters[1]["start_time"], 30.0)
+        self.assertEqual(chapters[1]["end_time"], 90.0)
+        self.assertEqual(chapters[2]["title"], "Outro")
+        self.assertEqual(chapters[2]["start_time"], 90.0)
+        self.assertEqual(chapters[2]["end_time"], 120.0)
+
+    def test_extract_video_chapters_edge_cases(self):
+        desc = """
+        00:00 Intro
+        03:45- Chapter 1
+        05:30: Chapter 2
+        08:00| Discussion
+        120:00 Big Jump
+        """
+        chapters = extract_video_chapters({"description": desc}, total_duration=8000.0)
+        self.assertEqual(len(chapters), 5)
+        self.assertEqual(chapters[0]["title"], "Intro")
+        self.assertEqual(chapters[1]["title"], "Chapter 1")
+        self.assertEqual(chapters[1]["start_time"], 225.0)
+        self.assertEqual(chapters[2]["title"], "Chapter 2")
+        self.assertEqual(chapters[2]["start_time"], 330.0)
+        self.assertEqual(chapters[3]["title"], "Discussion")
+        self.assertEqual(chapters[3]["start_time"], 480.0)
+        self.assertEqual(chapters[4]["title"], "Big Jump")
+        self.assertEqual(chapters[4]["start_time"], 7200.0)
+
+        # Arabic-Indic numerals
+        arabic_desc = "٠٠:٠٠ المقدمة\n٠٣:٤٥ الأساسيات"
+        ar_chapters = extract_video_chapters({"description": arabic_desc}, total_duration=500.0)
+        self.assertEqual(len(ar_chapters), 2)
+        self.assertEqual(ar_chapters[0]["start_time"], 0.0)
+        self.assertEqual(ar_chapters[1]["start_time"], 225.0)
+
+        # Single timestamp mid-video rejected as not a chapter list
+        single_desc = "Look at the funny dog at 03:45 in this clip!"
+        self.assertEqual(extract_video_chapters({"description": single_desc}, total_duration=600.0), [])
+
+    def test_process_post_download_avoids_double_boost_and_sanitizes_brackets(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as td:
+            target = os.path.join(td, "MyVideo.mp4")
+            with open(target, "wb") as f:
+                f.write(b"video_data")
+            info = YouTubeStreamInfo(
+                video_id="vid123",
+                title="MyVideo",
+                clean_filename="MyVideo.mp4",
+                is_progressive=True,
+                video_url="http://test",
+                clip_start_sec=10.0,
+                clip_end_sec=30.0,
+                audio_boost_enabled=True,
+                selected_chapter_title="[Intro]",
+            )
+            # Simulate hard burn already applied boost
+            setattr(info, "_audio_boost_applied", True)
+            captured_trim_args = {}
+            def fake_trim(file_path, clip_start, clip_end, **kwargs):
+                captured_trim_args.update(kwargs)
+                return True
+
+            with patch("faqih_downloader.services.media_clipper_engine.trim_media_file", side_effect=fake_trim), \
+                 patch("faqih_downloader.services.media_clipper_engine.probe_media_duration", return_value=100.0), \
+                 patch("faqih_downloader.services.media_env_helpers.find_ffmpeg_bin", return_value="ffmpeg"):
+                res_path = process_post_download_clip_and_subtitles(info, target)
+                # Boost must NOT be requested again during trim since it was already applied
+                self.assertFalse(captured_trim_args.get("audio_boost", False))
+                # Brackets in chapter title must be stripped so we don't get [[Intro]]
+                self.assertIn("[Intro]", res_path)
+                self.assertNotIn("[[Intro]]", res_path)
+                self.assertIn("[Clip]", res_path)
+
 
 if __name__ == "__main__":
     unittest.main()

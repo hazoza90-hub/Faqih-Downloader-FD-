@@ -204,7 +204,13 @@ function resetClipRange() {
 
 function onChapterSelectChange() {
     const sel = document.getElementById("chapterSelect");
-    if (!sel || sel.selectedIndex <= 0) return;
+    if (!sel) return;
+    if (sel.selectedIndex <= 0) {
+        selectedChapterTitle = "";
+        updateClipUI();
+        if (typeof syncStateToBridge === "function") syncStateToBridge();
+        return;
+    }
     const opt = sel.options[sel.selectedIndex];
     const s = parseFloat(opt.getAttribute("data-start") || 0);
     const e = parseFloat(opt.getAttribute("data-end") || 0);
@@ -415,6 +421,11 @@ function initClipperStudioHooks() {
         overlay.addEventListener("dblclick", (e) => { e.stopPropagation(); openSubTextEditor(); });
     }
     if (videoEl) {
+        videoEl.addEventListener("play", () => {
+            if (_studioAudioCtx && _studioAudioCtx.state === "suspended") {
+                _studioAudioCtx.resume().catch(e => {});
+            }
+        });
         videoEl.addEventListener("timeupdate", () => {
             if (isLoopingClip && clipEndSec > clipStartSec) {
                 if (videoEl.currentTime >= clipEndSec || videoEl.currentTime < clipStartSec) {
@@ -430,6 +441,15 @@ function initClipperStudioHooks() {
     if (sIn) { sIn.addEventListener("focus", () => { sIn._focused = true; }); sIn.addEventListener("blur", () => { sIn._focused = false; }); }
     if (eIn) { eIn.addEventListener("focus", () => { eIn._focused = true; }); eIn.addEventListener("blur", () => { eIn._focused = false; }); }
     const bBoost = document.getElementById("btnAudioBoost");
-    if (bBoost && audioBoostEnabled) bBoost.classList.add("active");
+    if (bBoost && audioBoostEnabled) {
+        bBoost.classList.add("active");
+        try {
+            initStudioWebAudioBoost();
+            const gVal = 1.65;
+            _studioBoostNodes.forEach(item => {
+                if (item.gain && item.gain.gain) item.gain.gain.setValueAtTime(gVal, _studioAudioCtx ? _studioAudioCtx.currentTime : 0);
+            });
+        } catch(e) {}
+    }
 }
 """.strip()

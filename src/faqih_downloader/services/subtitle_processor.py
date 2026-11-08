@@ -392,6 +392,7 @@ def burn_subtitle_into_video(
                             time.sleep(0.08)
                 if on_log:
                     on_log(f"[SUBTITLES] Successfully burned subtitles permanently into video frames (Candidate {idx}).")
+                if style_config and style_config.get("audio_boost"): style_config["_audio_boost_applied"] = True
                 success = True
                 break
             else:
@@ -522,6 +523,7 @@ def handle_subtitles_post_download(
             ok = burn_subtitle_into_video(output_path, srt_path, ffmpeg_bin, on_log=on_log, **burn_kwargs)
             if ok:
                 _cleanup_srt()
+                if eff_cfg and eff_cfg.get("audio_boost"): setattr(stream_info, "_audio_boost_applied", True)
             elif not (cancel_event and cancel_event.is_set()):
                 if on_log:
                     on_log("[SUBTITLES] Hard burn failed; falling back to soft subtitle embedding.")

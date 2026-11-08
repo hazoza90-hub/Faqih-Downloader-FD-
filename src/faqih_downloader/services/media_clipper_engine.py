@@ -219,7 +219,7 @@ def process_post_download_clip_and_subtitles(
     has_clip = (clip_end > clip_start >= 0.0)
     audio_boost = bool(getattr(stream_info, "audio_boost_enabled", False))
     chapter_title = str(getattr(stream_info, "selected_chapter_title", "") or "").strip()
-    boost_applied = False
+    boost_applied = bool(getattr(stream_info, "_audio_boost_applied", False))
 
     if has_sub:
         sc = getattr(stream_info, "style_config", None) or {}
@@ -236,7 +236,7 @@ def process_post_download_clip_and_subtitles(
         f_path = handle_subtitles_post_download(stream_info, target_path, on_log=on_log, cancel_event=cancel_event)
         if f_path and os.path.isfile(f_path):
             target_path = f_path
-            if mode == "hard_burn" and audio_boost:
+            if getattr(stream_info, "_audio_boost_applied", False):
                 boost_applied = True
 
     if has_clip and os.path.isfile(target_path):
@@ -254,8 +254,8 @@ def process_post_download_clip_and_subtitles(
     if audio_boost and not boost_applied and os.path.isfile(target_path):
         from .audio_and_chapters_engine import apply_audio_boost_to_file
         from .media_env_helpers import find_ffmpeg_bin
-        apply_audio_boost_to_file(target_path, ffmpeg_bin=find_ffmpeg_bin(), on_log=on_log, cancel_event=cancel_event)
-        boost_applied = True
+        if apply_audio_boost_to_file(target_path, ffmpeg_bin=find_ffmpeg_bin(), on_log=on_log, cancel_event=cancel_event):
+            boost_applied = True
 
     if (has_clip or chapter_title) and os.path.isfile(target_path):
         d_dir, f_name = os.path.split(target_path)
@@ -263,6 +263,8 @@ def process_post_download_clip_and_subtitles(
         clean_ch = ""
         if chapter_title:
             clean_ch = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '', chapter_title).strip()
+            clean_ch = re.sub(r'^[\[\(\]\)\s\-–—:|•~.]+', '', clean_ch)
+            clean_ch = re.sub(r'[\[\(\]\)\s\-–—:|•~.]+$', '', clean_ch).strip()
         new_stem = stem
         if clean_ch and f"[{clean_ch}]" not in new_stem:
             new_stem = f"{new_stem} [{clean_ch}]"
@@ -270,13 +272,18 @@ def process_post_download_clip_and_subtitles(
             new_stem = f"{new_stem} [Clip]"
         if new_stem != stem:
             new_path = os.path.join(d_dir, f"{new_stem}{ext}")
-            try:
-                os.replace(target_path, new_path)
-                target_path = new_path
-                old_srt = os.path.join(d_dir, f"{stem}.srt")
-                new_srt = os.path.join(d_dir, f"{new_stem}.srt")
-                if os.path.isfile(old_srt): os.replace(old_srt, new_srt)
-            except Exception: pass
+            for _ in range(4):
+                try:
+                    os.replace(target_path, new_path)
+                    target_path = new_path
+                    old_srt = os.path.join(d_dir, f"{stem}.srt")
+                    new_srt = os.path.join(d_dir, f"{new_stem}.srt")
+                    if os.path.isfile(old_srt):
+                        try: os.replace(old_srt, new_srt)
+                        except Exception: pass
+                    break
+                except Exception:
+                    time.sleep(0.08)
     return target_path
 
 def sync_clipper_state_from_body(session: Any, body: Dict[str, Any], opt: Any = None) -> None:

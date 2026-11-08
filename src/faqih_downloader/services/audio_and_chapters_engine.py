@@ -16,6 +16,7 @@ def _parse_timestamp_to_seconds(ts_str: str) -> Optional[float]:
     """Parses 'HH:MM:SS' or 'MM:SS' timestamp string to seconds."""
     if not ts_str:
         return None
+    ts_str = ts_str.translate(str.maketrans('٠١٢٣٤٥٦٧٨٩', '0123456789'))
     parts = ts_str.strip().split(":")
     try:
         if len(parts) == 2:
@@ -54,6 +55,7 @@ def extract_video_chapters(info_dict: Optional[Dict[str, Any]], total_duration: 
             e_t = float(ch.get("end_time", 0.0) or 0.0)
             cleaned.append({"title": title, "start_time": round(s_t, 2), "end_time": round(e_t, 2)})
 
+        cleaned.sort(key=lambda x: x["start_time"])
         if cleaned:
             # Fix any missing or zero end_time
             for i in range(len(cleaned)):
@@ -71,7 +73,9 @@ def extract_video_chapters(info_dict: Optional[Dict[str, Any]], total_duration: 
     if not desc:
         return []
 
-    ts_pattern = re.compile(r'(?:^|[\s\[\(])(\d{1,2}:\d{2}(?::\d{2})?)(?:[\s\]\)]|$)')
+    ts_pattern = re.compile(
+        r'(?:^|[\s\[\(•\-])((?:\d{1,2}:)?\d{1,3}:\d{2})(?=[\s\]\)\-–—:\|•~.،ـ]|$)'
+    )
     candidates: List[tuple[float, str]] = []
 
     for line in desc.splitlines():
@@ -87,8 +91,8 @@ def extract_video_chapters(info_dict: Optional[Dict[str, Any]], total_duration: 
             continue
 
         raw_title = line_s[:m.start(1)] + line_s[m.end(1):]
-        title = re.sub(r'^[\[\(\]\)\s\-–—:|•~]+', '', raw_title)
-        title = re.sub(r'[\[\(\]\)\s\-–—:|•~]+$', '', title).strip()
+        title = re.sub(r'^[\[\(\]\)\s\-–—:|•~.،ـ]+', '', raw_title)
+        title = re.sub(r'[\[\(\]\)\s\-–—:|•~.،ـ]+$', '', title).strip()
         if not title:
             title = f"Chapter {ts_str}"
         candidates.append((sec, title))
@@ -105,9 +109,9 @@ def extract_video_chapters(info_dict: Optional[Dict[str, Any]], total_duration: 
         if not unique or abs(sec - unique[-1][0]) > 0.5:
             unique.append((sec, title))
 
-    if len(unique) < 2 and (not unique or unique[0][0] != 0.0):
-        if not unique or total_duration <= 0:
-            return []
+    # Reject if less than 2 chapters and doesn't start at 00:00 spanning duration
+    if len(unique) < 2 and (not unique or unique[0][0] != 0.0 or total_duration <= 0):
+        return []
 
     chapters_result: List[Dict[str, Any]] = []
     tot = float(total_duration or 0.0)
@@ -185,9 +189,10 @@ def apply_audio_boost_to_file(
             "-c:v", "copy",
             "-af", af_filter,
             "-c:a", "aac", "-b:a", "192k",
-            "-movflags", "+faststart",
-            temp_out
         ]
+        if ext_lower in (".mp4", ".m4v", ".mov"):
+            cmd.extend(["-movflags", "+faststart"])
+        cmd.append(temp_out)
 
     try:
         from .subtitle_processor import run_cancellable_ffmpeg
