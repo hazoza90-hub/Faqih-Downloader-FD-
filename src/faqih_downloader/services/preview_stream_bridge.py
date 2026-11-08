@@ -116,13 +116,12 @@ def register_preview_session(
         subtitle_pos_y=float(subtitle_pos_y or 86.0),
     )
     ch_list = kwargs.get("chapters")
-    if not ch_list and isinstance(info_dict, dict):
+    if not ch_list and (isinstance(info_dict, dict) or (info_dict is None and options)):
         try:
             from .audio_and_chapters_engine import extract_video_chapters
-            tot_d = float(info_dict.get("duration") or 0.0)
-            if tot_d <= 0 and options:
-                tot_d = float(getattr(options[0], "duration", 0) or 0.0)
-            ch_list = extract_video_chapters(info_dict, tot_d, auto_split_if_empty=True)
+            tot_d = float(info_dict.get("duration") or 0.0) if isinstance(info_dict, dict) else 0.0
+            if tot_d <= 0 and options: tot_d = float(getattr(options[0], "duration", 0) or 0.0)
+            ch_list = extract_video_chapters(info_dict or {}, tot_d, auto_split_if_empty=True)
         except Exception: ch_list = []
     session.chapters = list(ch_list or [])
     session.audio_boost = bool(kwargs.get("audio_boost", False))
@@ -327,8 +326,9 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
 
         old_ch = str(getattr(session, "chapter_title", "") or "").strip()
         ch_title = str(body.get("chapter_title") if "chapter_title" in body else old_ch).strip()
-        c_start = float(body.get("clip_start") if "clip_start" in body else getattr(session, "clip_start", 0.0) or 0.0)
-        c_end = float(body.get("clip_end") if "clip_end" in body else getattr(session, "clip_end", 0.0) or 0.0)
+        _tf = lambda v, d=0.0: float(v) if (v is not None and str(v).replace('.', '', 1).replace('-', '', 1).isdigit()) else float(d)
+        c_start = _tf(body.get("clip_start"), getattr(session, "clip_start", 0.0) or 0.0) if "clip_start" in body else float(getattr(session, "clip_start", 0.0) or 0.0)
+        c_end = _tf(body.get("clip_end"), getattr(session, "clip_end", 0.0) or 0.0) if "clip_end" in body else float(getattr(session, "clip_end", 0.0) or 0.0)
         has_clip = (c_end > c_start >= 0.0)
 
         if "chapter_title" in body: session.chapter_title = ch_title

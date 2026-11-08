@@ -1103,6 +1103,53 @@ Non-mp4 clip cue
         finally:
             unregister_preview_session(sid_fb)
 
+        # Verify fallback when info_dict is None but options[0].duration is available
+        sid_none_info = register_preview_session(
+            url="https://youtube.com/watch?v=fb_none",
+            video_title="None Info Video",
+            default_dest_path=r"C:\Downloads\None Info Video.mp4",
+            info_dict=None,
+            options=[opt_fb],
+            chapters=[],
+        )
+        try:
+            session_none = get_preview_session(sid_none_info)
+            self.assertIsNotNone(session_none)
+            self.assertEqual(len(session_none.chapters), 5)
+            self.assertEqual(session_none.chapters[0]["title"], "الجزء 1 - تقسيم تلقائي")
+
+            # Verify _handle_api_update_filename survives None clip ranges without TypeError
+            handler = DummyHandler()
+            body_none_clips = {
+                "q_idx": 0,
+                "current_dest": session_none.default_dest_path,
+                "chapter_title": " [الجزء 1 - تقسيم تلقائي] ",
+                "clip_start": None,
+                "clip_end": None,
+            }
+            PreviewBridgeRequestHandler._handle_api_update_filename(handler, session_none, body_none_clips)
+            dest_none = handler.sent_data["dest_path"]
+            self.assertIn("[الجزء 1 - تقسيم تلقائي]", dest_none)
+            self.assertNotIn("[[", dest_none)
+            self.assertEqual(dest_none.count("["), dest_none.count("]"))
+
+            # Verify legacy broken bracket tag [الجزء 1 (تقسيم تلقائي] is cleanly stripped
+            legacy_dest = r"C:\Downloads\None Info Video [الجزء 1 (تقسيم تلقائي] [Clip].mp4"
+            body_legacy = {
+                "q_idx": 0,
+                "current_dest": legacy_dest,
+                "chapter_title": session_none.chapters[1]["title"],
+                "clip_start": 300.0,
+                "clip_end": 600.0,
+            }
+            PreviewBridgeRequestHandler._handle_api_update_filename(handler, session_none, body_legacy)
+            dest_cleaned = handler.sent_data["dest_path"]
+            self.assertNotIn("الجزء 1", dest_cleaned)
+            self.assertIn("[الجزء 2 - تقسيم تلقائي]", dest_cleaned)
+            self.assertEqual(dest_cleaned.count("["), dest_cleaned.count("]"))
+        finally:
+            unregister_preview_session(sid_none_info)
+
 
 if __name__ == "__main__":
     unittest.main()
