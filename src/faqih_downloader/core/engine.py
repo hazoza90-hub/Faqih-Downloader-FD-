@@ -167,7 +167,7 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
         Uses HEAD with fallback to GET Range: bytes=0-0 to bypass servers blocking HEAD.
         """
         self.log(f"Probing server capabilities: {self.url}")
-        if self.is_googlevideo:
+        if self.is_googlevideo or "googlevideo.com" in self.url:
             try:
                 clen = urllib.parse.parse_qs(urllib.parse.urlsplit(self.url).query).get("clen")
                 if clen and clen[0].isdigit():
@@ -178,9 +178,9 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
                         if url_fn: self.filename = url_fn
                     if os.path.isdir(self.destination_path) or self.destination_path.endswith(("/", "\\")):
                         self.destination_path = os.path.join(self.destination_path, self.filename or "download.bin")
+                        self.temp_dir = self.destination_path + ".sd_parts"
                     return
-            except Exception:
-                pass
+            except Exception: pass
 
         req = self._create_request(method="HEAD")
 
@@ -323,46 +323,44 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
         supervisor_thread = threading.Thread(target=self._supervisor_loop, daemon=True)
         supervisor_thread.start()
 
-    def _abort_active_conns(self):
+    def _abort_active_conns(self, force: bool = False):
         with self._lock:
             for conn in self._active_connections:
-                if hasattr(conn, "_mock_name"):
+                if force or hasattr(conn, "_mock_name"):
                     try: conn.close()
                     except Exception: pass
             self._active_connections.clear()
 
     def pause(self):
         """Pauses all active chunk downloads."""
-        if not self.is_running or self.is_paused:
-            return
+        if not self.is_running or self.is_paused: return
         self.is_paused = True
         if self._last_active_start_mono is not None:
             self._accumulated_active_sec += max(0.0, time.monotonic() - self._last_active_start_mono)
             self._last_active_start_mono = None
-        self._pause_event.set()
-        self._abort_active_conns()
+        self._pause_event.set(); self._abort_active_conns()
         threading.Thread(target=self.save_state, daemon=True).start()
         self.log("Download paused by user.")
 
     def resume(self):
         """Resumes all active chunk downloads."""
-        if not self.is_running or not self.is_paused:
-            return
+        if not self.is_running or not self.is_paused: return
         self.is_paused = False
         self._last_active_start_mono = time.monotonic()
         self.last_speed_check_time = time.monotonic()
         self.last_downloaded_bytes = sum(c.downloaded_bytes for c in self.chunks)
         self._session_start_bytes = self.last_downloaded_bytes
-        self._pause_event.clear()
-        self.log("Download resumed.")
+        self._pause_event.clear(); self.log("Download resumed.")
 
     def cancel(self):
         """Cancels download and stops all worker threads immediately."""
-        self.is_running = False
-        self._cancel_event.set()
-        self._pause_event.clear()
-        self._last_active_start_mono = None
-        self._abort_active_conns()
+        self.is_running, self._last_active_start_mono = False, None
+        self._cancel_event.set(); self._pause_event.clear()
+        self._abort_active_conns(force=True)
+        with self._lock: workers = list(self.active_workers)
+        for w in workers:
+            try: w.join(timeout=0.2)
+            except Exception: pass
         self.log("Download cancelled by user.")
         self.cleanup_temp_files()
 
