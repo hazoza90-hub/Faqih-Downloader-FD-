@@ -402,10 +402,26 @@ class SettingsModal(SettingsModalTabsMixin, _BaseToplevel):
             highlightbackground="#10b981" if nxt else self.c_border,
         )
 
+    def _update_threads_warning(self, val=None):
+        if not hasattr(self, "lbl_threads_warn") or not self.lbl_threads_warn:
+            return
+        v = str(val or (self.cb_threads.get() if hasattr(self, "cb_threads") else "")).strip()
+        if v == "32":
+            lang = get_setting("language", "ar")
+            if str(lang).lower().startswith("en"):
+                msg = "⚠ Warning: 32 connections may overload some routers or trigger temporary server rate limits (8 or 16 recommended)."
+            else:
+                msg = "⚠ تحذير: 32 اتصالاً قد يسبب ضغطاً عالياً على بعض أجهزة الراوتر أو تقييداً مؤقتاً من بعض الخوادم (يُنصح بـ 8 أو 16)."
+            self.lbl_threads_warn.configure(text=msg)
+            self.lbl_threads_warn.pack(fill=tk.X, padx=14, pady=(0, 6))
+        else:
+            self.lbl_threads_warn.pack_forget()
+
     def _on_threads_changed(self, event=None):
         try:
             n = int(self.cb_threads.get())
             set_setting("max_connections", n)
+            self._update_threads_warning(str(n))
             if self.parent_app and hasattr(self.parent_app, "conn_var"):
                 self.parent_app.conn_var.set(self.cb_threads.get())
             if self.parent_app and hasattr(self.parent_app, "log") and callable(self.parent_app.log):

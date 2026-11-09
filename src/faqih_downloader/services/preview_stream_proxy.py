@@ -121,7 +121,8 @@ def stream_upstream_media(
 ) -> None:
     """
     Forwards Range requests and essential HTTP headers upstream,
-    proxying chunks back to the browser with 206 Partial Content / 200 OK.
+    proxying chunks back to the browser or FFmpeg with 206 Partial Content / 200 OK.
+    Uses high-speed 2MB windowed range proxying for googlevideo.com and gvt1.com.
     """
     if not target_url or not target_url.startswith("http"):
         handler.send_response(404)
@@ -129,18 +130,121 @@ def stream_upstream_media(
         handler.end_headers()
         return
 
-    req = urllib.request.Request(target_url)
     ua = (
         custom_headers.get("User-Agent")
         or custom_headers.get("user-agent")
         or "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     )
+
+    is_google_media = bool("googlevideo.com" in target_url or "gvt1.com" in target_url)
+    client_range = handler.headers.get("Range")
+
+    # High-speed windowed streaming for googlevideo to bypass YouTube throttling
+    if not is_head and is_google_media:
+        start_byte = 0
+        end_byte_target = None
+        is_open_ended = True
+        if client_range:
+            m = re.match(r"^bytes=(\d+)-(\d+)?$", client_range.strip())
+            if m:
+                start_byte = int(m.group(1))
+                if m.group(2):
+                    end_byte_target = int(m.group(2))
+                    is_open_ended = False
+
+        WINDOW_SIZE = 2 * 1024 * 1024  # 2 MB window
+        req_len = (end_byte_target - start_byte + 1) if end_byte_target is not None else None
+        needs_windowed = is_open_ended or (req_len is not None and req_len > WINDOW_SIZE)
+
+        if needs_windowed:
+            try:
+                import requests
+                import urllib3
+                urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+                session = requests.Session()
+                s_headers = dict(custom_headers or {})
+                s_headers["User-Agent"] = ua
+                first_end = (start_byte + WINDOW_SIZE - 1) if end_byte_target is None else min(start_byte + WINDOW_SIZE - 1, end_byte_target)
+                s_headers["Range"] = f"bytes={start_byte}-{first_end}"
+
+                first_resp = session.get(target_url, headers=s_headers, stream=True, timeout=15, verify=False)
+                cr = first_resp.headers.get("Content-Range", "")
+                cr_match = re.search(r"bytes\s+(\d+)-(\d+)/(\d+|\*)", cr, re.IGNORECASE) if cr else None
+
+                if first_resp.status_code == 206 and cr_match:
+                    c_start = int(cr_match.group(1))
+                    c_end = int(cr_match.group(2))
+                    tot_str = cr_match.group(3)
+                    tot_size = int(tot_str) if tot_str != "*" else None
+
+                    if tot_size is not None and end_byte_target is None:
+                        final_end = tot_size - 1
+                    elif tot_size is not None and end_byte_target is not None:
+                        final_end = min(end_byte_target, tot_size - 1)
+                    else:
+                        final_end = end_byte_target if end_byte_target is not None else c_end
+
+                    resp_len = final_end - start_byte + 1
+                    handler.send_response(206 if client_range else 200)
+                    handler.send_header("Content-Type", first_resp.headers.get("Content-Type", "video/mp4"))
+                    handler.send_header("Accept-Ranges", "bytes")
+                    if client_range:
+                        tot_disp = str(tot_size) if tot_size is not None else "*"
+                        handler.send_header("Content-Range", f"bytes {start_byte}-{final_end}/{tot_disp}")
+                    handler.send_header("Content-Length", str(resp_len))
+                    handler.send_header("Access-Control-Allow-Origin", "*")
+                    handler.send_header("Access-Control-Allow-Headers", "*")
+                    handler.send_header("Cache-Control", "no-cache")
+                    handler.end_headers()
+
+                    try:
+                        for chunk in first_resp.iter_content(chunk_size=64 * 1024):
+                            if not chunk:
+                                break
+                            handler.wfile.write(chunk)
+                    except (ConnectionResetError, BrokenPipeError, ConnectionAbortedError, OSError):
+                        first_resp.close()
+                        session.close()
+                        return
+                    first_resp.close()
+
+                    cur_start = c_end + 1
+                    while cur_start <= final_end:
+                        cur_end = min(cur_start + WINDOW_SIZE - 1, final_end)
+                        s_headers["Range"] = f"bytes={cur_start}-{cur_end}"
+                        try:
+                            with session.get(target_url, headers=s_headers, stream=True, timeout=15, verify=False) as win_resp:
+                                if win_resp.status_code not in (200, 206):
+                                    break
+                                for chunk in win_resp.iter_content(chunk_size=64 * 1024):
+                                    if not chunk:
+                                        break
+                                    handler.wfile.write(chunk)
+                                w_cr = win_resp.headers.get("Content-Range", "")
+                                w_match = re.search(r"bytes\s+(\d+)-(\d+)", w_cr, re.IGNORECASE) if w_cr else None
+                                if w_match:
+                                    cur_start = int(w_match.group(2)) + 1
+                                else:
+                                    cur_start = cur_end + 1
+                        except (ConnectionResetError, BrokenPipeError, ConnectionAbortedError, OSError):
+                            break
+                        except Exception:
+                            break
+                    session.close()
+                    return
+                else:
+                    first_resp.close()
+                    session.close()
+            except Exception:
+                pass
+
+    # Standard direct streaming fallback
+    req = urllib.request.Request(target_url)
     req.add_header("User-Agent", ua)
     for k, v in custom_headers.items():
         if k.lower() not in ("host", "user-agent", "range"):
             req.add_header(k, str(v))
 
-    client_range = handler.headers.get("Range")
     if client_range:
         req.add_header("Range", client_range)
 
@@ -190,6 +294,90 @@ def stream_upstream_media(
             upstream.close()
         except Exception:
             pass
+
+
+class PreviewStreamBridge:
+    """Local loopback HTTP proxy bridge for windowed high-speed media streaming."""
+
+    def __init__(self, host: str = "127.0.0.1"):
+        self.host = host
+        self.port: int = 0
+        self._server: Optional[http.server.ThreadingHTTPServer] = None
+        self._thread: Optional[threading.Thread] = None
+        self._registered_streams: Dict[str, Dict[str, Any]] = {}
+        import threading
+        self._lock = threading.Lock()
+
+    def start(self) -> int:
+        """Starts the local proxy bridge HTTP server on an available port."""
+        if self._server is not None and self.port > 0:
+            return self.port
+        bridge_self = self
+
+        class _BridgeHandler(http.server.BaseHTTPRequestHandler):
+            timeout = 15.0
+
+            def log_message(self, format, *args):
+                pass
+
+            def do_OPTIONS(self):
+                self.send_response(200)
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
+                self.send_header("Access-Control-Allow-Headers", "*")
+                self.end_headers()
+
+            def do_HEAD(self):
+                self._serve(is_head=True)
+
+            def do_GET(self):
+                self._serve(is_head=False)
+
+            def _serve(self, is_head: bool):
+                parsed = urllib.parse.urlparse(self.path)
+                params = urllib.parse.parse_qs(parsed.query)
+                stream_id = params.get("id", [""])[0]
+                with bridge_self._lock:
+                    info = bridge_self._registered_streams.get(stream_id)
+                if not info:
+                    self.send_response(404)
+                    self.send_header("Content-Type", "text/plain")
+                    self.end_headers()
+                    self.wfile.write(b"Stream not found")
+                    return
+                stream_upstream_media(self, info["url"], info.get("headers") or {}, is_head=is_head)
+
+        server = http.server.ThreadingHTTPServer((self.host, 0), _BridgeHandler)
+        server.daemon_threads = True
+        self.port = server.server_address[1]
+        self._server = server
+        import threading
+        self._thread = threading.Thread(target=server.serve_forever, daemon=True, name="SD-ClipperStreamBridge")
+        self._thread.start()
+        return self.port
+
+    def register_stream(self, upstream_url: str, headers: Optional[Dict[str, str]] = None) -> str:
+        """Registers an upstream URL and returns a local proxy URL."""
+        if self.port == 0:
+            self.start()
+        import uuid
+        sid = uuid.uuid4().hex[:12]
+        with self._lock:
+            self._registered_streams[sid] = {"url": upstream_url, "headers": headers or {}}
+        return f"http://{self.host}:{self.port}/stream?id={sid}"
+
+    def stop(self) -> None:
+        """Stops the proxy bridge server and releases resources."""
+        with self._lock:
+            self._registered_streams.clear()
+        if self._server:
+            try:
+                self._server.shutdown()
+                self._server.server_close()
+            except Exception:
+                pass
+            self._server = None
+            self.port = 0
 
 
 def compile_and_serve_vtt(handler: http.server.BaseHTTPRequestHandler, session: Any, s_idx: int) -> None:

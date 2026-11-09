@@ -244,12 +244,16 @@ class MediaOptionsBarMixin(MediaOptionsActionsMixin):
         if not isinstance(ctx, dict):
             return
 
-        # Guard: prevent cross-video state corruption if media bar currently belongs to another URL
+        # Guard: prevent cross-video state corruption if media bar currently belongs to another URL or options mismatch
         bar_url = getattr(self, "_main_bar_url", None)
         if bar_url and ctx.get("url") and bar_url != ctx.get("url"):
             return
+        bar_opts = getattr(self, "_main_media_options", []) or []
+        ctx_opts = ctx.get("options") or []
+        if bar_opts and ctx_opts and bar_opts != ctx_opts:
+            return
 
-        opts = getattr(self, "_main_media_options", []) or ctx.get("options") or []
+        opts = ctx_opts or bar_opts
         q_idx = self.cb_main_quality.current() if hasattr(self, "cb_main_quality") else -1
         prev_opt = ctx.get("selected_option") or ctx.get("selected_opt")
         opt = opts[q_idx] if (0 <= q_idx < len(opts)) else prev_opt
@@ -277,7 +281,7 @@ class MediaOptionsBarMixin(MediaOptionsActionsMixin):
 
         # Subtitle mode
         m_idx = self.cb_main_sub_mode.current() if hasattr(self, "cb_main_sub_mode") else 0
-        sub_mode = self._main_sub_mode_codes[m_idx] if (0 <= m_idx < len(self._main_sub_mode_codes)) else "soft_embed"
+        sub_mode = self._main_sub_mode_codes[m_idx] if (hasattr(self, "_main_sub_mode_codes") and 0 <= m_idx < len(self._main_sub_mode_codes)) else "soft_embed"
         if opt:
             opt.subtitle_embed_mode = sub_mode
             ctx["subtitle_embed_mode"] = sub_mode

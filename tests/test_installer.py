@@ -35,10 +35,22 @@ os.environ["SD_DISABLE_SYSTEM_TRAY"] = "1"
 os.environ["SD_DISABLE_STARTUP_TOAST"] = "1"
 os.environ["SD_DISABLE_AUTO_UPDATE"] = "1"
 os.environ["SD_LANGUAGE"] = "en"
-if not os.environ.get("SD_CONFIG_DIR"):
-    _sd_test_cfg = os.path.join(tempfile.gettempdir(), "sd_test_isolated_cfg")
-    os.makedirs(_sd_test_cfg, exist_ok=True)
-    os.environ["SD_CONFIG_DIR"] = _sd_test_cfg
+try:
+    import pytest
+except ImportError:
+    pytest = None
+
+if pytest is not None:
+    @pytest.fixture(autouse=True)
+    def isolate_installer_system(tmp_path):
+        """Autouse fixture isolating tests from real user desktop, start menu, and processes."""
+        fake_dt = str(tmp_path / "FakeDesktop")
+        fake_sm = str(tmp_path / "FakeStartMenu")
+        os.makedirs(fake_dt, exist_ok=True)
+        os.makedirs(fake_sm, exist_ok=True)
+        with patch("faqih_downloader.installer.installer_ops.get_desktop_dir", return_value=fake_dt), \
+             patch("faqih_downloader.installer.installer_ops.get_start_menu_programs_dir", return_value=fake_sm):
+            yield
 
 try:
     import tkinter as tk

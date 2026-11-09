@@ -415,6 +415,45 @@ def main():
     print(f"Setup Installer: {setup_exe}")
     print("=" * 70)
 
+    # Ensure desktop and start menu shortcuts exist and launch installed app
+    try:
+        from faqih_downloader.installer import (
+            get_default_install_dir, get_desktop_dir, get_start_menu_programs_dir,
+            create_windows_shortcut, APP_NAME
+        )
+        installed_exe = os.path.join(get_default_install_dir(), "FaqihDownloader.exe")
+        if os.path.isfile(installed_exe):
+            ico = os.path.join(get_default_install_dir(), "app_icon.ico")
+            ico_path = ico if os.path.isfile(ico) else None
+            dt_lnk = os.path.join(get_desktop_dir(), f"{APP_NAME}.lnk")
+            if not os.path.isfile(dt_lnk):
+                create_windows_shortcut(installed_exe, dt_lnk, icon_path=ico_path)
+                print(f"[+] Recreated missing Desktop shortcut: {dt_lnk}")
+            sm_lnk = os.path.join(get_start_menu_programs_dir(), f"{APP_NAME}.lnk")
+            if not os.path.isfile(sm_lnk):
+                create_windows_shortcut(installed_exe, sm_lnk, icon_path=ico_path)
+                print(f"[+] Recreated missing Start Menu shortcut: {sm_lnk}")
+
+            print(f"[*] Starting installed application in background: {installed_exe}")
+            launched = False
+            if sys.platform.startswith("win"):
+                try:
+                    os.startfile(installed_exe)
+                    launched = True
+                except Exception:
+                    pass
+            if not launched:
+                cflags = (subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP) if sys.platform.startswith("win") else 0
+                subprocess.Popen(
+                    [installed_exe],
+                    cwd=os.path.dirname(installed_exe),
+                    creationflags=cflags,
+                    close_fds=True
+                )
+            print("[+] Application launched successfully in background")
+    except Exception as e:
+        print(f"[-] Warning: Failed to launch application in background: {e}")
+
 
 if __name__ == "__main__":
     main()

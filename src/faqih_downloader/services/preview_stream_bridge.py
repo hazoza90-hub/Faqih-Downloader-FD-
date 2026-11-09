@@ -9,6 +9,7 @@ from ..utils.file_ops import apply_media_filename_tags, generate_unique_destinat
 from .preview_stream_proxy import (
     compile_and_serve_vtt, stream_upstream_media, _safe_int, _is_preview_origin_allowed,
     _prune_preview_sessions, resolve_preview_video_target, resolve_preview_audio_target,
+    PreviewStreamBridge,
 )
 from .subtitle_downloader import download_subtitle_as_srt
 
@@ -17,7 +18,6 @@ _BRIDGE_SERVER: Optional[http.server.ThreadingHTTPServer] = None
 _BRIDGE_PORT: int = 0
 _SESSIONS_LOCK = threading.Lock()
 _SESSIONS: Dict[str, "PreviewSession"] = {}
-
 
 @dataclass
 class PreviewSession:

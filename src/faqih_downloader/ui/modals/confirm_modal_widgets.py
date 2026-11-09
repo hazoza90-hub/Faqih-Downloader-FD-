@@ -131,6 +131,7 @@ class ConfirmModalWidgetsMixin:
         def_conn_str = str(self.default_connections) if str(self.default_connections) in ["1", "2", "4", "8", "16", "32"] else "8"
         self.combo_threads.set(def_conn_str)
         self.combo_threads.pack(anchor="w")
+        self.combo_threads.bind("<<ComboboxSelected>>", self._update_threads_warning)
 
         spd_frame = tk.Frame(cfg_row, bg=self.c_panel)
         spd_frame.pack(side=tk.RIGHT, fill=tk.X, expand=True)
@@ -148,6 +149,18 @@ class ConfirmModalWidgetsMixin:
         else:
             self.combo_speed.set(tr("lbl_unlimited", "Unlimited"))
         self.combo_speed.pack(anchor="w")
+
+        self.lbl_threads_warn = tk.Label(
+            card,
+            text="",
+            font=("Segoe UI", 8),
+            fg="#f59e0b",
+            bg=self.c_panel,
+            anchor="w",
+            justify="left",
+            wraplength=380,
+        )
+        self._update_threads_warning()
 
         # Bottom Buttons Row
         btn_row = tk.Frame(self.frame_confirmation, bg=self.c_bg)
@@ -273,6 +286,23 @@ class ConfirmModalWidgetsMixin:
             bg=self.c_success, fg="white", relief="flat", activebackground="#059669",
             cursor="hand2", padx=14, pady=5, command=self._on_open_file
         )
+
+    def _update_threads_warning(self, event=None):
+        """Displays a warning label if 32 parallel connections are chosen."""
+        if not hasattr(self, "lbl_threads_warn") or not self.lbl_threads_warn:
+            return
+        thread_val = str(self.combo_threads.get() if hasattr(self, "combo_threads") else "").strip()
+        if thread_val == "32":
+            from faqih_downloader.config import get_setting
+            lang = get_setting("language", "ar")
+            if str(lang).lower().startswith("en"):
+                msg = "⚠ Warning: 32 connections may overload some routers or trigger temporary server rate limits (8 or 16 recommended)."
+            else:
+                msg = "⚠ تحذير: 32 اتصالاً قد يسبب ضغطاً عالياً على بعض أجهزة الراوتر أو تقييداً مؤقتاً من بعض الخوادم (يُنصح بـ 8 أو 16)."
+            self.lbl_threads_warn.configure(text=msg)
+            self.lbl_threads_warn.pack(fill=tk.X, pady=(4, 0))
+        else:
+            self.lbl_threads_warn.pack_forget()
 
 
 __all__ = ["ConfirmModalWidgetsMixin"]

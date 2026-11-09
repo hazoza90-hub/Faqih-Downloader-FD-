@@ -234,6 +234,19 @@ class SettingsModalTabsMixin(SettingsModalExtraMixin):
         self.cb_threads.pack(side=tk.RIGHT)
         self.cb_threads.bind("<<ComboboxSelected>>", self._on_threads_changed)
 
+        self.lbl_threads_warn = tk.Label(
+            selectors,
+            text="",
+            font=("Segoe UI", 8),
+            fg="#f59e0b",
+            bg=self.c_bg,
+            anchor="w",
+            justify="left",
+            wraplength=420,
+        )
+        if hasattr(self, "_update_threads_warning"):
+            self._update_threads_warning(cur_conn)
+
         r2 = tk.Frame(selectors, bg=self.c_bg)
         r2.pack(fill=tk.X, pady=3)
         tk.Label(

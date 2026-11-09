@@ -319,29 +319,20 @@ def sync_clipper_state_from_body(session: Any, body: Dict[str, Any], opt: Any = 
 def enrich_stream_info_with_clip(stream_info: Any, opt: Any) -> Any:
     """Enriches YouTubeStreamInfo instance with clip range, dual subtitle, and audio boost configuration."""
     if opt and stream_info:
-        stream_info.clip_start_sec = float(getattr(opt, "clip_start_sec", 0.0) or 0.0)
-        stream_info.clip_end_sec = float(getattr(opt, "clip_end_sec", 0.0) or 0.0)
-        stream_info.subtitle_custom_edits = dict(getattr(opt, "subtitle_custom_edits", {}) or {})
-        stream_info.dual_subtitle_enabled = bool(getattr(opt, "dual_subtitle_enabled", False))
-        stream_info.secondary_subtitle_track = getattr(opt, "secondary_subtitle_track", None)
-        stream_info.audio_boost_enabled = bool(getattr(opt, "audio_boost_enabled", False))
-        stream_info.selected_chapter_title = str(getattr(opt, "selected_chapter_title", "") or "")
+        for a, dv in (("clip_start_sec", 0.0), ("clip_end_sec", 0.0), ("subtitle_custom_edits", {}), ("dual_subtitle_enabled", False), ("secondary_subtitle_track", None), ("audio_boost_enabled", False), ("selected_chapter_title", "")):
+            setattr(stream_info, a, getattr(opt, a, dv))
         if getattr(stream_info, "duration", 0) <= 0 and getattr(opt, "duration", 0) > 0:
             stream_info.duration = float(opt.duration)
     return stream_info
 
 def estimate_clip_total_bytes(stream_info: Any, full_total_bytes: int) -> int:
     """Calculates estimated byte size of the selected clip/chapter proportional to total media duration."""
-    if not stream_info or full_total_bytes <= 0: return full_total_bytes if full_total_bytes > 0 else 0
-    if isinstance(stream_info, dict):
-        c_start, c_end = float(stream_info.get("clip_start_sec") or 0.0), float(stream_info.get("clip_end_sec") or 0.0)
-        duration = float(stream_info.get("duration") or 0.0)
-    else:
-        c_start, c_end = float(getattr(stream_info, "clip_start_sec", 0.0) or 0.0), float(getattr(stream_info, "clip_end_sec", 0.0) or 0.0)
-        duration = float(getattr(stream_info, "duration", 0.0) or 0.0)
-    if c_end > c_start >= 0 and duration > 0 and (c_end - c_start) < duration - 0.5:
-        ratio = max(0.03, min(1.0, (c_end - c_start) / float(duration)))
-        return max(65536, int(full_total_bytes * ratio))
+    if not stream_info or full_total_bytes <= 0: return max(0, full_total_bytes)
+    cs = float(stream_info.get("clip_start_sec", 0.0) if isinstance(stream_info, dict) else getattr(stream_info, "clip_start_sec", 0.0) or 0.0)
+    ce = float(stream_info.get("clip_end_sec", 0.0) if isinstance(stream_info, dict) else getattr(stream_info, "clip_end_sec", 0.0) or 0.0)
+    dur = float(stream_info.get("duration", 0.0) if isinstance(stream_info, dict) else getattr(stream_info, "duration", 0.0) or 0.0)
+    if ce > cs >= 0 and dur > 0 and (ce - cs) < dur - 0.5:
+        return max(65536, int(full_total_bytes * max(0.03, min(1.0, (ce - cs) / dur))))
     return full_total_bytes
 
 def _format_ffmpeg_headers(headers: Optional[Dict[str, str]]) -> str:
@@ -378,18 +369,10 @@ def download_clipped_stream_direct(coordinator: Any) -> bool:
     c_start, c_end = float(getattr(si, "clip_start_sec", 0.0) or 0.0), float(getattr(si, "clip_end_sec", 0.0) or 0.0)
     if not (c_end > c_start >= 0): return False
     duration, clip_dur = float(getattr(si, "duration", 0.0) or 0.0), c_end - c_start
-    if duration > 0 and clip_dur >= duration - 0.5: return False
+    if duration > 0 and clip_dur >= duration * 0.85: return False
 
     v_url = getattr(si, "video_url", "") or ""
-    is_mock = bool(
-        hasattr(ffmpeg_bin, "_mock_name") or hasattr(subprocess.Popen, "_mock_name") or hasattr(subprocess, "_mock_name")
-        or "example.com" in v_url or v_url.startswith("https://rr1---sn-4g5ednsl.googlevideo.com/videoplayback?id=")
-    )
-    if (v_url.startswith("http://127.0.0.1") or v_url.startswith("http://localhost")) and not is_mock: return False
-
     raw_total = getattr(si, "video_size", 0) + (getattr(si, "audio_size", 0) if not getattr(si, "is_progressive", False) else 0)
-    if not is_mock and ((0 < raw_total <= 25 * 1024 * 1024) or (duration > 0 and clip_dur >= duration * 0.5)):
-        return False
     est_total = estimate_clip_total_bytes(si, raw_total) or (getattr(si, "video_size", 0) or 10485760)
 
     from ..core.chunk import DownloadChunk
@@ -402,20 +385,33 @@ def download_clipped_stream_direct(coordinator: Any) -> bool:
     coordinator._clip_chunks = chunks_list
     coordinator._clip_total_size = est_total
 
+    a_url = getattr(si, "audio_url", None) or ""
+    bridge, ffmpeg_v_url, ffmpeg_a_url = None, v_url, a_url
+    if any(dom in v_url or (a_url and dom in a_url) for dom in ("googlevideo.com", "gvt1.com")):
+        try:
+            from .preview_stream_proxy import PreviewStreamBridge
+            bridge = PreviewStreamBridge()
+            bridge.start()
+            if "googlevideo.com" in v_url or "gvt1.com" in v_url:
+                ffmpeg_v_url = bridge.register_stream(v_url, headers=getattr(si, "video_headers", {}))
+            if a_url and ("googlevideo.com" in a_url or "gvt1.com" in a_url):
+                ffmpeg_a_url = ffmpeg_v_url if a_url == v_url else bridge.register_stream(a_url, headers=getattr(si, "audio_headers", {}) or getattr(si, "video_headers", {}))
+        except Exception:
+            ffmpeg_v_url, ffmpeg_a_url = v_url, a_url
+
     clip_in = ["-ss", f"{c_start:.3f}"]
     reconn = ["-reconnect", "1", "-reconnect_on_network_error", "1", "-reconnect_on_http_error", "4xx,5xx", "-reconnect_delay_max", "4", "-multiple_requests", "1", "-seekable", "1", "-rw_timeout", "15000000"]
-    v_rec = reconn if (v_url.startswith("http://") or v_url.startswith("https://")) else []
-    v_hdr_str = _format_ffmpeg_headers(getattr(si, "video_headers", {}))
+    v_rec = reconn if (ffmpeg_v_url.startswith("http://") or ffmpeg_v_url.startswith("https://")) else []
+    v_hdr_str = _format_ffmpeg_headers(getattr(si, "video_headers", {})) if ffmpeg_v_url == v_url else ""
     v_hdr_args = ["-headers", v_hdr_str] if v_hdr_str else []
-    a_url = getattr(si, "audio_url", None) or ""
-    a_rec = reconn if (a_url.startswith("http://") or a_url.startswith("https://")) else []
+    a_rec = reconn if (ffmpeg_a_url.startswith("http://") or ffmpeg_a_url.startswith("https://")) else []
     is_prog, is_audio_only = bool(getattr(si, "is_progressive", False)), bool(getattr(si, "is_audio_only", False))
-    is_dual = bool(v_url and a_url and not is_prog and not is_audio_only)
+    is_dual = bool(ffmpeg_v_url and ffmpeg_a_url and not is_prog and not is_audio_only)
     if is_dual:
-        a_hdr_str = _format_ffmpeg_headers(getattr(si, "audio_headers", {}) or getattr(si, "video_headers", {}))
-        cmd = [str(ffmpeg_bin), *v_rec, *clip_in, *v_hdr_args, "-i", v_url, *a_rec, *clip_in, *(["-headers", a_hdr_str] if a_hdr_str else []), "-i", a_url, "-t", f"{clip_dur:.3f}", "-map", "0:v:0", "-map", "1:a:0"]
+        a_hdr_str = _format_ffmpeg_headers(getattr(si, "audio_headers", {}) or getattr(si, "video_headers", {})) if ffmpeg_a_url == a_url else ""
+        cmd = [str(ffmpeg_bin), *v_rec, *clip_in, *v_hdr_args, "-i", ffmpeg_v_url, *a_rec, *clip_in, *(["-headers", a_hdr_str] if a_hdr_str else []), "-i", ffmpeg_a_url, "-t", f"{clip_dur:.3f}", "-map", "0:v:0", "-map", "1:a:0"]
     else:
-        cmd = [str(ffmpeg_bin), *v_rec, *clip_in, *v_hdr_args, "-i", v_url, "-t", f"{clip_dur:.3f}"]
+        cmd = [str(ffmpeg_bin), *v_rec, *clip_in, *v_hdr_args, "-i", ffmpeg_v_url, "-t", f"{clip_dur:.3f}"]
 
     boost_args, boost_enabled = [], bool(getattr(si, "audio_boost_enabled", False))
     sub = getattr(si, "subtitle_track", None) or getattr(si, "selected_subtitle_track", None)
@@ -541,6 +537,9 @@ def download_clipped_stream_direct(coordinator: Any) -> bool:
         if hasattr(coordinator, "log"): coordinator.log(f"[CLIPPER] FFmpeg execution error: {ex}")
         return False
     finally:
+        if bridge is not None:
+            try: bridge.stop()
+            except Exception: pass
         if os.path.exists(temp_clip_path) and not getattr(si, "_already_trimmed", False):
             try: os.remove(temp_clip_path)
             except Exception: pass

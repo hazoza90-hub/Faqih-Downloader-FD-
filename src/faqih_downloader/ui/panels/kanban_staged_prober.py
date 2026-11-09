@@ -245,7 +245,10 @@ def _probe_media_worker(gui: Any, url_clean: str, base_dir: str, conn_count: int
                     pass
             elif hasattr(gui, "populate_main_media_bar") and isinstance(info_dict_meta, dict) and opts_list:
                 try:
-                    gui.populate_main_media_bar(media_ctx)
+                    try:
+                        gui.populate_main_media_bar(**media_ctx)
+                    except TypeError:
+                        gui.populate_main_media_bar(media_ctx)
                 except Exception:
                     pass
             if hasattr(gui, "update_idletasks"):

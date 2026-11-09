@@ -81,11 +81,12 @@ def run_cancellable_ffmpeg(cmd, cancel_event=None, creationflags=0, timeout=1800
                 except Exception: pass
                 return subprocess.CompletedProcess(cmd, returncode=-1, stdout="", stderr="Cancelled or timed out")
 
-            try:
-                out, err = proc.communicate(timeout=0.1)
+            if proc.poll() is not None:
+                comm = proc.communicate()
+                out, err = (comm[0], comm[1]) if isinstance(comm, tuple) and len(comm) == 2 else ("", "")
                 return subprocess.CompletedProcess(cmd, proc.returncode, out, err)
-            except subprocess.TimeoutExpired:
-                pass
+
+            time.sleep(0.05)
     finally:
         if proc and proc.poll() is None:
             try:

@@ -115,17 +115,6 @@ def build_core_patch_zip(
                     rel_to_pkg = os.path.relpath(full_p, src_pkg)
                     zf.write(full_p, os.path.join("faqih_downloader", rel_to_pkg).replace("\\", "/"))
         zf.writestr("smart_download/__init__.py", b"from faqih_downloader import *\n")
-        for icon_name in ("app_icon.png", "app_icon.ico"):
-            for cand_dir in (
-                os.path.join(os.path.dirname(os.path.dirname(src_pkg)), "assets"),
-                os.path.join(src_pkg, "assets"), os.path.join(os.getcwd(), "assets"),
-                os.path.dirname(os.path.dirname(src_pkg)), os.getcwd(),
-            ):
-                cand_icon = os.path.join(cand_dir, icon_name)
-                if os.path.isfile(cand_icon):
-                    zf.write(cand_icon, f"assets/{icon_name}")
-                    zf.write(cand_icon, f"faqih_downloader/assets/{icon_name}")
-                    break
 
     os.replace(part_out, out_abs)
     return out_abs
