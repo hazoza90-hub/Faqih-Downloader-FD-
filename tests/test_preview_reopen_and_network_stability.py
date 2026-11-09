@@ -456,6 +456,39 @@ class TestPreviewReopenAndNetworkStability(unittest.TestCase):
             self.assertEqual(len(app.detected_calls), 2)
             self.assertEqual(app.detected_calls[1], diff_url)
 
+    def test_force_check_clipboard_bypasses_last_detected_url_without_sequence_change(self):
+        """9. Calling _check_clipboard_now(force=True) re-triggers URL even without sequence change and matching _last_detected_url."""
+        from faqih_downloader.ui.controllers.clipboard_controller import ClipboardControllerMixin
+
+        class DummyClipboardApp(ClipboardControllerMixin):
+            def __init__(self):
+                self.root = MagicMock()
+                self.root.winfo_exists.return_value = True
+                self._last_clipboard_url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+                self._last_detected_url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+                self._last_clipboard_seq = 300
+                self.detected_calls = []
+                self.sniffer_platforms = {"youtube": True, "direct": True}
+
+            def _on_clipboard_url_detected(self, url):
+                self.detected_calls.append(url)
+
+        app = DummyClipboardApp()
+        same_url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+
+        # Sequence number unchanged (still 300)
+        with patch("faqih_downloader.ui.controllers.clipboard_controller.IS_WINDOWS", True), \
+             patch("faqih_downloader.ui.controllers.clipboard_controller.ctypes.windll.user32.GetClipboardSequenceNumber", return_value=300), \
+             patch("faqih_downloader.ui.controllers.clipboard_controller.get_clipboard_text", return_value=same_url):
+            # force=False: must NOT trigger because url == _last_clipboard_url and seq unchanged
+            app._check_clipboard_now(force=False)
+            self.assertEqual(len(app.detected_calls), 0)
+
+            # force=True: MUST trigger despite unchanged sequence and matching _last_detected_url
+            app._check_clipboard_now(force=True)
+            self.assertEqual(len(app.detected_calls), 1)
+            self.assertEqual(app.detected_calls[0], same_url)
+
 
 if __name__ == "__main__":
     unittest.main()

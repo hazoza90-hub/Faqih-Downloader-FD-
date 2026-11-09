@@ -152,7 +152,7 @@ class ClipboardControllerMixin(ClipboardDialogMixin):
 
         if not force and not seq_changed and (url == getattr(self, "_last_clipboard_url", None)):
             return
-        if not seq_changed and (url == getattr(self, "_last_detected_url", None)):
+        if not force and not seq_changed and (url == getattr(self, "_last_detected_url", None)):
             return
         self._last_clipboard_url = url
         self._last_detected_url = url
