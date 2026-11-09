@@ -277,11 +277,11 @@ def sync_clipper_state_from_body(session: Any, body: Dict[str, Any], opt: Any = 
     session.sub_custom_edits, session.dual_sub, session.sec_s_idx = edits, dual, s_idx
     session.audio_boost, session.chapter_title = boost, ch_title
 
-    sub_trks = getattr(session, "subtitle_tracks", None) or []
-    if sub_trks:
-        clean_sub_trks = [clone_clean_subtitle_track(t) for t in sub_trks]
-        session.subtitle_tracks = clean_sub_trks
-        sub_trks = clean_sub_trks
+    sub_trks = getattr(session, "subtitle_tracks", None)
+    if isinstance(sub_trks, list):
+        for idx in range(len(sub_trks)):
+            if isinstance(sub_trks[idx], dict): sub_trks[idx] = clone_clean_subtitle_track(sub_trks[idx])
+    else: sub_trks = []
     sec_trk = None
     if dual and sub_trks:
         if 0 <= s_idx < len(sub_trks): sec_trk = clone_clean_subtitle_track(sub_trks[s_idx])
@@ -307,12 +307,14 @@ def sync_clipper_state_from_body(session: Any, body: Dict[str, Any], opt: Any = 
         if sec_trk is not None or not dual: target_opt.secondary_subtitle_track = sec_trk
         st = getattr(target_opt, "selected_subtitle_track", None)
         if st and isinstance(st, dict):
-            st = clone_clean_subtitle_track(st)
-            target_opt.selected_subtitle_track = st
-            sc = st.setdefault("style_config", {})
-            sc["clip_start"], sc["clip_end"], sc["custom_edits"] = c_start, c_end, edits
-            sc["dual_sub"], sc["secondary_track"] = dual, sec_trk
-            sc["audio_boost"], sc["chapter_title"] = boost, ch_title
+            ex_st = dict(st.get("style_config", {})) if isinstance(st.get("style_config"), dict) else {}
+            st = clone_clean_subtitle_track(st); target_opt.selected_subtitle_track = st
+            sc = st.setdefault("style_config", ex_st)
+            sc.update({"clip_start": c_start, "clip_end": c_end, "custom_edits": edits, "dual_sub": dual, "secondary_track": clone_clean_subtitle_track(sec_trk) if (dual and sec_trk) else None, "audio_boost": boost, "chapter_title": ch_title})
+            if isinstance(sub_trks, list):
+                tid = st.get("sub_id")
+                for i, trk in enumerate(sub_trks):
+                    if isinstance(trk, dict) and tid and trk.get("sub_id") == tid: sub_trks[i] = st; break
 
 def enrich_stream_info_with_clip(stream_info: Any, opt: Any) -> Any:
     """Enriches YouTubeStreamInfo instance with clip range, dual subtitle, and audio boost configuration."""

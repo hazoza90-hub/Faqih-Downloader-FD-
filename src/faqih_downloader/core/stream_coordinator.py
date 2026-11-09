@@ -405,7 +405,9 @@ class StreamDownloadCoordinator:
                 _report_combined()
 
             def _on_a_error(err):
-                with self._lock: self._a_speed, self._a_active = 0.0, 0
+                with self._lock:
+                    self._a_speed = 0.0
+                    self._a_active = 0
                 a_error.append(err); a_completed.set(); _report_combined()
 
             def _on_a_progress(downloaded, total, speed, eta, active):
@@ -431,12 +433,12 @@ class StreamDownloadCoordinator:
                 on_error=_on_v_error
             )
 
-            a_conn = 2 if self.max_connections >= 4 else 1
+            a_conn = 2 if self.max_connections >= 4 else 1  # Wi-Fi safe balance: a_conn = 1 on slower connections
             a_engine = TurboDownloadEngine(
                 url=self.stream_info.audio_url,
                 destination_path=audio_tmp,
                 max_connections=a_conn,
-                allow_dynamic_split=(a_conn > 1),
+                allow_dynamic_split=(a_conn > 1),  # Dynamic split: allow_dynamic_split=False when a_conn <= 1
                 rate_limit_bytes_per_sec=self.rate_limit,
                 ssl_context=self.ssl_context,
                 headers=self.stream_info.audio_headers,

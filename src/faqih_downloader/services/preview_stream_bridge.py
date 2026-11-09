@@ -153,6 +153,12 @@ def _apply_session_sub_styles(opt: Any, session: PreviewSession) -> None:
             "pos_x": session.subtitle_pos_x, "pos_y": session.subtitle_pos_y,
             "subtitle_position": session.subtitle_position, "secondary_track": clean_sec,
         }
+        sub_trks = getattr(session, "subtitle_tracks", None)
+        if isinstance(sub_trks, list):
+            tid = clean_st.get("sub_id")
+            for i, trk in enumerate(sub_trks):
+                if isinstance(trk, dict) and tid and trk.get("sub_id") == tid:
+                    sub_trks[i] = clean_st; break
 
 
 class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
@@ -505,12 +511,10 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
 
         def _sync_tk():
             m = session.modal_ref
-            if not m or (hasattr(m, "winfo_exists") and not m.winfo_exists()):
-                return
+            if not m or (hasattr(m, "winfo_exists") and not m.winfo_exists()): return
             try:
                 iid = f"opt_{q_idx}"
-                if hasattr(m, "tree") and m.tree:
-                    m.tree.selection_set(iid); m.tree.focus(iid); m.tree.see(iid)
+                if hasattr(m, "tree") and m.tree: m.tree.selection_set(iid); m.tree.focus(iid); m.tree.see(iid)
                 if hasattr(m, "options") and 0 <= q_idx < len(m.options):
                     so = m.selected_option = m.options[q_idx]
                     so.selected_audio_track, so.selected_subtitle_track = session.selected_audio_track, session.selected_sub_track
@@ -535,7 +539,5 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
 
         parent = session.parent_app or (session.modal_ref.master if session.modal_ref else None)
         target = session.modal_ref if (session.modal_ref and hasattr(session.modal_ref, "after")) else parent
-        if target and hasattr(target, "after"):
-            target.after(0, _sync_tk)
-
+        if target and hasattr(target, "after"): target.after(0, _sync_tk)
         self._send_json({"status": "ok"})
