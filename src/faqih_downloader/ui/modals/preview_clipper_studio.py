@@ -47,7 +47,7 @@ def get_clipper_toolbar_html(
     audio_boost: bool = False, chapters: Optional[List[Dict[str, Any]]] = None
 ) -> str:
     """Generates HTML markup for the clipper toolbar, chapters selector, audio booster, and subtitle editor."""
-    import html as _html
+    import html as _html; clip_start, clip_end = float(clip_start or 0.0), float(clip_end or 0.0)
     c_s = f"{int(clip_start//60):02d}:{int(clip_start%60):02d}" if clip_start > 0 else "00:00"
     c_e = f"{int(clip_end//60):02d}:{int(clip_end%60):02d}" if clip_end > 0 else "00:00"
     badge_txt = f"المقطع: {int((clip_end-clip_start)//60):02d}:{int((clip_end-clip_start)%60):02d}" if clip_end > clip_start else "المقطع: كامل الفيديو"

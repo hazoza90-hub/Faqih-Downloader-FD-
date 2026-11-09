@@ -25,6 +25,8 @@ from faqih_downloader.services.media_clipper_engine import (
     clone_clean_subtitle_track, sync_clipper_state_from_body, download_clipped_stream_direct
 )
 from faqih_downloader.ui.modals.preview_html_builder import generate_preview_html
+from faqih_downloader.ui.modals.video_preview_modal import open_video_preview
+from faqih_downloader.ui.modals.preview_clipper_studio import get_clipper_toolbar_html
 from faqih_downloader.ui.panels.media_options_actions import MediaOptionsActionsMixin
 from faqih_downloader.core.engine import TurboDownloadEngine
 from faqih_downloader.core.chunk import DownloadChunk
@@ -276,6 +278,93 @@ class TestPreviewReopenAndNetworkStability(unittest.TestCase):
         self.assertIn("-reconnect_on_network_error 1", cmd_str)
         self.assertIn("-reconnect_delay_max 4", cmd_str)
         self.assertIn("-rw_timeout 15000000", cmd_str)
+
+    def test_e2e_second_copy_open_video_preview_after_cached_modal(self):
+        """5. End-to-End: open_video_preview succeeds without TypeError when clip bounds are None after cached modal reset."""
+        # 5a. Direct unit verification: get_clipper_toolbar_html must not fail when clip bounds are None
+        html_none = get_clipper_toolbar_html(clip_start=None, clip_end=None, dual_sub=None, audio_boost=None)
+        self.assertIn('value="00:00"', html_none)
+        self.assertIn("المقطع: كامل الفيديو", html_none)
+
+        # 5b. End-to-End simulation: Cached quality modal resets bounds to None, then preview is reopened
+        class MockApp(MediaOptionsActionsMixin):
+            def __init__(self):
+                self.root = None
+                self.conn_var = MagicMock()
+                self.conn_var.get.return_value = "8"
+                self.entry_custom_speed = MagicMock()
+                self.entry_custom_speed.get.return_value = "0"
+                self.history_manager = None
+                self._pending_media_context = None
+
+            def _get_base_downloads_dir(self):
+                return "C:\\Downloads"
+
+            def _theme_dict(self):
+                return {"c_bg": "#1e1e1e"}
+
+        app = MockApp()
+        raw_opt = VideoFormatOption(
+            format_id="22",
+            resolution_label="720p (HD)",
+            height=720,
+            ext="mp4",
+            filesize_approx=25_000_000,
+            fps=30,
+            vcodec="avc1",
+            acodec="mp4a",
+            video_url="https://example.com/720.mp4"
+        )
+        raw_opt.clip_start_sec = 15.0
+        raw_opt.clip_end_sec = 60.0
+        raw_opt.selected_chapter_title = "Highlight"
+        raw_opt.dual_subtitle_enabled = True
+
+        ctx = {
+            "info": {"title": "Wildlife Documentary", "duration": 300},
+            "options": [raw_opt],
+            "url": "https://www.youtube.com/watch?v=wildlife123",
+            "final_dest": "C:\\Downloads\\Wildlife Documentary [Highlight] [Clip].mp4",
+            "subtitle_tracks": [{"language": "ar", "label": "Arabic", "style_config": {"clip_start": 15.0}}],
+        }
+
+        with patch("faqih_downloader.ui.modals.quality_modal.QualitySelectionModal.__init__", return_value=None):
+            app._show_cached_quality_modal(ctx)
+
+        pending = app._pending_media_context
+        self.assertIsNotNone(pending)
+        res_opt = pending["options"][0]
+        self.assertIsNone(res_opt.clip_start_sec)
+        self.assertIsNone(res_opt.clip_end_sec)
+
+        mock_proc = MagicMock()
+        mock_proc.poll.return_value = 0
+        mock_proc.pid = 99999
+
+        created_html = None
+        try:
+            with patch("subprocess.Popen", return_value=mock_proc) as mock_popen:
+                created_html = open_video_preview(
+                    parent=None,
+                    url=ctx["url"],
+                    video_title="Wildlife Documentary",
+                    stream_info=res_opt,
+                    info_dict=ctx["info"],
+                    options=pending["options"],
+                    subtitle_tracks=pending["subtitle_tracks"],
+                    default_dest_path=pending["final_dest"],
+                    use_bridge=True,
+                )
+                self.assertIsNotNone(created_html)
+                self.assertTrue(os.path.isfile(created_html), "Preview HTML file must be created on disk")
+                self.assertTrue(mock_popen.called, "subprocess.Popen must be invoked to display preview window")
+                with open(created_html, "r", encoding="utf-8") as hf:
+                    html_content = hf.read()
+                self.assertIn("Wildlife Documentary", html_content)
+        finally:
+            if created_html and os.path.exists(created_html):
+                try: os.remove(created_html)
+                except Exception: pass
 
 
 if __name__ == "__main__":

@@ -39,10 +39,8 @@ if "--preview-html" in sys.argv:
     try:
         idx = sys.argv.index("--preview-html")
         if idx + 1 < len(sys.argv):
-            html_target = sys.argv[idx + 1]
-            import webview
-            webview.create_window("Faqih Downloader — Video Preview", html_target, width=860, height=560)
-            webview.start()
+            from faqih_downloader.ui.modals.video_preview_modal import _launch_webview_subprocess
+            _launch_webview_subprocess(sys.argv[idx + 1])
     except Exception:
         pass
     os._exit(0)
