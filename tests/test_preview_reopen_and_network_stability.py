@@ -366,6 +366,18 @@ class TestPreviewReopenAndNetworkStability(unittest.TestCase):
                 try: os.remove(created_html)
                 except Exception: pass
 
+    def test_preview_html_entrypoint_dispatches_webview_subprocess(self):
+        """6. CLI entrypoints (__main__.py, faqih_downloader.py, pyinstaller_entry.py) dispatch --preview-html."""
+        import subprocess
+        for entry_args in [
+            [sys.executable, "-m", "faqih_downloader", "--preview-html", "dummy.html"],
+            [sys.executable, "faqih_downloader.py", "--preview-html", "dummy.html"],
+            [sys.executable, "scripts/pyinstaller_entry.py", "--preview-html", "dummy.html"],
+        ]:
+            proc = subprocess.run(entry_args, capture_output=True, text=True, timeout=10)
+            self.assertEqual(proc.returncode, 0, f"Entrypoint {entry_args} failed with: {proc.stderr}")
+
 
 if __name__ == "__main__":
     unittest.main()
+
