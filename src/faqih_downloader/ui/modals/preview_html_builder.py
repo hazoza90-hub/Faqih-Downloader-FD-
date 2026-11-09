@@ -178,6 +178,7 @@ function selectQualityRow(idx) {
             if (hasDubAudio && dubAudioEl) { dubAudioEl.play().catch(e => {}); }
         }
         if (typeof applyLiveSubStyle === "function") applyLiveSubStyle();
+        if (typeof updateClipUI === "function") updateClipUI();
         syncStateToBridge();
         requestUpdatedFilename();
     }

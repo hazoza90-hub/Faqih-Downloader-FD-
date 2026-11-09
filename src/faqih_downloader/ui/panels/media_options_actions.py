@@ -3,6 +3,7 @@ MediaOptionsActionsMixin: Actions, modal triggers, preview handlers, and downloa
 for the Media Options Bar in Smart Download (SD).
 """
 import os
+import sys
 import copy
 from typing import Optional, Dict, Any, List
 
@@ -161,7 +162,9 @@ class MediaOptionsActionsMixin:
                 pass
             self._quality_modal = None
 
-        self._quality_modal = QualitySelectionModal(
+        _bar_mod = sys.modules.get("faqih_downloader.ui.panels.media_options_bar")
+        _q_cls = getattr(_bar_mod, "QualitySelectionModal", QualitySelectionModal) if _bar_mod else QualitySelectionModal
+        self._quality_modal = _q_cls(
             parent=self.root, video_title=raw_title, duration=duration, options=options, default_dest_path=dest,
             theme=theme_dict, on_confirm=_on_confirm, on_cancel=lambda: setattr(self, "_quality_modal", None),
             on_open_in_main=_on_open_in_main, parent_app=self, audio_tracks=ctx.get("audio_tracks", []),

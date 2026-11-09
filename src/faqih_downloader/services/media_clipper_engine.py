@@ -346,8 +346,9 @@ def _set_process_suspended(proc_or_pid: Any, suspend: bool) -> None:
     try:
         pid = getattr(proc_or_pid, "pid", proc_or_pid)
         is_obj = not isinstance(proc_or_pid, int)
-        cur_susp = getattr(proc_or_pid, "_os_suspended", None)
-        if is_obj and cur_susp is not None and not hasattr(cur_susp, "_mock_name") and bool(cur_susp) == bool(suspend): return
+        cur_susp = getattr(proc_or_pid, "_os_suspended", False)
+        if hasattr(cur_susp, "_mock_name"): cur_susp = False
+        if is_obj and bool(cur_susp) == bool(suspend): return
         if os.name == "nt":
             import ctypes
             if hasattr(ctypes, "windll") and isinstance(pid, int):

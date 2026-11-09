@@ -1642,6 +1642,12 @@ Non-mp4 clip cue
             _set_process_suspended(proc, False)
             self.assertEqual(mock_resume.call_count, 1)
 
+            # Calling resume on a fresh running process must NO-OP
+            fresh_proc = MagicMock()
+            fresh_proc.pid = 9998
+            _set_process_suspended(fresh_proc, False)
+            self.assertEqual(mock_resume.call_count, 1)
+
     def test_ffmpeg_progress_interpolation_and_header_skip(self):
         """Verifies dl_bytes compensation from pct when FFmpeg reports size=0KiB and skips header banner lines."""
         from faqih_downloader.core.stream_coordinator import StreamDownloadCoordinator
