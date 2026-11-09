@@ -135,13 +135,12 @@ class StreamDownloadCoordinator:
         with self._lock:
             self._is_paused = True
             self._pause_event.set()
-            if self._active_subproc and getattr(self._active_subproc, "pid", None):
+            if self._active_subproc:
                 try:
                     from ..services.media_clipper_engine import _set_process_suspended
-                    _set_process_suspended(self._active_subproc.pid, True)
+                    _set_process_suspended(self._active_subproc, True)
                 except Exception: pass
-            targets = list(self._active_engines) if self._active_engines else ([self.current_engine] if self.current_engine else [])
-            for eng in targets:
+            for eng in (self._active_engines or ([self.current_engine] if self.current_engine else [])):
                 try: eng.pause()
                 except Exception: pass
 
@@ -149,13 +148,12 @@ class StreamDownloadCoordinator:
         with self._lock:
             self._is_paused = False
             self._pause_event.clear()
-            if self._active_subproc and getattr(self._active_subproc, "pid", None):
+            if self._active_subproc:
                 try:
                     from ..services.media_clipper_engine import _set_process_suspended
-                    _set_process_suspended(self._active_subproc.pid, False)
+                    _set_process_suspended(self._active_subproc, False)
                 except Exception: pass
-            targets = list(self._active_engines) if self._active_engines else ([self.current_engine] if self.current_engine else [])
-            for eng in targets:
+            for eng in (self._active_engines or ([self.current_engine] if self.current_engine else [])):
                 try: eng.resume()
                 except Exception: pass
 
@@ -167,8 +165,7 @@ class StreamDownloadCoordinator:
                 try: self._active_subproc.kill()
                 except Exception: pass
                 self._active_subproc = None
-            targets = list(self._active_engines) if self._active_engines else ([self.current_engine] if self.current_engine else [])
-            for eng in targets:
+            for eng in (self._active_engines or ([self.current_engine] if self.current_engine else [])):
                 try: eng.cancel()
                 except Exception: pass
 
@@ -180,11 +177,8 @@ class StreamDownloadCoordinator:
                 try: self._active_subproc.kill()
                 except Exception: pass
                 self._active_subproc = None
-            targets = list(self._active_engines) if self._active_engines else ([self.current_engine] if self.current_engine else [])
-            for eng in targets:
-                try:
-                    if hasattr(eng, "safe_shutdown"): eng.safe_shutdown()
-                    else: eng.cancel()
+            for eng in (self._active_engines or ([self.current_engine] if self.current_engine else [])):
+                try: (eng.safe_shutdown() if hasattr(eng, "safe_shutdown") else eng.cancel())
                 except Exception: pass
 
     def update_url(self, new_url: str, headers: Optional[Dict[str, str]] = None):

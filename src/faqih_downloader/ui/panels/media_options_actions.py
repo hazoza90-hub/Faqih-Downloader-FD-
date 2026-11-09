@@ -16,7 +16,7 @@ except Exception:
 from faqih_downloader.i18n import tr
 from faqih_downloader.config import get_base_downloads_dir
 from faqih_downloader.utils.file_ops import apply_media_filename_tags, generate_unique_destination_path
-from faqih_downloader.services.youtube_service import VideoFormatOption, YouTubeResolver, sanitize_filename
+from faqih_downloader.services.youtube_service import VideoFormatOption, YouTubeResolver, sanitize_filename, format_filesize
 from ..modals.quality_modal import QualitySelectionModal
 from ..modals.confirm_modal import DownloadConfirmationModal
 from ..modals.quality_modal_helpers import resolve_preferred_option_index
@@ -170,8 +170,9 @@ class MediaOptionsActionsMixin:
 
     def _open_main_media_preview(self):
         """Launches in-app VidMate-style preview directly from the Main Window Media Bar."""
-        ctx = getattr(self, "_pending_media_context", None) or {}
-        url = ctx.get("url") or (self.entry_url.get().strip() if hasattr(self, "entry_url") else "")
+        u_in = (self.entry_url.get().strip() if hasattr(self, "entry_url") else "")
+        ctx = getattr(self, "_pending_media_context", None) or getattr(self, "_last_media_context", None) or (self._get_cached_media_context(u_in) if hasattr(self, "_get_cached_media_context") else None) or {}
+        url = ctx.get("url") or u_in
         info = ctx.get("info") or getattr(self, "_last_yt_info", {}) or {}
         raw_title = info.get("title") or ctx.get("title") or "Video Preview"
         opts = getattr(self, "_main_media_options", ctx.get("options", []))
@@ -192,6 +193,22 @@ class MediaOptionsActionsMixin:
         sel_pos = self._main_sub_pos_codes[self.cb_main_sub_pos.current()] if (hasattr(self, "cb_main_sub_pos") and hasattr(self, "_main_sub_pos_codes") and 0 <= self.cb_main_sub_pos.current() < len(self._main_sub_pos_codes)) else "bottom"
 
         def _sync_ui(opt, dst, stage_col1: bool = True):
+            if opt and opts:
+                for attr in ("clip_start_sec", "clip_end_sec", "selected_chapter_title", "audio_boost_enabled", "dual_subtitle_enabled", "subtitle_custom_edits", "duration"):
+                    if hasattr(opt, attr):
+                        val = getattr(opt, attr)
+                        for o in opts: setattr(o, attr, val)
+            if opts and hasattr(self, "cb_main_quality"):
+                from faqih_downloader.services.media_clipper_engine import estimate_clip_total_bytes
+                q_vals = []
+                for o in opts:
+                    fs = getattr(o, "filesize_approx", 0) or getattr(o, "filesize", 0) or 0
+                    if fs: fs = estimate_clip_total_bytes(o, int(fs))
+                    sz = format_filesize(fs) if fs else "~"
+                    res_lbl = getattr(o, "resolution_label", "") or getattr(o, "resolution_name", "Video")
+                    ext = getattr(o, "ext", "mp4").upper()
+                    q_vals.append(f"{res_lbl} ({ext}) — {sz}")
+                self.cb_main_quality.configure(values=q_vals)
             if opt and opts and hasattr(self, "cb_main_quality"):
                 for i, o in enumerate(opts):
                     if o == opt or getattr(o, "format_id", None) == getattr(opt, "format_id", None):

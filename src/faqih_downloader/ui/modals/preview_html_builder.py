@@ -279,6 +279,7 @@ function getSyncPayload(extra) {
         sub_bg_mode: subBgMode, sub_pos_x: subPosX, sub_pos_y: subPosY, dest_path: destInput ? destInput.value.trim() : "",
         clip_start: (typeof clipStartSec !== "undefined" ? clipStartSec : 0.0),
         clip_end: (typeof clipEndSec !== "undefined" ? clipEndSec : 0.0),
+        duration: (typeof videoEl !== "undefined" && videoEl && !isNaN(videoEl.duration) && isFinite(videoEl.duration) && videoEl.duration > 0) ? parseFloat(videoEl.duration.toFixed(2)) : 0.0,
         sub_custom_edits: (typeof subCustomEdits !== "undefined" ? subCustomEdits : {}),
         dual_sub: (typeof dualSubEnabled !== "undefined" ? dualSubEnabled : false),
         sec_s_idx: (typeof secSubIndex !== "undefined" ? secSubIndex : -1),
@@ -449,7 +450,7 @@ def generate_preview_html(
             r_f = str(fps_val) if isinstance(fps_val, (int, float)) and fps_val > 0 else "—"
             r_s, r_n = html.escape(format_filesize(getattr(opt, "filesize_approx", 0))), html.escape(getattr(opt, "note", ""))
             s_cls = "opt-row selected" if idx == selected_q_idx else "opt-row"
-            rows.append(f'<tr class="{s_cls}" data-idx="{idx}" onclick="selectQualityRow({idx})"><td class="col-res"><strong>{r_l}</strong></td><td class="col-center">{r_e}</td><td class="col-right">{r_s}</td><td class="col-center">{r_f}</td><td class="col-note">{r_n}</td></tr>')
+            rows.append(f'<tr class="{s_cls}" data-idx="{idx}" data-raw-size="{int(getattr(opt, "filesize_approx", 0) or 0)}" onclick="selectQualityRow({idx})"><td class="col-res"><strong>{r_l}</strong></td><td class="col-center">{r_e}</td><td class="col-right col-size">{r_s}</td><td class="col-center">{r_f}</td><td class="col-note">{r_n}</td></tr>')
         a_opts = [f'<option value="{i}"{" selected" if i == sel_a_idx else ""}>{html.escape(t.get("label") or t.get("language") or f"Audio #{i}")}</option>' for i, t in enumerate(audio_tracks or [])] or ['<option value="0">Original Audio (Default)</option>']
         s_opts = [f'<option value="{i}"{" selected" if i == sel_s_idx else ""}>{html.escape(t.get("label") or t.get("language") or f"Subtitle #{i}")}</option>' for i, t in enumerate(subtitle_tracks or [])] or ['<option value="0">No Subtitles</option>']
         m_opts = [f'<option value="soft_embed"{" selected" if subtitle_embed_mode == "soft_embed" else ""}>Soft Embed (دمج ناعم)</option>', f'<option value="hard_burn"{" selected" if subtitle_embed_mode == "hard_burn" else ""}>Burn into Video (حرق دائم)</option>', f'<option value="srt_only"{" selected" if subtitle_embed_mode == "srt_only" else ""}>Save External .srt (ملف خارجي)</option>']

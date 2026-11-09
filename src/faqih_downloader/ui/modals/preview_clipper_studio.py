@@ -157,14 +157,54 @@ function populateAutoChaptersIfNeeded() {
     }
 }
 
+function formatClipBytes(bytes) {
+    if (!bytes || bytes <= 0) return "—";
+    if (bytes >= 1073741824) return (bytes / 1073741824).toFixed(1) + " GB";
+    if (bytes >= 1048576) return (bytes / 1048576).toFixed(1) + " MB";
+    if (bytes >= 1024) return (bytes / 1024).toFixed(1) + " KB";
+    return bytes + " B";
+}
+
 function updateClipUI() {
     const sIn = document.getElementById("clipStartInput"), eIn = document.getElementById("clipEndInput");
     const bDur = document.getElementById("clipDurationBadge"), bLoop = document.getElementById("btnLoopClip");
     if (sIn && !sIn._focused) sIn.value = secToTimeStr(clipStartSec);
     if (eIn && !eIn._focused) eIn.value = secToTimeStr(clipEndSec);
+
+    let ratio = 1.0;
+    if (clipEndSec > clipStartSec) {
+        let totalDur = (typeof videoEl !== "undefined" && videoEl && videoEl.duration > 0 && isFinite(videoEl.duration)) ? videoEl.duration : 0;
+        if (totalDur <= 0) {
+            const chSel = document.getElementById("chapterSelect");
+            if (chSel && chSel.options) {
+                for (let i = 0; i < chSel.options.length; i++) {
+                    const de = parseFloat(chSel.options[i].getAttribute("data-end") || 0);
+                    if (de > totalDur) totalDur = de;
+                }
+            }
+        }
+        if (totalDur > 0 && (clipEndSec - clipStartSec) < totalDur - 0.5) {
+            ratio = Math.max(0.03, Math.min(1.0, (clipEndSec - clipStartSec) / totalDur));
+        }
+    }
+
+    let selEstStr = "";
+    document.querySelectorAll(".opt-row[data-raw-size]").forEach(row => {
+        const raw = parseFloat(row.getAttribute("data-raw-size") || "0");
+        const cell = row.querySelector(".col-size");
+        if (cell && raw > 0) {
+            const estBytes = Math.round(raw * ratio);
+            const formatted = (ratio < 0.99 ? "~" : "") + formatClipBytes(ratio < 0.99 ? estBytes : raw);
+            cell.textContent = formatted;
+            if (row.classList.contains("selected") && ratio < 0.99) selEstStr = formatted;
+        }
+    });
+
     if (bDur) {
         if (clipEndSec > clipStartSec) {
-            bDur.textContent = selectedChapterTitle ? `📑 ${selectedChapterTitle.slice(0, 22)} (${secToTimeStr(clipEndSec - clipStartSec)})` : `✂️ المقطع: ${secToTimeStr(clipEndSec - clipStartSec)}`;
+            const durText = secToTimeStr(clipEndSec - clipStartSec);
+            const sizeSuffix = selEstStr ? ` • ${selEstStr}` : "";
+            bDur.textContent = selectedChapterTitle ? `📑 ${selectedChapterTitle.slice(0, 22)} (${durText}${sizeSuffix})` : `✂️ المقطع: ${durText}${sizeSuffix}`;
             bDur.className = "badge badge-res";
         } else {
             bDur.textContent = "المقطع: كامل الفيديو"; bDur.className = "badge badge-dim";

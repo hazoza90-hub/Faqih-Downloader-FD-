@@ -512,8 +512,8 @@ def handle_subtitles_post_download(
                     "subtitle_position": sub_pos,
                 }
                 sc.setdefault("custom_edits", getattr(stream_info, "subtitle_custom_edits", {}))
-                sc.setdefault("clip_start", getattr(stream_info, "clip_start_sec", 0.0))
-                sc.setdefault("clip_end", getattr(stream_info, "clip_end_sec", 0.0))
+                sc.setdefault("clip_start", getattr(stream_info, "clip_start_sec", 0.0)); sc.setdefault("clip_end", getattr(stream_info, "clip_end_sec", 0.0))
+                sc.setdefault("_already_trimmed", bool(getattr(stream_info, "_already_trimmed", False)))
                 sec_trk = getattr(stream_info, "secondary_subtitle_track", None) or sc.get("secondary_track")
                 if getattr(stream_info, "dual_subtitle_enabled", False) and sec_trk and isinstance(sec_trk, dict) and (sec_trk.get("url") or sec_trk.get("base_url")):
                     sec_f = f"{orig_stem}.sec.srt"

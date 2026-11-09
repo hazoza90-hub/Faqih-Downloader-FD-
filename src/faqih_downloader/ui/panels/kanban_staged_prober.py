@@ -38,6 +38,14 @@ def stage_media_option_in_col1(
 
     file_name = os.path.basename(final_dest) if final_dest else (raw_title or "video.mp4")
     file_size = getattr(selected_opt, "filesize", 0) or getattr(selected_opt, "filesize_approx", 0) or 0
+    if selected_opt:
+        if duration > 0 and not getattr(selected_opt, "duration", 0):
+            setattr(selected_opt, "duration", duration)
+        try:
+            from faqih_downloader.services.media_clipper_engine import estimate_clip_total_bytes
+            file_size = estimate_clip_total_bytes(selected_opt, int(file_size))
+        except Exception:
+            pass
     is_audio = bool(getattr(selected_opt, "is_audio_only", False))
     badge = getattr(selected_opt, "resolution_label", "") or getattr(selected_opt, "quality_label", "") or (getattr(selected_opt, "ext", "MP4") or "MP4").upper()
     category = "Audio" if is_audio else "Video"

@@ -1600,10 +1600,10 @@ Non-mp4 clip cue
 
         with patch("faqih_downloader.services.media_clipper_engine._set_process_suspended") as mock_suspend:
             coord.pause()
-            mock_suspend.assert_called_with(54321, True)
+            mock_suspend.assert_called_with(mock_proc, True)
 
             coord.resume()
-            mock_suspend.assert_called_with(54321, False)
+            mock_suspend.assert_called_with(mock_proc, False)
 
         # Test cancel in _run_coordinator does NOT fall through to start engines
         with patch("faqih_downloader.core.stream_coordinator.download_clipped_stream_direct", return_value=False), \
@@ -1611,6 +1611,129 @@ Non-mp4 clip cue
             coord._cancel_event.set()
             coord._run_coordinator()
             mock_engine_cls.assert_not_called()
+
+    def test_os_suspended_count_guard(self):
+        """Verifies that _set_process_suspended guards against multiple consecutive suspensions."""
+        import ctypes
+        from faqih_downloader.services.media_clipper_engine import _set_process_suspended
+        proc = MagicMock()
+        proc.pid = 9999
+
+        with patch.object(ctypes.windll.kernel32, "OpenProcess", return_value=123) as mock_open, \
+             patch.object(ctypes.windll.ntdll, "NtSuspendProcess") as mock_suspend, \
+             patch.object(ctypes.windll.ntdll, "NtResumeProcess") as mock_resume, \
+             patch.object(ctypes.windll.kernel32, "CloseHandle"), \
+             patch("os.name", "nt"):
+            # First suspend: should call NtSuspendProcess and set _os_suspended=True
+            _set_process_suspended(proc, True)
+            self.assertEqual(mock_suspend.call_count, 1)
+            self.assertTrue(getattr(proc, "_os_suspended", False))
+
+            # Second consecutive suspend: should NO-OP and NOT call NtSuspendProcess again
+            _set_process_suspended(proc, True)
+            self.assertEqual(mock_suspend.call_count, 1)
+
+            # First resume: should call NtResumeProcess and set _os_suspended=False
+            _set_process_suspended(proc, False)
+            self.assertEqual(mock_resume.call_count, 1)
+            self.assertFalse(getattr(proc, "_os_suspended", False))
+
+            # Second consecutive resume: should NO-OP and NOT call NtResumeProcess again
+            _set_process_suspended(proc, False)
+            self.assertEqual(mock_resume.call_count, 1)
+
+    def test_ffmpeg_progress_interpolation_and_header_skip(self):
+        """Verifies dl_bytes compensation from pct when FFmpeg reports size=0KiB and skips header banner lines."""
+        from faqih_downloader.core.stream_coordinator import StreamDownloadCoordinator
+        from faqih_downloader.services.youtube_models import YouTubeStreamInfo
+
+        si = YouTubeStreamInfo(
+            video_id="interp_test",
+            title="Interp Test",
+            clean_filename="interp.mp4",
+            is_progressive=True,
+            video_url="https://example.com/v.mp4",
+            duration=100.0,
+            clip_start_sec=0.0,
+            clip_end_sec=50.0,
+            video_size=10 * 1024 * 1024,
+        )
+        coord = StreamDownloadCoordinator(si, os.path.join(tempfile.gettempdir(), "interp.mp4"))
+        coord._is_running = True
+        progress_calls = []
+        coord.on_progress = lambda dl, tot, spd, eta, ac: progress_calls.append((dl, tot, spd, eta, ac))
+
+        mock_proc = MagicMock()
+        mock_proc.pid = 8888
+        mock_proc.returncode = 0
+        mock_proc.wait.return_value = 0
+        mock_proc.stderr.read.side_effect = [
+            b"ffmpeg version 6.0-full_build-www.gyan.dev Copyright (c) 2000-2023\n",
+            b"frame=  300 fps= 60 q=-0.0 size=       0KiB time=00:00:10.00 bitrate=   0.0kbits/s speed=1.99x\n",
+            b""
+        ]
+        mock_proc.stderr.read1 = mock_proc.stderr.read
+        mock_proc.poll.side_effect = [None, None, 0]
+
+        with patch("subprocess.Popen", return_value=mock_proc), \
+             patch("faqih_downloader.services.media_env_helpers.find_ffmpeg_bin", return_value="ffmpeg"), \
+             patch("os.path.isfile", return_value=True), \
+             patch("os.path.getsize", return_value=10 * 1024 * 1024), \
+             patch("os.replace"):
+            ok = download_clipped_stream_direct(coord)
+            self.assertTrue(ok)
+
+        # Header banner line must be skipped, progress must have received interpolated eff_dl > 0
+        self.assertGreaterEqual(len(progress_calls), 1)
+        first_call = progress_calls[0]
+        eff_dl, total_sz, spd, eta, ac = first_call
+        self.assertGreater(eff_dl, 0)
+        self.assertEqual(total_sz, coord._clip_total_size)
+        self.assertAlmostEqual(eff_dl / total_sz, 0.20, places=1)
+
+    def test_sync_clipper_state_propagates_to_all_options_and_kanban_col1(self):
+        """Verifies sync_clipper_state_from_body updates all session options and kanban col1 card has estimated size."""
+        from faqih_downloader.services.youtube_models import VideoFormatOption
+        from faqih_downloader.ui.panels.kanban_staged_prober import stage_media_option_in_col1
+
+        opt1 = VideoFormatOption(format_id="1080p", resolution_label="1080p", height=1080, ext="mp4", filesize_approx=100 * 1024 * 1024)
+        opt2 = VideoFormatOption(format_id="720p", resolution_label="720p", height=720, ext="mp4", filesize_approx=50 * 1024 * 1024)
+        opt3 = VideoFormatOption(format_id="480p", resolution_label="480p", height=480, ext="mp4", filesize_approx=25 * 1024 * 1024)
+
+        session = MagicMock()
+        session.options = [opt1, opt2, opt3]
+        session.info_dict = {"duration": 200.0}
+        session.subtitle_tracks = []
+        session.modal_ref = None
+
+        body = {
+            "clip_start": 20.0,
+            "clip_end": 70.0,
+            "chapter_title": "Test Chapter 1",
+            "duration": 200.0,
+        }
+        sync_clipper_state_from_body(session, body, opt=opt1)
+
+        for opt in (opt1, opt2, opt3):
+            self.assertEqual(opt.clip_start_sec, 20.0)
+            self.assertEqual(opt.clip_end_sec, 70.0)
+            self.assertEqual(opt.selected_chapter_title, "Test Chapter 1")
+            self.assertEqual(opt.duration, 200.0)
+
+        gui_mock = MagicMock()
+        gui_mock.stage_probed_link_in_col1 = MagicMock()
+        stage_media_option_in_col1(
+            gui=gui_mock,
+            url="https://example.com/video",
+            raw_title="Full Video",
+            selected_opt=opt1,
+            final_dest="/downloads/test.mp4",
+            duration=200
+        )
+        self.assertTrue(gui_mock.stage_probed_link_in_col1.called)
+        info_staged = gui_mock.stage_probed_link_in_col1.call_args[0][0]
+        self.assertLess(info_staged["file_size"], 100 * 1024 * 1024)
+        self.assertAlmostEqual(info_staged["file_size"] / (100 * 1024 * 1024), 0.25, places=2)
 
 
 if __name__ == "__main__":

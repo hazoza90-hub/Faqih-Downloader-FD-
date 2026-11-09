@@ -142,11 +142,8 @@ def trim_media_file(
     else:
         from .audio_and_chapters_engine import get_studio_audio_boost_filter
         af_filt = get_studio_audio_boost_filter()
-        if is_audio:
-            ac = "libmp3lame" if ext.lower() == ".mp3" else "aac"
-            cmd_boost = [ffmpeg_bin, "-y", "-ss", f"{clip_start:.3f}", "-to", f"{clip_end:.3f}", "-i", os.path.abspath(file_path), "-af", af_filt, "-c:a", ac, "-b:a", "192k", temp_clip]
-        else:
-            cmd_boost = [ffmpeg_bin, "-y", "-ss", f"{clip_start:.3f}", "-to", f"{clip_end:.3f}", "-i", os.path.abspath(file_path), "-c:v", "copy", "-af", af_filt, "-c:a", "aac", "-b:a", "192k", "-avoid_negative_ts", "make_zero", temp_clip]
+        ac = "libmp3lame" if ext.lower() == ".mp3" else "aac"
+        cmd_boost = [ffmpeg_bin, "-y", "-ss", f"{clip_start:.3f}", "-to", f"{clip_end:.3f}", "-i", os.path.abspath(file_path)] + (["-af", af_filt, "-c:a", ac, "-b:a", "192k"] if is_audio else ["-c:v", "copy", "-af", af_filt, "-c:a", "aac", "-b:a", "192k", "-avoid_negative_ts", "make_zero"]) + [temp_clip]
         res = run_cancellable_ffmpeg(cmd_boost, cancel_event=cancel_event)
         if res.returncode == 0 and os.path.isfile(temp_clip) and os.path.getsize(temp_clip) > 0:
             actual_dur = probe_media_duration(temp_clip, ffmpeg_bin)
@@ -156,15 +153,10 @@ def trim_media_file(
         if os.path.exists(temp_clip):
             try: os.remove(temp_clip)
             except Exception: pass
-        af_args = []
-        if audio_boost:
-            from .audio_and_chapters_engine import get_studio_audio_boost_filter
-            af_args = ["-af", get_studio_audio_boost_filter()]
-        if is_audio:
-            ac = "libmp3lame" if ext.lower() == ".mp3" else "aac"
-            cmd_rec = [ffmpeg_bin, "-y", "-ss", f"{clip_start:.3f}", "-to", f"{clip_end:.3f}", "-i", os.path.abspath(file_path), *af_args, "-c:a", ac, "-b:a", "192k", temp_clip]
-        else:
-            cmd_rec = [ffmpeg_bin, "-y", "-ss", f"{clip_start:.3f}", "-to", f"{clip_end:.3f}", "-i", os.path.abspath(file_path), "-c:v", "libx264", "-preset", "ultrafast", "-crf", "22", *af_args, "-c:a", "aac", "-b:a", "192k", temp_clip]
+        from .audio_and_chapters_engine import get_studio_audio_boost_filter
+        af_args = ["-af", get_studio_audio_boost_filter()] if audio_boost else []
+        ac = "libmp3lame" if ext.lower() == ".mp3" else "aac"
+        cmd_rec = [ffmpeg_bin, "-y", "-ss", f"{clip_start:.3f}", "-to", f"{clip_end:.3f}", "-i", os.path.abspath(file_path)] + ([*af_args, "-c:a", ac, "-b:a", "192k"] if is_audio else ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "22", *af_args, "-c:a", "aac", "-b:a", "192k"]) + [temp_clip]
         res = run_cancellable_ffmpeg(cmd_rec, cancel_event=cancel_event)
 
     if res.returncode == 0 and os.path.isfile(temp_clip) and os.path.getsize(temp_clip) > 0:
@@ -223,68 +215,49 @@ def process_post_download_clip_and_subtitles(
 
     if has_sub:
         sc = getattr(stream_info, "style_config", None) or {}
-        sc["clip_start"], sc["clip_end"] = clip_start, clip_end
-        sc["custom_edits"] = getattr(stream_info, "subtitle_custom_edits", {})
-        sc["dual_sub"] = getattr(stream_info, "dual_subtitle_enabled", False)
-        sc["secondary_track"] = getattr(stream_info, "secondary_subtitle_track", None)
-        sc["audio_boost"] = audio_boost
-        sc["chapter_title"] = chapter_title
-        sc["_already_trimmed"] = bool(getattr(stream_info, "_already_trimmed", False))
+        sc.update({"clip_start": clip_start, "clip_end": clip_end, "custom_edits": getattr(stream_info, "subtitle_custom_edits", {}), "dual_sub": getattr(stream_info, "dual_subtitle_enabled", False), "secondary_track": getattr(stream_info, "secondary_subtitle_track", None), "audio_boost": audio_boost, "chapter_title": chapter_title, "_already_trimmed": bool(getattr(stream_info, "_already_trimmed", False))})
         setattr(stream_info, "style_config", sc)
         if isinstance(sub, dict): sub.setdefault("style_config", {}).update(sc)
-        mode = getattr(stream_info, "subtitle_embed_mode", "hard_burn")
         from .subtitle_processor import handle_subtitles_post_download
         f_path = handle_subtitles_post_download(stream_info, target_path, on_log=on_log, cancel_event=cancel_event)
         if f_path and os.path.isfile(f_path):
             target_path = f_path
-            if getattr(stream_info, "_audio_boost_applied", False):
-                boost_applied = True
+            if getattr(stream_info, "_audio_boost_applied", False): boost_applied = True
 
     if has_clip and not getattr(stream_info, "_already_trimmed", False) and os.path.isfile(target_path):
         from .media_env_helpers import find_ffmpeg_bin
-        ff = find_ffmpeg_bin()
-        exp_d = clip_end - clip_start
+        ff = find_ffmpeg_bin(); exp_d = clip_end - clip_start
         cur_d = probe_media_duration(target_path, ff) if ff else -1.0
-        need_trim = (cur_d <= 0 or cur_d > exp_d + 0.8)
         apply_boost_here = (audio_boost and not boost_applied)
-        if need_trim or apply_boost_here:
-            ok = trim_media_file(target_path, clip_start, clip_end, ffmpeg_bin=ff, on_log=on_log, cancel_event=cancel_event, audio_boost=apply_boost_here)
-            if ok and apply_boost_here:
+        if (cur_d <= 0 or cur_d > exp_d + 0.8) or apply_boost_here:
+            if trim_media_file(target_path, clip_start, clip_end, ffmpeg_bin=ff, on_log=on_log, cancel_event=cancel_event, audio_boost=apply_boost_here) and apply_boost_here:
                 boost_applied = True
 
     if audio_boost and not boost_applied and os.path.isfile(target_path):
         from .audio_and_chapters_engine import apply_audio_boost_to_file
         from .media_env_helpers import find_ffmpeg_bin
-        if apply_audio_boost_to_file(target_path, ffmpeg_bin=find_ffmpeg_bin(), on_log=on_log, cancel_event=cancel_event):
-            boost_applied = True
+        if apply_audio_boost_to_file(target_path, ffmpeg_bin=find_ffmpeg_bin(), on_log=on_log, cancel_event=cancel_event): boost_applied = True
 
     if (has_clip or chapter_title) and os.path.isfile(target_path):
-        d_dir, f_name = os.path.split(target_path)
-        stem, ext = os.path.splitext(f_name)
-        clean_ch = ""
+        d_dir, f_name = os.path.split(target_path); stem, ext = os.path.splitext(f_name); clean_ch = ""
         if chapter_title:
             clean_ch = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '', chapter_title).strip()
             clean_ch = re.sub(r'^[\[\(\]\)\s\-–—:|•~.]+', '', clean_ch)
             clean_ch = re.sub(r'[\[\(\]\)\s\-–—:|•~.]+$', '', clean_ch).strip()
         new_stem = stem
-        if clean_ch and f"[{clean_ch}]" not in new_stem:
-            new_stem = f"{new_stem} [{clean_ch}]"
-        if has_clip and "[Clip]" not in new_stem:
-            new_stem = f"{new_stem} [Clip]"
+        if clean_ch and f"[{clean_ch}]" not in new_stem: new_stem = f"{new_stem} [{clean_ch}]"
+        if has_clip and "[Clip]" not in new_stem: new_stem = f"{new_stem} [Clip]"
         if new_stem != stem:
             new_path = os.path.join(d_dir, f"{new_stem}{ext}")
             for _ in range(4):
                 try:
-                    os.replace(target_path, new_path)
-                    target_path = new_path
-                    old_srt = os.path.join(d_dir, f"{stem}.srt")
-                    new_srt = os.path.join(d_dir, f"{new_stem}.srt")
+                    os.replace(target_path, new_path); target_path = new_path
+                    old_srt, new_srt = os.path.join(d_dir, f"{stem}.srt"), os.path.join(d_dir, f"{new_stem}.srt")
                     if os.path.isfile(old_srt):
                         try: os.replace(old_srt, new_srt)
                         except Exception: pass
                     break
-                except Exception:
-                    time.sleep(0.08)
+                except Exception: time.sleep(0.08)
     return target_path
 
 def sync_clipper_state_from_body(session: Any, body: Dict[str, Any], opt: Any = None) -> None:
@@ -296,37 +269,46 @@ def sync_clipper_state_from_body(session: Any, body: Dict[str, Any], opt: Any = 
     s_idx = int(body.get("sec_s_idx", getattr(session, "sec_s_idx", -1)))
     boost = bool(body.get("audio_boost", getattr(session, "audio_boost", False)))
     ch_title = str(body.get("chapter_title", getattr(session, "chapter_title", "")) or "").strip()
+    vid_dur = float(body.get("duration", 0.0) or 0.0)
+    if vid_dur <= 0 and isinstance(getattr(session, "info_dict", None), dict):
+        vid_dur = float(session.info_dict.get("duration", 0.0) or 0.0)
+    if vid_dur > 0 and isinstance(getattr(session, "info_dict", None), dict):
+        if float(session.info_dict.get("duration", 0.0) or 0.0) <= 0: session.info_dict["duration"] = vid_dur
 
     session.clip_start, session.clip_end = c_start, c_end
     session.sub_custom_edits, session.dual_sub, session.sec_s_idx = edits, dual, s_idx
     session.audio_boost, session.chapter_title = boost, ch_title
 
-    if opt:
-        opt.clip_start_sec, opt.clip_end_sec = c_start, c_end
-        opt.subtitle_custom_edits, opt.dual_subtitle_enabled = edits, dual
-        opt.audio_boost_enabled, opt.selected_chapter_title = boost, ch_title
-        if dual and session.subtitle_tracks:
-            if 0 <= s_idx < len(session.subtitle_tracks): opt.secondary_subtitle_track = session.subtitle_tracks[s_idx]
-            else:
-                for idx, trk in enumerate(session.subtitle_tracks):
-                    if idx > 0 and (not session.selected_sub_track or trk != session.selected_sub_track):
-                        opt.secondary_subtitle_track = trk; break
-        st = getattr(opt, "selected_subtitle_track", None)
+    sub_trks = getattr(session, "subtitle_tracks", None) or []
+    sec_trk = None
+    if dual and sub_trks:
+        if 0 <= s_idx < len(sub_trks): sec_trk = sub_trks[s_idx]
+        else:
+            for idx, trk in enumerate(sub_trks):
+                if idx > 0 and (not getattr(session, "selected_sub_track", None) or trk != session.selected_sub_track):
+                    sec_trk = trk; break
+
+    target_opts = list(getattr(session, "options", []) or [])
+    m = getattr(session, "modal_ref", None)
+    if m and hasattr(m, "options") and m.options:
+        for mo in m.options:
+            if mo not in target_opts: target_opts.append(mo)
+    if opt and opt not in target_opts: target_opts.append(opt)
+    if m and hasattr(m, "selected_option") and m.selected_option and m.selected_option not in target_opts:
+        target_opts.append(m.selected_option)
+
+    for target_opt in target_opts:
+        target_opt.clip_start_sec, target_opt.clip_end_sec = c_start, c_end
+        target_opt.subtitle_custom_edits, target_opt.dual_subtitle_enabled = edits, dual
+        target_opt.audio_boost_enabled, target_opt.selected_chapter_title = boost, ch_title
+        if vid_dur > 0: setattr(target_opt, "duration", vid_dur)
+        if sec_trk is not None or not dual: target_opt.secondary_subtitle_track = sec_trk
+        st = getattr(target_opt, "selected_subtitle_track", None)
         if st and isinstance(st, dict):
             sc = st.setdefault("style_config", {})
             sc["clip_start"], sc["clip_end"], sc["custom_edits"] = c_start, c_end, edits
-            sc["dual_sub"], sc["secondary_track"] = dual, getattr(opt, "secondary_subtitle_track", None)
+            sc["dual_sub"], sc["secondary_track"] = dual, sec_trk
             sc["audio_boost"], sc["chapter_title"] = boost, ch_title
-
-    m = getattr(session, "modal_ref", None)
-    if m and hasattr(m, "selected_option") and m.selected_option:
-        m.selected_option.clip_start_sec = c_start
-        m.selected_option.clip_end_sec = c_end
-        m.selected_option.subtitle_custom_edits = edits
-        m.selected_option.dual_subtitle_enabled = dual
-        m.selected_option.audio_boost_enabled = boost
-        m.selected_option.selected_chapter_title = ch_title
-        if opt: m.selected_option.secondary_subtitle_track = getattr(opt, "secondary_subtitle_track", None)
 
 def enrich_stream_info_with_clip(stream_info: Any, opt: Any) -> Any:
     """Enriches YouTubeStreamInfo instance with clip range, dual subtitle, and audio boost configuration."""
@@ -338,6 +320,8 @@ def enrich_stream_info_with_clip(stream_info: Any, opt: Any) -> Any:
         stream_info.secondary_subtitle_track = getattr(opt, "secondary_subtitle_track", None)
         stream_info.audio_boost_enabled = bool(getattr(opt, "audio_boost_enabled", False))
         stream_info.selected_chapter_title = str(getattr(opt, "selected_chapter_title", "") or "")
+        if getattr(stream_info, "duration", 0) <= 0 and getattr(opt, "duration", 0) > 0:
+            stream_info.duration = float(opt.duration)
     return stream_info
 
 def estimate_clip_total_bytes(stream_info: Any, full_total_bytes: int) -> int:
@@ -358,18 +342,23 @@ def _format_ffmpeg_headers(headers: Optional[Dict[str, str]]) -> str:
     """Formats a dict of HTTP headers into a CRLF-separated string for FFmpeg -headers."""
     return "".join(f"{k}: {v}\r\n" for k, v in headers.items() if k and v) if isinstance(headers, dict) else ""
 
-def _set_process_suspended(pid: int, suspend: bool) -> None:
+def _set_process_suspended(proc_or_pid: Any, suspend: bool) -> None:
     try:
+        pid = getattr(proc_or_pid, "pid", proc_or_pid)
+        is_obj = not isinstance(proc_or_pid, int)
+        cur_susp = getattr(proc_or_pid, "_os_suspended", None)
+        if is_obj and cur_susp is not None and not hasattr(cur_susp, "_mock_name") and bool(cur_susp) == bool(suspend): return
         if os.name == "nt":
             import ctypes
-            if hasattr(ctypes, "windll"):
+            if hasattr(ctypes, "windll") and isinstance(pid, int):
                 h = ctypes.windll.kernel32.OpenProcess(0x0800, False, pid)
                 if h:
                     try: (ctypes.windll.ntdll.NtSuspendProcess if suspend else ctypes.windll.ntdll.NtResumeProcess)(h)
                     finally: ctypes.windll.kernel32.CloseHandle(h)
         else:
             import signal
-            os.kill(pid, signal.SIGSTOP if suspend else signal.SIGCONT)
+            if isinstance(pid, int): os.kill(pid, signal.SIGSTOP if suspend else signal.SIGCONT)
+        if is_obj: setattr(proc_or_pid, "_os_suspended", bool(suspend))
     except Exception: pass
 
 def download_clipped_stream_direct(coordinator: Any) -> bool:
@@ -461,9 +450,9 @@ def download_clipped_stream_direct(coordinator: Any) -> bool:
                 return False
 
             if coordinator.is_paused:
-                _set_process_suspended(proc.pid, True)
+                _set_process_suspended(proc, True)
                 while coordinator.is_paused and not coordinator._cancel_event.is_set() and coordinator.is_running: time.sleep(0.1)
-                _set_process_suspended(proc.pid, False)
+                _set_process_suspended(proc, False)
 
             raw = b""
             try: raw = proc.stderr.read1(1024) if hasattr(proc.stderr, "read1") else proc.stderr.read(1024)
@@ -480,6 +469,7 @@ def download_clipped_stream_direct(coordinator: Any) -> bool:
                 line_str = buf[:idx].decode("utf-8", errors="replace"); buf = buf[idx + 1:]
                 m_sz = re.search(r"(?:size|Lsize)=\s*([0-9]+(?:\.[0-9]+)?)\s*([kKmMgG]?i?B)?", line_str, re.IGNORECASE)
                 m_tm = re.search(r"time=(\d+):(\d+):(\d+(?:\.\d+)?)", line_str)
+                if not m_sz and not m_tm: continue
                 if m_tm: last_time_sec = float(m_tm.group(1)) * 3600.0 + float(m_tm.group(2)) * 60.0 + float(m_tm.group(3))
                 if m_sz:
                     val = float(m_sz.group(1)); unit = (m_sz.group(2) or "").lower()
@@ -498,10 +488,11 @@ def download_clipped_stream_direct(coordinator: Any) -> bool:
                             eb = (i + 1) * p_sz - 1 if i < chunk_count - 1 else max(sb, dynamic_total - 1)
                             with chk.lock: chk.start_byte, chk.end_byte = sb, max(sb, eb)
 
-                el = max(0.05, time.time() - start_time); speed = dl_bytes / el; rem = max(0, dynamic_total - dl_bytes)
+                eff_dl = max(dl_bytes, int(dynamic_total * (pct / 100.0))) if (pct > 0 and dynamic_total > 0) else dl_bytes
+                el = max(0.05, time.time() - start_time); speed = eff_dl / el; rem = max(0, dynamic_total - eff_dl)
                 eta_s = int(rem / speed) if speed > 1024 and rem > 0 else 0; eta_str = f"{eta_s // 60}:{eta_s % 60:02d}"
 
-                accum = dl_bytes
+                accum = eff_dl
                 for c in coordinator._clip_chunks:
                     with c.lock:
                         c_tot = c.total_bytes
@@ -510,7 +501,8 @@ def download_clipped_stream_direct(coordinator: Any) -> bool:
                         else: c.downloaded_bytes, c.status = 0, "pending"
 
                 ac = sum(1 for c in coordinator._clip_chunks if c.status == "active") or 1
-                if coordinator.on_progress: coordinator.on_progress(dl_bytes, dynamic_total, speed, eta_str, ac)
+                coordinator._last_active_speed = speed
+                if coordinator.on_progress: coordinator.on_progress(eff_dl, dynamic_total, speed, eta_str, ac)
                 if coordinator.on_chunk_update:
                     try: coordinator.on_chunk_update()
                     except Exception: pass

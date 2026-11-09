@@ -390,6 +390,8 @@ class YouTubeDownloadControllerMixin:
             if hasattr(self, "history_manager") and self.history_manager:
                 q_url = getattr(stream_info, "webpage_url", "") or (self.entry_url.get().strip() if hasattr(self, "entry_url") else "")
                 est_sz = (getattr(stream_info, "video_size", 0) or 0) + (getattr(stream_info, "audio_size", 0) or 0)
+                from faqih_downloader.services.media_clipper_engine import estimate_clip_total_bytes
+                est_sz = estimate_clip_total_bytes(stream_info, est_sz)
                 self.history_manager.add_or_update_entry(
                     url=q_url, file_path=final_dest, size_bytes=est_sz, status="Queued", elapsed_sec=0.0
                 )
@@ -455,6 +457,8 @@ class YouTubeDownloadControllerMixin:
             try:
                 q_url = getattr(stream_info, "webpage_url", "") or (self.entry_url.get().strip() if hasattr(self, "entry_url") else "")
                 est_sz = (getattr(stream_info, "video_size", 0) or 0) + (getattr(stream_info, "audio_size", 0) or 0)
+                from faqih_downloader.services.media_clipper_engine import estimate_clip_total_bytes
+                est_sz = estimate_clip_total_bytes(stream_info, est_sz)
                 self.history_manager.add_or_update_entry(url=q_url, file_path=final_dest, size_bytes=est_sz, status="In Progress", elapsed_sec=0.0)
                 self._refresh_history_table()
             except Exception: pass

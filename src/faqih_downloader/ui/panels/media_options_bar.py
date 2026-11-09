@@ -159,8 +159,12 @@ class MediaOptionsBarMixin(MediaOptionsActionsMixin):
 
         # 1. Populate Quality Combobox
         q_vals = []
+        info_dur = float((info.get("duration") if isinstance(info, dict) else getattr(info, "duration", 0)) or 0.0)
+        from faqih_downloader.services.media_clipper_engine import estimate_clip_total_bytes
         for opt in self._main_media_options:
-            fs = getattr(opt, "filesize_approx", 0) or getattr(opt, "filesize", 0)
+            if info_dur > 0 and not getattr(opt, "duration", 0): setattr(opt, "duration", info_dur)
+            fs = getattr(opt, "filesize_approx", 0) or getattr(opt, "filesize", 0) or 0
+            if fs: fs = estimate_clip_total_bytes(opt, int(fs))
             sz = format_filesize(fs) if fs else "~"
             res_lbl = getattr(opt, "resolution_label", "") or getattr(opt, "resolution_name", "Video")
             ext = getattr(opt, "ext", "mp4").upper()
@@ -247,7 +251,11 @@ class MediaOptionsBarMixin(MediaOptionsActionsMixin):
 
         opts = getattr(self, "_main_media_options", []) or ctx.get("options") or []
         q_idx = self.cb_main_quality.current() if hasattr(self, "cb_main_quality") else -1
-        opt = opts[q_idx] if (0 <= q_idx < len(opts)) else (ctx.get("selected_option") or ctx.get("selected_opt"))
+        prev_opt = ctx.get("selected_option") or ctx.get("selected_opt")
+        opt = opts[q_idx] if (0 <= q_idx < len(opts)) else prev_opt
+        if prev_opt and opt and prev_opt != opt:
+            for attr in ("clip_start_sec", "clip_end_sec", "selected_chapter_title", "audio_boost_enabled", "dual_subtitle_enabled", "subtitle_custom_edits", "duration"):
+                if hasattr(prev_opt, attr): setattr(opt, attr, getattr(prev_opt, attr))
 
         # Audio track
         audios = getattr(self, "_main_audio_tracks", []) or ctx.get("audio_tracks") or []
@@ -283,6 +291,18 @@ class MediaOptionsBarMixin(MediaOptionsActionsMixin):
 
         ctx["selected_option"] = opt
         ctx["selected_opt"] = opt
+        if opts and hasattr(self, "cb_main_quality"):
+            from faqih_downloader.services.media_clipper_engine import estimate_clip_total_bytes
+            q_vals = []
+            for o in opts:
+                fs = getattr(o, "filesize_approx", 0) or getattr(o, "filesize", 0) or 0
+                if fs: fs = estimate_clip_total_bytes(o, int(fs))
+                sz = format_filesize(fs) if fs else "~"
+                res_lbl = getattr(o, "resolution_label", "") or getattr(o, "resolution_name", "Video")
+                ext = getattr(o, "ext", "mp4").upper()
+                q_vals.append(f"{res_lbl} ({ext}) — {sz}")
+            self.cb_main_quality.configure(values=q_vals)
+            if 0 <= q_idx < len(q_vals): self.cb_main_quality.current(q_idx)
 
         # Update destination path filename tags
         cur_dest = self.entry_dest.get().strip() if hasattr(self, "entry_dest") else ""
