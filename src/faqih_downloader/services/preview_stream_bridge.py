@@ -1,10 +1,4 @@
-"""
-Built-In In-Memory Preview & Control Bridge (preview_stream_bridge.py).
-Provides a lightweight, zero-dependency, local loopback HTTP server (127.0.0.1)
-for hardware-accelerated HTML5 video preview, header-forwarding media stream proxy,
-live audio dubbing stream delivery, asynchronous WebVTT subtitle compilation,
-and real-time bidirectional GUI control actions.
-"""
+"""Built-In In-Memory Preview & Control Bridge: lightweight HTTP server for preview, proxy, and controls."""
 import http.server, urllib.request, urllib.parse, urllib.error
 import threading, json, os, re, tempfile, uuid
 from typing import Dict, List, Optional, Any, Callable
@@ -159,6 +153,22 @@ def _apply_session_sub_styles(opt: Any, session: PreviewSession) -> None:
             for i, trk in enumerate(sub_trks):
                 if isinstance(trk, dict) and tid and trk.get("sub_id") == tid:
                     sub_trks[i] = clean_st; break
+
+
+def _schedule_on_tk(session: PreviewSession, fn: Callable[[], None], delay_ms: int = 0) -> None:
+    app = session.parent_app
+    tk_w = getattr(app, "root", None) if app else None
+    if not tk_w or not hasattr(tk_w, "after"):
+        tk_w = session.modal_ref if (session.modal_ref and hasattr(session.modal_ref, "after")) else None
+    if delay_ms <= 0 and app and hasattr(app, "dispatch_to_main_thread"):
+        app.dispatch_to_main_thread(fn)
+    elif tk_w and hasattr(tk_w, "after"):
+        try: tk_w.after(delay_ms, fn)
+        except Exception:
+            if delay_ms > 0: threading.Timer(delay_ms / 1000.0, fn).start()
+            else: fn()
+    elif delay_ms > 0: threading.Timer(delay_ms / 1000.0, fn).start()
+    else: fn()
 
 
 class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
@@ -386,11 +396,7 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
             except Exception: pass
             finally: browse_evt.set()
 
-        parent = session.parent_app or (session.modal_ref.master if session.modal_ref else None)
-        target = session.modal_ref if (session.modal_ref and hasattr(session.modal_ref, "after")) else parent
-        if target and hasattr(target, "after"):
-            target.after(0, _ask); browse_evt.wait(timeout=60.0)
-        else: _ask()
+        _schedule_on_tk(session, _ask, 0); browse_evt.wait(timeout=60.0)
 
         chosen = chosen_holder[0]
         if chosen:
@@ -453,6 +459,9 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
                     session.modal_ref._confirmed = True
                     session.modal_ref.destroy()
                 except Exception: pass
+            if session.parent_app and hasattr(session.parent_app, "clear_last_clipboard_url"):
+                try: session.parent_app.clear_last_clipboard_url()
+                except Exception: pass
             if action == "download" and session.on_confirm:
                 session.on_confirm(selected_opt, final_dest)
             elif action == "open_in_main":
@@ -464,16 +473,11 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
                     from ..ui.modals.video_preview_modal import terminate_active_preview_proc
                     terminate_active_preview_proc()
                 except Exception: pass
-            if parent and hasattr(parent, "after"): parent.after(250, _kill_preview)
-            else: threading.Timer(0.25, _kill_preview).start()
+            _schedule_on_tk(session, _kill_preview, 250)
             def _cleanup(): unregister_preview_session(session.sid)
-            if parent and hasattr(parent, "after"): parent.after(2000, _cleanup)
-            else: threading.Timer(2.0, _cleanup).start()
+            _schedule_on_tk(session, _cleanup, 2000)
 
-        parent = session.parent_app or (session.modal_ref.master if session.modal_ref else None)
-        target = parent if (parent and hasattr(parent, "after")) else (session.modal_ref if (session.modal_ref and hasattr(session.modal_ref, "after")) else None)
-        if target: target.after(0, _dispatch)
-        else: _dispatch()
+        _schedule_on_tk(session, _dispatch, 0)
 
         self._send_json({"status": "ok", "action": action, "dest_path": final_dest})
 
@@ -500,6 +504,7 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
             _apply_session_sub_styles(cur_opt, session)
         from .media_clipper_engine import sync_clipper_state_from_body
         sync_clipper_state_from_body(session, body, cur_opt)
+        if cur_opt: session.selected_sub_track = cur_opt.selected_subtitle_track
 
         try:
             from ..config import set_setting
@@ -537,7 +542,5 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
                     if hasattr(m, "dest_path"): m.dest_path = dest_path
             except Exception: pass
 
-        parent = session.parent_app or (session.modal_ref.master if session.modal_ref else None)
-        target = session.modal_ref if (session.modal_ref and hasattr(session.modal_ref, "after")) else parent
-        if target and hasattr(target, "after"): target.after(0, _sync_tk)
+        _schedule_on_tk(session, _sync_tk, 0)
         self._send_json({"status": "ok"})

@@ -102,6 +102,9 @@ class MediaOptionsActionsMixin:
 
     def _show_cached_quality_modal(self, ctx: Dict[str, Any], preferred_dest: Optional[str] = None):
         """Displays QualitySelectionModal instantaneously from cached metadata context."""
+        if hasattr(self, "_close_fetching_toast"):
+            try: self._close_fetching_toast()
+            except Exception: pass
         info = ctx["info"]
         raw_title, duration = info.get("title") or "Video", int(info.get("duration") or 0)
         theme_dict = self._theme_dict() if hasattr(self, "_theme_dict") else {}
@@ -109,9 +112,9 @@ class MediaOptionsActionsMixin:
         options = []
         for o in ctx.get("options", []):
             opt = copy.copy(o)
-            opt.clip_start_sec, opt.clip_end_sec = None, None
-            opt.selected_chapter_title, opt.dual_subtitle_enabled = None, False
-            opt.subtitle_custom_edits, opt.audio_boost_enabled = None, False
+            opt.clip_start_sec, opt.clip_end_sec = 0.0, 0.0
+            opt.selected_chapter_title, opt.dual_subtitle_enabled = "", False
+            opt.subtitle_custom_edits, opt.audio_boost_enabled = {}, False
             opt.audio_volume_percent = 100
             options.append(opt)
         clean_subs = [clone_clean_subtitle_track(t) for t in ctx.get("subtitle_tracks", []) if isinstance(t, dict)]
@@ -141,6 +144,11 @@ class MediaOptionsActionsMixin:
             yt_modal = DownloadConfirmationModal(parent=self.root, url=ctx.get("url", ""), default_dest_path=final_dest, theme=self._theme_dict(), parent_app=self, show_progress_immediately=True) if getattr(self, "is_window_hidden_or_minimized", lambda: False)() else None
             if stream_info and hasattr(self, "_launch_stream_coordinator"):
                 self._launch_stream_coordinator(stream_info, final_dest, max_conn, kb_lim * 1024.0, yt_modal=yt_modal)
+
+        def _on_cancel():
+            self._quality_modal = None
+            if hasattr(self, "clear_last_clipboard_url"):
+                self.clear_last_clipboard_url()
 
         def _on_open_in_main(selected_opt: VideoFormatOption, final_dest: str):
             self._quality_modal = None
@@ -183,10 +191,15 @@ class MediaOptionsActionsMixin:
         _q_cls = getattr(_bar_mod, "QualitySelectionModal", QualitySelectionModal) if _bar_mod else QualitySelectionModal
         self._quality_modal = _q_cls(
             parent=self.root, video_title=raw_title, duration=duration, options=options, default_dest_path=dest,
-            theme=theme_dict, on_confirm=_on_confirm, on_cancel=lambda: setattr(self, "_quality_modal", None),
+            theme=theme_dict, on_confirm=_on_confirm, on_cancel=_on_cancel,
             on_open_in_main=_on_open_in_main, parent_app=self, audio_tracks=ctx.get("audio_tracks", []),
             subtitle_tracks=ctx.get("subtitle_tracks", []), video_url=ctx.get("url", ""), raw_info=info
         )
+        try:
+            self._quality_modal.lift()
+            self._quality_modal.focus_force()
+        except Exception:
+            pass
 
     def _open_main_media_preview(self):
         """Launches in-app VidMate-style preview directly from the Main Window Media Bar."""

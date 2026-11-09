@@ -219,7 +219,7 @@ class StreamDownloadCoordinator:
         is_mp3_request, has_error = False, False
         v_error, a_error = [], []
         try:
-            if getattr(self.stream_info, "clip_end_sec", 0) > getattr(self.stream_info, "clip_start_sec", 0) >= 0:
+            if float(getattr(self.stream_info, "clip_end_sec", 0.0) or 0.0) > float(getattr(self.stream_info, "clip_start_sec", 0.0) or 0.0) >= 0.0:
                 if download_clipped_stream_direct(self):
                     return
                 if self._cancel_event.is_set() or not self._is_running:

@@ -121,43 +121,47 @@ class ClipboardControllerMixin(ClipboardDialogMixin):
     def _check_clipboard_now(self, force: bool = False):
         """Checks if current clipboard contains a new downloadable URL and processes it."""
         if not force:
-            for m in (getattr(self, "_fetching_toast", None), getattr(self, "_quality_modal", None), getattr(self, "_confirm_modal", None), getattr(self, "_candidates_modal", None)):
+            for m in (getattr(self, "_fetching_toast", None), getattr(self, "_confirm_modal", None), getattr(self, "_candidates_modal", None)):
                 if m is not None:
                     try:
                         if m.winfo_exists() and not getattr(m, "is_completed", False) and not getattr(m, "is_closed", False):
-                            if IS_WINDOWS:
-                                try: self._last_clipboard_seq = ctypes.windll.user32.GetClipboardSequenceNumber()
-                                except Exception: pass
-                            try:
-                                cur = get_clipboard_text(getattr(self, "root", None))
-                                if cur and isinstance(cur, str): self._last_clipboard_url = cur.strip()
-                            except Exception: pass
                             return
-                    except Exception: pass
+                    except Exception:
+                        pass
 
         seq = None
         if IS_WINDOWS:
-            try: seq = ctypes.windll.user32.GetClipboardSequenceNumber()
-            except Exception: seq = None
+            try:
+                seq = ctypes.windll.user32.GetClipboardSequenceNumber()
+            except Exception:
+                seq = None
             if not force and seq is not None and getattr(self, "_last_clipboard_seq", None) is not None:
-                if seq == self._last_clipboard_seq: return
+                if seq == self._last_clipboard_seq:
+                    return
 
         text = get_clipboard_text(self.root)
-        seq_changed = (seq is not None and getattr(self, "_last_clipboard_seq", None) is not None and seq != self._last_clipboard_seq)
-        if seq is not None: self._last_clipboard_seq = seq
-        if not text or not isinstance(text, str): return
-
+        if not text or not isinstance(text, str):
+            return
         url = text.strip()
-        if not url: return
-        if not force and not seq_changed and (url == getattr(self, "_last_clipboard_url", None)): return
-        if not seq_changed and (url == getattr(self, "_last_detected_url", None)): return
+        if not url:
+            return
+
+        seq_changed = (seq is not None and getattr(self, "_last_clipboard_seq", None) is not None and seq != self._last_clipboard_seq)
+        if seq is not None:
+            self._last_clipboard_seq = seq
+
+        if not force and not seq_changed and (url == getattr(self, "_last_clipboard_url", None)):
+            return
+        if not seq_changed and (url == getattr(self, "_last_detected_url", None)):
+            return
         self._last_clipboard_url = url
         self._last_detected_url = url
         if is_downloadable_url(url):
             if not self.is_clipboard_url_allowed(url):
                 plat = extract_media_platform(url) if is_media_url(url) else 'Direct'
                 msg = f"[CLIPBOARD] Ignored {plat} link (disabled in Clipboard Sniffer settings): {url}"
-                if hasattr(self, "log") and callable(self.log): self.log(msg)
+                if hasattr(self, "log") and callable(self.log):
+                    self.log(msg)
                 return
             self._on_clipboard_url_detected(url)
 

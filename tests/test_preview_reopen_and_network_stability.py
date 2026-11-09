@@ -149,9 +149,9 @@ class TestPreviewReopenAndNetworkStability(unittest.TestCase):
         pending = app._pending_media_context
         self.assertIsNotNone(pending)
         res_opt = pending["options"][0]
-        self.assertIsNone(res_opt.clip_start_sec)
-        self.assertIsNone(res_opt.clip_end_sec)
-        self.assertIsNone(res_opt.selected_chapter_title)
+        self.assertTrue(not res_opt.clip_start_sec or res_opt.clip_start_sec == 0.0)
+        self.assertTrue(not res_opt.clip_end_sec or res_opt.clip_end_sec == 0.0)
+        self.assertTrue(not res_opt.selected_chapter_title)
         self.assertFalse(res_opt.dual_subtitle_enabled)
         self.assertFalse(res_opt.audio_boost_enabled)
         self.assertEqual(res_opt.audio_volume_percent, 100)
@@ -334,8 +334,8 @@ class TestPreviewReopenAndNetworkStability(unittest.TestCase):
         pending = app._pending_media_context
         self.assertIsNotNone(pending)
         res_opt = pending["options"][0]
-        self.assertIsNone(res_opt.clip_start_sec)
-        self.assertIsNone(res_opt.clip_end_sec)
+        self.assertTrue(not res_opt.clip_start_sec or res_opt.clip_start_sec == 0.0)
+        self.assertTrue(not res_opt.clip_end_sec or res_opt.clip_end_sec == 0.0)
 
         mock_proc = MagicMock()
         mock_proc.poll.return_value = 0
@@ -376,6 +376,85 @@ class TestPreviewReopenAndNetworkStability(unittest.TestCase):
         ]:
             proc = subprocess.run(entry_args, capture_output=True, text=True, timeout=10)
             self.assertEqual(proc.returncode, 0, f"Entrypoint {entry_args} failed with: {proc.stderr}")
+
+    def test_clipboard_recovers_from_momentary_lock_on_sequence_change(self):
+        """7. Clipboard sniffer must not lose copied link if clipboard is momentarily locked on sequence change."""
+        from faqih_downloader.ui.controllers.clipboard_controller import ClipboardControllerMixin
+
+        class DummyClipboardApp(ClipboardControllerMixin):
+            def __init__(self):
+                self.root = MagicMock()
+                self.root.winfo_exists.return_value = True
+                self._last_clipboard_url = "https://example.com/old.mp4"
+                self._last_detected_url = "https://example.com/old.mp4"
+                self._last_clipboard_seq = 100
+                self.detected_calls = []
+                self.sniffer_platforms = {"youtube": True, "direct": True}
+
+            def _on_clipboard_url_detected(self, url):
+                self.detected_calls.append(url)
+
+        app = DummyClipboardApp()
+        test_url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+
+        with patch("faqih_downloader.ui.controllers.clipboard_controller.IS_WINDOWS", True), \
+             patch("faqih_downloader.ui.controllers.clipboard_controller.ctypes.windll.user32.GetClipboardSequenceNumber", return_value=101):
+            # First poll: sequence changed from 100 to 101, but clipboard is locked returning None
+            with patch("faqih_downloader.ui.controllers.clipboard_controller.get_clipboard_text", return_value=None):
+                app._check_clipboard_now(force=False)
+                self.assertEqual(len(app.detected_calls), 0)
+                # Sequence must NOT be advanced to 101 yet!
+                self.assertEqual(app._last_clipboard_seq, 100)
+
+            # Second poll: sequence is still 101, but now clipboard is unlocked and returns URL
+            with patch("faqih_downloader.ui.controllers.clipboard_controller.get_clipboard_text", return_value=test_url):
+                app._check_clipboard_now(force=False)
+                self.assertEqual(len(app.detected_calls), 1)
+                self.assertEqual(app.detected_calls[0], test_url)
+                self.assertEqual(app._last_clipboard_seq, 101)
+
+    def test_recopying_url_with_sequence_change_triggers_even_with_open_quality_modal(self):
+        """8. Re-copying same or new URL with sequence change detects URL immediately even if _quality_modal is active."""
+        from faqih_downloader.ui.controllers.clipboard_controller import ClipboardControllerMixin
+
+        class DummyClipboardApp(ClipboardControllerMixin):
+            def __init__(self):
+                self.root = MagicMock()
+                self.root.winfo_exists.return_value = True
+                self._last_clipboard_url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+                self._last_detected_url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+                self._last_clipboard_seq = 200
+                self.detected_calls = []
+                self.sniffer_platforms = {"youtube": True, "direct": True}
+                # Simulate an active quality modal
+                mock_modal = MagicMock()
+                mock_modal.winfo_exists.return_value = True
+                mock_modal.is_completed = False
+                mock_modal.is_closed = False
+                self._quality_modal = mock_modal
+
+            def _on_clipboard_url_detected(self, url):
+                self.detected_calls.append(url)
+
+        app = DummyClipboardApp()
+        same_url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+
+        # User re-copied the same URL, causing sequence number to change from 200 to 201
+        with patch("faqih_downloader.ui.controllers.clipboard_controller.IS_WINDOWS", True), \
+             patch("faqih_downloader.ui.controllers.clipboard_controller.ctypes.windll.user32.GetClipboardSequenceNumber", return_value=201), \
+             patch("faqih_downloader.ui.controllers.clipboard_controller.get_clipboard_text", return_value=same_url):
+            app._check_clipboard_now(force=False)
+            self.assertEqual(len(app.detected_calls), 1)
+            self.assertEqual(app.detected_calls[0], same_url)
+
+        # Now user copies a different URL with another sequence change (202)
+        diff_url = "https://www.youtube.com/watch?v=abcdefghijk"
+        with patch("faqih_downloader.ui.controllers.clipboard_controller.IS_WINDOWS", True), \
+             patch("faqih_downloader.ui.controllers.clipboard_controller.ctypes.windll.user32.GetClipboardSequenceNumber", return_value=202), \
+             patch("faqih_downloader.ui.controllers.clipboard_controller.get_clipboard_text", return_value=diff_url):
+            app._check_clipboard_now(force=False)
+            self.assertEqual(len(app.detected_calls), 2)
+            self.assertEqual(app.detected_calls[1], diff_url)
 
 
 if __name__ == "__main__":

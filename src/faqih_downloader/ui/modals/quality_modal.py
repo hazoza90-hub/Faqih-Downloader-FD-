@@ -453,6 +453,10 @@ class QualitySelectionModal(_BaseToplevel):
                 subtitle_embed_mode=getattr(self.selected_option, "subtitle_embed_mode", "hard_burn"),
                 selected_q_idx=q_idx, subtitle_position=sub_pos,
             )
+            self._confirmed = True
+            if self.parent_app and getattr(self.parent_app, "_quality_modal", None) is self:
+                self.parent_app._quality_modal = None
+            self.destroy()
         except Exception:
             import logging
             logging.getLogger(__name__).exception("Preview launch error")
