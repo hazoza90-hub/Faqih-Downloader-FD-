@@ -25,6 +25,11 @@ def apply_custom_cue_edits(cues: list, custom_edits: Optional[Dict[str, Any]]) -
         else: updated.append((s, e, new_text))
     return updated
 
+def clone_clean_subtitle_track(trk: Any) -> dict:
+    """Clones subtitle track dict while stripping nested style_config and secondary_track to prevent circular references."""
+    if not isinstance(trk, dict): return {}
+    return {k: v for k, v in trk.items() if k not in ("style_config", "secondary_track")}
+
 def filter_and_shift_cues_for_clip(cues: list, clip_start: float, clip_end: float) -> list:
     """Filters cues overlapping [clip_start, clip_end] and shifts timestamps to start at 00:00."""
     if not cues or clip_end <= clip_start or clip_start < 0: return cues
@@ -92,16 +97,12 @@ def export_cues_to_srt(cues: list, output_srt_path: str) -> bool:
     try: from .subtitle_downloader import _format_seconds_to_srt
     except Exception:
         def _format_seconds_to_srt(sec: float) -> str:
-            sec = max(0.0, float(sec)); h, m, s = int(sec // 3600), int((sec % 3600) // 60), int(sec % 60)
-            ms = int(round((sec - int(sec)) * 1000))
-            if ms >= 1000: s += 1; ms = 0
-            return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+            s_i, ms = int(sec), int(round((sec - int(sec)) * 1000))
+            if ms >= 1000: s_i += 1; ms = 0
+            return f"{s_i // 3600:02d}:{(s_i % 3600) // 60:02d}:{s_i % 60:02d},{ms:03d}"
     lines, idx = [], 1
     for item in cues:
-        s, e, text = 0.0, 0.0, ""
-        if isinstance(item, dict): s, e, text = float(item.get("start", 0)), float(item.get("end", 0)), str(item.get("text", ""))
-        elif isinstance(item, (tuple, list)) and len(item) >= 3: s, e, text = float(item[0]), float(item[1]), str(item[2])
-        else: continue
+        s, e, text = (float(item.get("start", 0)), float(item.get("end", 0)), str(item.get("text", ""))) if isinstance(item, dict) else ((float(item[0]), float(item[1]), str(item[2])) if isinstance(item, (tuple, list)) and len(item) >= 3 else (0.0, 0.0, ""))
         clean = text.replace("\n[[DUAL]]", "\n").replace("[[DUAL]]", "\n").strip()
         if not clean or e <= s: continue
         lines.append(f"{idx}\n{_format_seconds_to_srt(s)} --> {_format_seconds_to_srt(e)}\n{clean}\n"); idx += 1
@@ -206,18 +207,17 @@ def process_post_download_clip_and_subtitles(
     """Unified coordinator step handling subtitle embedding/burning, audio boost, and clip trimming."""
     sub = getattr(stream_info, "subtitle_track", None) or getattr(stream_info, "selected_subtitle_track", None)
     has_sub = bool(sub and sub.get("sub_id") not in (None, "none") and (sub.get("url") or sub.get("base_url")))
-    clip_start = float(getattr(stream_info, "clip_start_sec", 0.0) or 0.0)
-    clip_end = float(getattr(stream_info, "clip_end_sec", 0.0) or 0.0)
-    has_clip = (clip_end > clip_start >= 0.0)
-    audio_boost = bool(getattr(stream_info, "audio_boost_enabled", False))
-    chapter_title = str(getattr(stream_info, "selected_chapter_title", "") or "").strip()
-    boost_applied = bool(getattr(stream_info, "_audio_boost_applied", False))
+    clip_start, clip_end = float(getattr(stream_info, "clip_start_sec", 0.0) or 0.0), float(getattr(stream_info, "clip_end_sec", 0.0) or 0.0)
+    has_clip, audio_boost = (clip_end > clip_start >= 0.0), bool(getattr(stream_info, "audio_boost_enabled", False))
+    chapter_title, boost_applied = str(getattr(stream_info, "selected_chapter_title", "") or "").strip(), bool(getattr(stream_info, "_audio_boost_applied", False))
 
     if has_sub:
         sc = getattr(stream_info, "style_config", None) or {}
-        sc.update({"clip_start": clip_start, "clip_end": clip_end, "custom_edits": getattr(stream_info, "subtitle_custom_edits", {}), "dual_sub": getattr(stream_info, "dual_subtitle_enabled", False), "secondary_track": getattr(stream_info, "secondary_subtitle_track", None), "audio_boost": audio_boost, "chapter_title": chapter_title, "_already_trimmed": bool(getattr(stream_info, "_already_trimmed", False))})
+        sc.update({"clip_start": clip_start, "clip_end": clip_end, "custom_edits": getattr(stream_info, "subtitle_custom_edits", {}), "dual_sub": getattr(stream_info, "dual_subtitle_enabled", False), "secondary_track": clone_clean_subtitle_track(getattr(stream_info, "secondary_subtitle_track", None)), "audio_boost": audio_boost, "chapter_title": chapter_title, "_already_trimmed": bool(getattr(stream_info, "_already_trimmed", False))})
         setattr(stream_info, "style_config", sc)
-        if isinstance(sub, dict): sub.setdefault("style_config", {}).update(sc)
+        if isinstance(sub, dict):
+            sub = clone_clean_subtitle_track(sub); sub["style_config"] = sc
+            for attr in ("subtitle_track", "selected_subtitle_track"): setattr(stream_info, attr, sub)
         from .subtitle_processor import handle_subtitles_post_download
         f_path = handle_subtitles_post_download(stream_info, target_path, on_log=on_log, cancel_event=cancel_event)
         if f_path and os.path.isfile(f_path):
@@ -241,9 +241,7 @@ def process_post_download_clip_and_subtitles(
     if (has_clip or chapter_title) and os.path.isfile(target_path):
         d_dir, f_name = os.path.split(target_path); stem, ext = os.path.splitext(f_name); clean_ch = ""
         if chapter_title:
-            clean_ch = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '', chapter_title).strip()
-            clean_ch = re.sub(r'^[\[\(\]\)\s\-–—:|•~.]+', '', clean_ch)
-            clean_ch = re.sub(r'[\[\(\]\)\s\-–—:|•~.]+$', '', clean_ch).strip()
+            clean_ch = re.sub(r'[\[\(\]\)\s\-–—:|•~.]+$', '', re.sub(r'^[\[\(\]\)\s\-–—:|•~.]+', '', re.sub(r'[<>:"/\\|?*\x00-\x1f]', '', chapter_title).strip())).strip()
         new_stem = stem
         if clean_ch and f"[{clean_ch}]" not in new_stem: new_stem = f"{new_stem} [{clean_ch}]"
         if has_clip and "[Clip]" not in new_stem: new_stem = f"{new_stem} [Clip]"
@@ -280,13 +278,17 @@ def sync_clipper_state_from_body(session: Any, body: Dict[str, Any], opt: Any = 
     session.audio_boost, session.chapter_title = boost, ch_title
 
     sub_trks = getattr(session, "subtitle_tracks", None) or []
+    if sub_trks:
+        clean_sub_trks = [clone_clean_subtitle_track(t) for t in sub_trks]
+        session.subtitle_tracks = clean_sub_trks
+        sub_trks = clean_sub_trks
     sec_trk = None
     if dual and sub_trks:
-        if 0 <= s_idx < len(sub_trks): sec_trk = sub_trks[s_idx]
+        if 0 <= s_idx < len(sub_trks): sec_trk = clone_clean_subtitle_track(sub_trks[s_idx])
         else:
             for idx, trk in enumerate(sub_trks):
                 if idx > 0 and (not getattr(session, "selected_sub_track", None) or trk != session.selected_sub_track):
-                    sec_trk = trk; break
+                    sec_trk = clone_clean_subtitle_track(trk); break
 
     target_opts = list(getattr(session, "options", []) or [])
     m = getattr(session, "modal_ref", None)
@@ -305,6 +307,8 @@ def sync_clipper_state_from_body(session: Any, body: Dict[str, Any], opt: Any = 
         if sec_trk is not None or not dual: target_opt.secondary_subtitle_track = sec_trk
         st = getattr(target_opt, "selected_subtitle_track", None)
         if st and isinstance(st, dict):
+            st = clone_clean_subtitle_track(st)
+            target_opt.selected_subtitle_track = st
             sc = st.setdefault("style_config", {})
             sc["clip_start"], sc["clip_end"], sc["custom_edits"] = c_start, c_end, edits
             sc["dual_sub"], sc["secondary_track"] = dual, sec_trk
@@ -344,8 +348,7 @@ def _format_ffmpeg_headers(headers: Optional[Dict[str, str]]) -> str:
 
 def _set_process_suspended(proc_or_pid: Any, suspend: bool) -> None:
     try:
-        pid = getattr(proc_or_pid, "pid", proc_or_pid)
-        is_obj = not isinstance(proc_or_pid, int)
+        pid, is_obj = getattr(proc_or_pid, "pid", proc_or_pid), not isinstance(proc_or_pid, int)
         cur_susp = getattr(proc_or_pid, "_os_suspended", False)
         if hasattr(cur_susp, "_mock_name"): cur_susp = False
         if is_obj and bool(cur_susp) == bool(suspend): return
@@ -394,18 +397,19 @@ def download_clipped_stream_direct(coordinator: Any) -> bool:
     coordinator._clip_total_size = est_total
 
     clip_seek = ["-ss", f"{c_start:.3f}", "-to", f"{c_end:.3f}"]
+    reconn = ["-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_on_network_error", "1", "-reconnect_delay_max", "4", "-rw_timeout", "15000000"]
+    v_rec = reconn if (v_url.startswith("http://") or v_url.startswith("https://")) else []
     v_hdr_str = _format_ffmpeg_headers(getattr(si, "video_headers", {}))
     v_hdr_args = ["-headers", v_hdr_str] if v_hdr_str else []
     a_url = getattr(si, "audio_url", None) or ""
-    is_prog = bool(getattr(si, "is_progressive", False))
-    is_audio_only = bool(getattr(si, "is_audio_only", False))
+    a_rec = reconn if (a_url.startswith("http://") or a_url.startswith("https://")) else []
+    is_prog, is_audio_only = bool(getattr(si, "is_progressive", False)), bool(getattr(si, "is_audio_only", False))
     is_dual = bool(v_url and a_url and not is_prog and not is_audio_only)
-
     if is_dual:
         a_hdr_str = _format_ffmpeg_headers(getattr(si, "audio_headers", {}) or getattr(si, "video_headers", {}))
-        cmd = [str(ffmpeg_bin), *clip_seek, *v_hdr_args, "-i", v_url, *clip_seek, *(["-headers", a_hdr_str] if a_hdr_str else []), "-i", a_url, "-map", "0:v:0", "-map", "1:a:0"]
+        cmd = [str(ffmpeg_bin), *v_rec, *clip_seek, *v_hdr_args, "-i", v_url, *a_rec, *clip_seek, *(["-headers", a_hdr_str] if a_hdr_str else []), "-i", a_url, "-map", "0:v:0", "-map", "1:a:0"]
     else:
-        cmd = [str(ffmpeg_bin), *clip_seek, *v_hdr_args, "-i", v_url]
+        cmd = [str(ffmpeg_bin), *v_rec, *clip_seek, *v_hdr_args, "-i", v_url]
 
     boost_args, boost_enabled = [], bool(getattr(si, "audio_boost_enabled", False))
     sub = getattr(si, "subtitle_track", None) or getattr(si, "selected_subtitle_track", None)
@@ -526,13 +530,11 @@ def download_clipped_stream_direct(coordinator: Any) -> bool:
             with coordinator._lock: coordinator._is_running = False
             if coordinator.on_complete: coordinator.on_complete(coordinator.destination_path, final_sz, el)
             return True
-        if os.path.exists(temp_clip_path):
-            try: os.remove(temp_clip_path)
-            except Exception: pass
         return False
     except Exception as ex:
         if hasattr(coordinator, "log"): coordinator.log(f"[CLIPPER] FFmpeg execution error: {ex}")
-        if os.path.exists(temp_clip_path):
+        return False
+    finally:
+        if os.path.exists(temp_clip_path) and not getattr(si, "_already_trimmed", False):
             try: os.remove(temp_clip_path)
             except Exception: pass
-        return False

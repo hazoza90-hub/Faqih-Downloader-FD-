@@ -13,13 +13,8 @@ from dataclasses import dataclass, field
 from ..locales.i18n import tr
 from ..utils.file_ops import apply_media_filename_tags, generate_unique_destination_path
 from .preview_stream_proxy import (
-    compile_and_serve_vtt,
-    stream_upstream_media,
-    _safe_int,
-    _is_preview_origin_allowed,
-    _prune_preview_sessions,
-    resolve_preview_video_target,
-    resolve_preview_audio_target,
+    compile_and_serve_vtt, stream_upstream_media, _safe_int, _is_preview_origin_allowed,
+    _prune_preview_sessions, resolve_preview_video_target, resolve_preview_audio_target,
 )
 from .subtitle_downloader import download_subtitle_as_srt
 
@@ -148,11 +143,15 @@ def _apply_session_sub_styles(opt: Any, session: PreviewSession) -> None:
     opt.subtitle_pos_x, opt.subtitle_pos_y = session.subtitle_pos_x, session.subtitle_pos_y
     st = getattr(opt, "selected_subtitle_track", None)
     if st and isinstance(st, dict):
-        st["style_config"] = {
+        clean_st = {k: v for k, v in st.items() if k not in ("style_config", "secondary_track")}
+        opt.selected_subtitle_track = clean_st
+        sec_trk = getattr(session, "secondary_subtitle_track", None) or getattr(opt, "secondary_subtitle_track", None)
+        clean_sec = {k: v for k, v in sec_trk.items() if k not in ("style_config", "secondary_track")} if isinstance(sec_trk, dict) else sec_trk
+        clean_st["style_config"] = {
             "preset": session.subtitle_preset, "font_scale": session.subtitle_font_scale,
             "text_color": session.subtitle_text_color, "bg_mode": session.subtitle_bg_mode,
             "pos_x": session.subtitle_pos_x, "pos_y": session.subtitle_pos_y,
-            "subtitle_position": session.subtitle_position,
+            "subtitle_position": session.subtitle_position, "secondary_track": clean_sec,
         }
 
 
@@ -208,23 +207,21 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(b"404 Session Not Found or Expired")
             return
 
-        if parsed.path == "/player":
-            self._handle_player(session)
+        if parsed.path == "/player": self._handle_player(session)
         elif parsed.path == "/stream_video":
             q_idx = _safe_int(params.get("q_idx", ["0"])[0]) if params.get("q_idx") else 0
             a_idx = _safe_int(params.get("a_idx", ["0"])[0]) if params.get("a_idx") else None
-            target_url, target_headers = self._resolve_video_target(session, q_idx, a_idx=a_idx)
-            stream_upstream_media(self, target_url, target_headers, is_head=False)
+            t_url, t_hdrs = self._resolve_video_target(session, q_idx, a_idx=a_idx)
+            stream_upstream_media(self, t_url, t_hdrs, is_head=False)
         elif parsed.path == "/stream_audio":
             a_idx = _safe_int(params.get("a_idx", ["0"])[0]) if params.get("a_idx") else 0
             q_idx = _safe_int(params.get("q_idx", ["0"])[0]) if params.get("q_idx") else None
-            target_url, target_headers = self._resolve_audio_target(session, a_idx, q_idx=q_idx)
-            stream_upstream_media(self, target_url, target_headers, is_head=False)
+            t_url, t_hdrs = self._resolve_audio_target(session, a_idx, q_idx=q_idx)
+            stream_upstream_media(self, t_url, t_hdrs, is_head=False)
         elif parsed.path == "/subtitle.vtt":
             s_idx = _safe_int(params.get("s_idx", ["0"])[0]) if params.get("s_idx") else 0
             self._handle_subtitle(session, s_idx)
-        else:
-            self.send_response(404); self.end_headers()
+        else: self.send_response(404); self.end_headers()
 
     def _send_json(self, data: Dict[str, Any], code: int = 200) -> None:
         """Sends JSON HTTP response with CORS headers."""
@@ -235,12 +232,10 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
 
     def do_POST(self):
         """Dispatches JSON POST API calls for dynamic filename tagging or confirmed action."""
-        origin = self.headers.get("Origin", "")
-        if not _is_preview_origin_allowed(origin):
+        if not _is_preview_origin_allowed(self.headers.get("Origin", "")):
             self.send_response(403); self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Access-Control-Allow-Origin", "*"); self.end_headers()
-            self.wfile.write(b'{"ok": false, "error": "Forbidden: Untrusted Origin"}')
-            return
+            self.wfile.write(b'{"ok": false, "error": "Forbidden: Untrusted Origin"}'); return
 
         parsed = urllib.parse.urlparse(self.path)
         params = urllib.parse.parse_qs(parsed.query)
@@ -379,8 +374,7 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
                 from tkinter import filedialog
                 parent_w = session.modal_ref if (session.modal_ref and hasattr(session.modal_ref, "winfo_exists") and session.modal_ref.winfo_exists()) else (session.parent_app.root if (session.parent_app and hasattr(session.parent_app, "root")) else None)
                 cur_d = current_dest or session.default_dest_path
-                init_dir = os.path.dirname(os.path.abspath(cur_d)) if cur_d else os.path.expanduser("~")
-                init_file = os.path.basename(cur_d) if cur_d else "video.mp4"
+                init_dir, init_file = (os.path.dirname(os.path.abspath(cur_d)) if cur_d else os.path.expanduser("~")), (os.path.basename(cur_d) if cur_d else "video.mp4")
                 res = filedialog.asksaveasfilename(parent=parent_w, title="Save Video As", initialdir=init_dir, initialfile=init_file)
                 if res: chosen_holder[0] = str(res)
             except Exception: pass
@@ -389,10 +383,8 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
         parent = session.parent_app or (session.modal_ref.master if session.modal_ref else None)
         target = session.modal_ref if (session.modal_ref and hasattr(session.modal_ref, "after")) else parent
         if target and hasattr(target, "after"):
-            target.after(0, _ask)
-            browse_evt.wait(timeout=60.0)
-        else:
-            _ask()
+            target.after(0, _ask); browse_evt.wait(timeout=60.0)
+        else: _ask()
 
         chosen = chosen_holder[0]
         if chosen:
@@ -402,13 +394,11 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
                 from ..utils.file_ops import CATEGORY_SUBFOLDERS
                 cd = os.path.dirname(os.path.abspath(chosen))
                 auto_cat = getattr(session.parent_app, "auto_categorize_folders", True) if session.parent_app else True
-                if auto_cat and os.path.basename(cd).lower() in {s.lower() for s in CATEGORY_SUBFOLDERS.values()}:
-                    cd = os.path.dirname(cd)
+                if auto_cat and os.path.basename(cd).lower() in {s.lower() for s in CATEGORY_SUBFOLDERS.values()}: cd = os.path.dirname(cd)
                 set_setting("last_download_dir", cd)
             except Exception: pass
             self._send_json({"ok": True, "dest": chosen})
-        else:
-            self._send_json({"ok": False, "dest": ""})
+        else: self._send_json({"ok": False, "dest": ""})
 
     def _handle_api_action(self, session: PreviewSession, body: Dict[str, Any]) -> None:
         """Processes download, open in main window, or cancel actions and dispatches safely to Tkinter."""
@@ -463,6 +453,13 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
                 if session.on_open_in_main: session.on_open_in_main(selected_opt, final_dest)
             elif action == "cancel" and session.on_cancel:
                 session.on_cancel()
+            def _kill_preview():
+                try:
+                    from ..ui.modals.video_preview_modal import terminate_active_preview_proc
+                    terminate_active_preview_proc()
+                except Exception: pass
+            if parent and hasattr(parent, "after"): parent.after(250, _kill_preview)
+            else: threading.Timer(0.25, _kill_preview).start()
             def _cleanup(): unregister_preview_session(session.sid)
             if parent and hasattr(parent, "after"): parent.after(2000, _cleanup)
             else: threading.Timer(2.0, _cleanup).start()
@@ -517,10 +514,8 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
                 if hasattr(m, "options") and 0 <= q_idx < len(m.options):
                     so = m.selected_option = m.options[q_idx]
                     so.selected_audio_track, so.selected_subtitle_track = session.selected_audio_track, session.selected_sub_track
-                    so.subtitle_embed_mode, so.subtitle_position = session.subtitle_embed_mode, session.subtitle_position
-                    so.subtitle_preset, so.subtitle_font_scale = session.subtitle_preset, session.subtitle_font_scale
-                    so.subtitle_text_color, so.subtitle_bg_mode = session.subtitle_text_color, session.subtitle_bg_mode
-                    so.subtitle_pos_x, so.subtitle_pos_y = session.subtitle_pos_x, session.subtitle_pos_y
+                    so.subtitle_embed_mode, so.subtitle_position, so.subtitle_preset, so.subtitle_font_scale = session.subtitle_embed_mode, session.subtitle_position, session.subtitle_preset, session.subtitle_font_scale
+                    so.subtitle_text_color, so.subtitle_bg_mode, so.subtitle_pos_x, so.subtitle_pos_y = session.subtitle_text_color, session.subtitle_bg_mode, session.subtitle_pos_x, session.subtitle_pos_y
                 if hasattr(m, "cb_audio") and m.cb_audio: m.cb_audio.current(a_idx)
                 if hasattr(m, "cb_sub") and m.cb_sub:
                     m.cb_sub.current(s_idx); m.cb_sub._selected_mode, m.cb_sub._user_touched_mode, m.cb_sub._selected_pos = sub_mode, True, sub_pos

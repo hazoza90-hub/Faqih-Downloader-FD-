@@ -90,22 +90,39 @@ class MediaOptionsActionsMixin:
         if hasattr(self, "_start_youtube_download"):
             self._start_youtube_download(url, dest)
 
-    def _show_cached_quality_modal(self, ctx: Dict[str, Any], preferred_dest: Optional[str] = None):
-        """Displays QualitySelectionModal instantaneously from cached metadata context."""
-        info, options = ctx["info"], [copy.copy(o) for o in ctx.get("options", [])]
-        raw_title, duration = info.get("title") or "Video", int(info.get("duration") or 0)
-        theme_dict = self._theme_dict() if hasattr(self, "_theme_dict") else {}
-        clean_title = sanitize_filename(raw_title)
-        cached_opt = ctx.get("selected_option")
-        first_opt = cached_opt if (cached_opt and cached_opt in options) else (options[resolve_preferred_option_index(options)] if options else None)
-        first_ext = first_opt.ext if first_opt else "mp4"
-        first_lbl = first_opt.resolution_label if first_opt else ""
-
+    def _resolve_final_dest(self, preferred_dest: str = "", title: str = "", opt: Any = None) -> str:
+        clean_title = sanitize_filename(title or "Video")
+        first_ext = getattr(opt, "ext", "mp4") or "mp4"
+        first_lbl = getattr(opt, "resolution_label", "") or ""
         base_dl = self._get_base_downloads_dir() if hasattr(self, "_get_base_downloads_dir") else get_base_downloads_dir()
-        target_dest = preferred_dest if (preferred_dest and clean_title.lower() in os.path.basename(preferred_dest).lower()) else (ctx.get("final_dest") or preferred_dest or os.path.join(base_dl, f"{clean_title}.{first_ext}"))
+        target_dest = preferred_dest if (preferred_dest and clean_title.lower() in os.path.basename(preferred_dest).lower()) else os.path.join(base_dl, f"{clean_title}.{first_ext}")
         initial_dest = apply_media_filename_tags(target_dest, quality_label=first_lbl, is_sub_burned=False, ext=first_ext)
         reserved = self.history_manager.get_active_or_queued_paths() if getattr(self, "history_manager", None) else None
-        dest = generate_unique_destination_path(initial_dest, reserved_paths=reserved)
+        return generate_unique_destination_path(initial_dest, reserved_paths=reserved)
+
+    def _show_cached_quality_modal(self, ctx: Dict[str, Any], preferred_dest: Optional[str] = None):
+        """Displays QualitySelectionModal instantaneously from cached metadata context."""
+        info = ctx["info"]
+        raw_title, duration = info.get("title") or "Video", int(info.get("duration") or 0)
+        theme_dict = self._theme_dict() if hasattr(self, "_theme_dict") else {}
+        from ...services.media_clipper_engine import clone_clean_subtitle_track
+        options = []
+        for o in ctx.get("options", []):
+            opt = copy.copy(o)
+            opt.clip_start_sec, opt.clip_end_sec = None, None
+            opt.selected_chapter_title, opt.dual_subtitle_enabled = None, False
+            opt.subtitle_custom_edits, opt.audio_boost_enabled = None, False
+            opt.audio_volume_percent = 100
+            options.append(opt)
+        clean_subs = [clone_clean_subtitle_track(t) for t in ctx.get("subtitle_tracks", []) if isinstance(t, dict)]
+        first_opt = options[0] if options else None
+        dest = self._resolve_final_dest(preferred_dest or ctx.get("preferred_dest", ""), raw_title, first_opt)
+
+        ctx["options"] = options
+        ctx["subtitle_tracks"] = clean_subs
+        ctx["final_dest"] = dest
+        if options: ctx["selected_option"] = options[0]
+        self._pending_media_context = ctx
         resolver = ctx.get("resolver") or (YouTubeResolver(on_log=self.log, cookies_from_browser=getattr(self, "cookies_browser", "auto"), cookies_file=getattr(self, "cookies_file", "")) if hasattr(self, "log") else None)
 
         def _on_confirm(selected_opt: VideoFormatOption, final_dest: str):
@@ -190,7 +207,7 @@ class MediaOptionsActionsMixin:
         sel_opt = opts[q_idx] if (opts and 0 <= q_idx < len(opts)) else None
         sel_aud = auds[self.cb_main_audio.current()] if hasattr(self, "cb_main_audio") and auds and 0 <= self.cb_main_audio.current() < len(auds) else None
         sel_sub = subs[self.cb_main_sub.current()] if hasattr(self, "cb_main_sub") and subs and 0 <= self.cb_main_sub.current() < len(subs) else None
-        theme_d = getattr(self, "_theme_dict", None) or ({"c_bg": self.c_bg, "c_panel": self.c_panel, "c_panel_light": self.c_panel_light, "c_border": self.c_border, "c_accent": self.c_accent, "c_accent_dark": self.c_accent_dark, "c_success": self.c_success, "c_text_bright": self.c_text_bright, "c_text_muted": self.c_text_muted, "c_input_bg": self.c_input_bg} if hasattr(self, "c_bg") else {})
+        theme_d = (self._theme_dict() if hasattr(self, "_theme_dict") else None) or ({"c_bg": self.c_bg, "c_panel": self.c_panel, "c_panel_light": self.c_panel_light, "c_border": self.c_border, "c_accent": self.c_accent, "c_accent_dark": self.c_accent_dark, "c_success": self.c_success, "c_text_bright": self.c_text_bright, "c_text_muted": self.c_text_muted, "c_input_bg": self.c_input_bg} if hasattr(self, "c_bg") else {})
         dest_p = (self.entry_dest.get().strip() if hasattr(self, "entry_dest") else "") or (self.dest_input.get().strip() if hasattr(self, "dest_input") else "")
         sel_mode = self._main_sub_mode_codes[self.cb_main_sub_mode.current()] if (hasattr(self, "cb_main_sub_mode") and hasattr(self, "_main_sub_mode_codes") and 0 <= self.cb_main_sub_mode.current() < len(self._main_sub_mode_codes)) else "hard_burn"
         sel_pos = self._main_sub_pos_codes[self.cb_main_sub_pos.current()] if (hasattr(self, "cb_main_sub_pos") and hasattr(self, "_main_sub_pos_codes") and 0 <= self.cb_main_sub_pos.current() < len(self._main_sub_pos_codes)) else "bottom"

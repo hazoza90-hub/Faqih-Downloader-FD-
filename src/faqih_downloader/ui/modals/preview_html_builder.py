@@ -311,12 +311,13 @@ function requestUpdatedFilename() {
 function doAction(actionType) {
     actionSubmitted = true;
     document.querySelectorAll(".action-bar button").forEach(b => { b.disabled = true; b.style.opacity = "0.6"; });
-    try { if (videoEl) videoEl.pause(); if (dubAudioEl) dubAudioEl.pause(); } catch (e) {}
-    if (!sid) { window.close(); return; }
+    try { if (videoEl) { videoEl.pause(); videoEl.removeAttribute('src'); videoEl.load(); } if (dubAudioEl) { dubAudioEl.pause(); dubAudioEl.removeAttribute('src'); dubAudioEl.load(); } } catch (e) {}
+    const _closeWin = () => { try { if (window.pywebview && window.pywebview.api && window.pywebview.api.close_window) window.pywebview.api.close_window(); } catch(e) {} try { window.close(); } catch(e) {} };
+    if (!sid) { _closeWin(); return; }
     fetch(`${bridgeBase}/api/action?sid=${encodeURIComponent(sid)}`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(getSyncPayload({ action: actionType }))
-    }).then(r => r.json()).then(() => { setTimeout(() => { window.close(); }, 120); }).catch(() => { window.close(); });
+    }).then(r => r.json()).then(() => { setTimeout(_closeWin, 120); }).catch(_closeWin);
 }
 
 __STUDIO_JS__
@@ -462,6 +463,7 @@ def generate_preview_html(
         settings_html = f"""<div class="settings-panel"><div class="settings-header"><span class="settings-title">⚡ Download Quality &amp; Controls</span><span class="settings-count">{len(options)} Formats Detected</span></div><div class="table-container"><table class="format-table"><thead><tr><th>Resolution / Quality</th><th class="col-center">Format</th><th class="col-right">Est. Size</th><th class="col-center">FPS</th><th>Stream Details</th></tr></thead><tbody>{"".join(rows)}</tbody></table></div><div class="controls-row"><div class="ctrl-group"><label>🔊 Audio / الدبلجة</label><select id="audioSelect" onchange="onAudioChange()">{"".join(a_opts)}</select></div><div class="ctrl-group"><label>💬 Subtitles / الترجمة</label><select id="subSelect" onchange="onSubChange()">{"".join(s_opts)}</select></div><div class="ctrl-group"><label>⚙️ Mode / الطريقة</label><select id="modeSelect" onchange="onModeChange()">{"".join(m_opts)}</select></div><div class="ctrl-group"><label>📍 Position / الموضع</label><select id="posSelect" onchange="onPosChange()">{"".join(p_opts)}</select></div></div>{clipper_toolbar}{studio_toolbar}<div class="dest-card"><label>📁 Save As / مسار الحفظ:</label><input type="text" id="destInput" value="{safe_dst}" /><button type="button" class="btn" style="padding:4px 8px;font-size:11px;" onclick="browseDestination()">📁 Browse...</button></div><div class="action-bar"><button class="btn btn-download" onclick="doAction('download')">⚡ Download Selected Quality</button><button class="btn btn-secondary" onclick="doAction('open_in_main')">🖥️ Open in Main Window</button><button class="btn btn-cancel" onclick="doAction('cancel')">✕ Cancel</button></div></div>"""
 
     opt_needs_audio = [bool(not getattr(o, "is_progressive", False) and not getattr(o, "is_audio_only", False) and getattr(o, "audio_url", None)) for o in (options or [])]
+    safe_tracks = [{k: v for k, v in t.items() if isinstance(v, (str, int, float, bool)) and k not in ("style_config", "secondary_track")} for t in (subtitle_tracks or []) if isinstance(t, dict)]
     _j = lambda v: json.dumps(v).replace("</", "<\\/")
     safe_embed_src = html.escape(embed_src or "", quote=True)
     js_code = (
@@ -471,7 +473,7 @@ def generate_preview_html(
         .replace("__DUB_URL__", _j(eff_dub or ""))
         .replace("__SID__", _j(sid or ""))
         .replace("__AUDIO_TRACKS__", _j(audio_tracks or []))
-        .replace("__SUBTITLE_TRACKS__", _j(subtitle_tracks or []))
+        .replace("__SUBTITLE_TRACKS__", _j(safe_tracks))
         .replace("__EFFECTIVE_AUDIO_LABEL__", _j(eff_audio_lbl))
         .replace("__BRIDGE_BASE__", _j(bridge_base))
         .replace("__SELECTED_Q_IDX__", _j(selected_q_idx))

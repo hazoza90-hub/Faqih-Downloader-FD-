@@ -14,6 +14,8 @@ from .engine_resumer import EngineResumerMixin
 from ..utils.url_utils import parse_filename_from_cd_header
 
 
+GOOGLEVIDEO_WINDOW_BYTES = 8 * 1024 * 1024  # 8 MB Safe Window to prevent throttling without choking routers
+
 class EngineWorkersMixin(EngineResumerMixin):
     """Mixin providing worker management, chunk streaming, dynamic splitting, and rate limiting."""
 
@@ -68,7 +70,7 @@ class EngineWorkersMixin(EngineResumerMixin):
         Worker thread with automatic transient retry, safe boundary clamping,
         smooth single-connection streaming for YouTube/googlevideo CDN, and single-handle file streaming.
         """
-        max_retries = 3
+        max_retries = 8
         retry_count = 0
 
         while retry_count < max_retries and not self._cancel_event.is_set() and not self._error_abort_event.is_set() and self.is_running:
@@ -91,9 +93,12 @@ class EngineWorkersMixin(EngineResumerMixin):
                         if self.total_size == 0 and chunk.downloaded_bytes > 0 and chunk.status == "completed":
                             return
 
-                    # Compute end byte for this request (single continuous stream from cur_offset to target_end)
+                    # Compute end byte for this request (single continuous stream or 8MB safe window for googlevideo)
                     if self.supports_ranges and self.total_size > 0:
-                        req_end = target_end
+                        if getattr(self, "is_googlevideo", False) and (target_end - cur_offset + 1) > GOOGLEVIDEO_WINDOW_BYTES:
+                            req_end = min(target_end, cur_offset + GOOGLEVIDEO_WINDOW_BYTES - 1)
+                        else:
+                            req_end = target_end
                     else:
                         req_end = None
 
@@ -133,7 +138,7 @@ class EngineWorkersMixin(EngineResumerMixin):
                     with self._lock:
                         self._active_connections.append(resp)
 
-                    BUF_SIZE = 32768
+                    BUF_SIZE = 65536
                     seg_bytes_read = 0
                     expected_seg_bytes = (req_end - cur_offset + 1) if (req_end is not None) else None
 
@@ -222,9 +227,11 @@ class EngineWorkersMixin(EngineResumerMixin):
                             chunk.status = "completed"
                             return
 
-                    # If single request completed without reaching chunk end, treat as premature EOF to retry
-                    with chunk.lock:
+                        # If chunk is not yet completed
                         if self.total_size > 0 and (chunk.start_byte + chunk.downloaded_bytes <= chunk.end_byte):
+                            if expected_seg_bytes is not None and seg_bytes_read >= expected_seg_bytes:
+                                retry_count = 0
+                                continue
                             raise RuntimeError(
                                 f"Premature EOF from server before chunk completion "
                                 f"({chunk.downloaded_bytes:,}/{chunk.end_byte - chunk.start_byte + 1:,} bytes)"
@@ -250,11 +257,20 @@ class EngineWorkersMixin(EngineResumerMixin):
                         break
                 if self._cancel_event.is_set() or self._error_abort_event.is_set() or not self.is_running:
                     return
-                if seg_bytes_read > 0:
+                if seg_bytes_read >= 65536:
+                    retry_count = 0
+                elif seg_bytes_read > 0:
                     retry_count = max(0, retry_count - 1)
                 retry_count += 1
-                self.log(f"Connection #{chunk.chunk_id} error: {e}. Retry {retry_count}/{max_retries} in 1s...")
-                time.sleep(1.0)
+                backoff = min(4.0, 0.8 * (1.4 ** min(retry_count, 5)))
+                self.log(f"Connection #{chunk.chunk_id} error: {e}. Retry {retry_count}/{max_retries} in {backoff:.1f}s...")
+                t_end = time.time() + backoff
+                while time.time() < t_end:
+                    if self._cancel_event.is_set() or self._error_abort_event.is_set() or not self.is_running:
+                        return
+                    if self._pause_event.is_set():
+                        break
+                    time.sleep(0.1)
             finally:
                 if resp:
                     with self._lock:

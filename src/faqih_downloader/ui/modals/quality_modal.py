@@ -438,33 +438,24 @@ class QualitySelectionModal(_BaseToplevel):
 
         q_idx = self.options.index(self.selected_option) if (self.selected_option and self.selected_option in self.options) else 0
         sub_pos = self.cb_sub.get_selected_pos() if (hasattr(self, "cb_sub") and self.cb_sub and hasattr(self.cb_sub, "get_selected_pos")) else "bottom"
+        try: self.attributes("-topmost", False)
+        except Exception: pass
         try:
             from .video_preview_modal import open_video_preview
             open_video_preview(
-                parent=self,
-                url=self.video_url,
-                video_title=self.video_title,
-                stream_info=self.selected_option,
-                info_dict=self.raw_info,
-                selected_sub_track=sel_sub,
-                theme=self.theme,
-                selected_audio_track=sel_audio,
-                options=self.options,
-                audio_tracks=self.audio_tracks,
-                subtitle_tracks=self.subtitle_tracks,
+                parent=self, url=self.video_url, video_title=self.video_title,
+                stream_info=self.selected_option, info_dict=self.raw_info, selected_sub_track=sel_sub,
+                theme=self.theme, selected_audio_track=sel_audio, options=self.options,
+                audio_tracks=self.audio_tracks, subtitle_tracks=self.subtitle_tracks,
                 default_dest_path=self.entry_dest.get().strip() or self.dest_path,
-                on_confirm=self.on_confirm,
-                on_open_in_main=self.on_open_in_main,
-                on_cancel=self.on_cancel,
-                parent_app=self.parent_app,
-                modal_ref=self,
-                use_bridge=True,
+                on_confirm=self.on_confirm, on_open_in_main=self.on_open_in_main, on_cancel=self.on_cancel,
+                parent_app=self.parent_app, modal_ref=self, use_bridge=True,
                 subtitle_embed_mode=getattr(self.selected_option, "subtitle_embed_mode", "hard_burn"),
-                selected_q_idx=q_idx,
-                subtitle_position=sub_pos,
+                selected_q_idx=q_idx, subtitle_position=sub_pos,
             )
         except Exception:
-            pass
+            import logging
+            logging.getLogger(__name__).exception("Preview launch error")
 
     def launch_unified_preview(self):
         """Public helper to launch the unified preview and settings interface directly."""

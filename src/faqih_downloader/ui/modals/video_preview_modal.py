@@ -21,6 +21,35 @@ from ...locales.i18n import tr
 from .preview_html_builder import generate_preview_html
 
 IS_WINDOWS = sys.platform.startswith("win")
+_ACTIVE_PREVIEW_PROC: Optional[subprocess.Popen] = None
+
+class _PreviewJsApi:
+    def close_window(self) -> None:
+        try:
+            import webview
+            for w in getattr(webview, "windows", []): w.destroy()
+        except Exception: pass
+
+def terminate_active_preview_proc() -> None:
+    """Terminates currently running preview subprocess to prevent hanging webview instances."""
+    global _ACTIVE_PREVIEW_PROC
+    if _ACTIVE_PREVIEW_PROC is not None:
+        try:
+            if _ACTIVE_PREVIEW_PROC.poll() is None:
+                _ACTIVE_PREVIEW_PROC.terminate()
+                try: _ACTIVE_PREVIEW_PROC.wait(timeout=0.8)
+                except Exception: _ACTIVE_PREVIEW_PROC.kill()
+        except Exception: pass
+        _ACTIVE_PREVIEW_PROC = None
+
+def _launch_webview_subprocess(html_target: str, title: str = "Faqih Downloader — Video Preview", width: int = 920, height: int = 720) -> None:
+    """Subprocess target executing pywebview with bridge js_api and immediate exit on close."""
+    try:
+        import webview
+        webview.create_window(title, html_target, width=width, height=height, js_api=_PreviewJsApi())
+        webview.start()
+    except Exception: pass
+    finally: os._exit(0)
 
 
 def _find_chromeless_browser() -> Optional[str]:
@@ -145,6 +174,7 @@ def open_video_preview(
     Builds and opens a real, VidMate-style video preview with synchronized live audio dubbing,
     asynchronous subtitles, and interactive format picker in a chromeless native window.
     """
+    terminate_active_preview_proc()
     clean_url = str(url or "").strip()
     title = str(video_title or "Video Preview").strip()
     if on_log:
@@ -319,18 +349,27 @@ def open_video_preview(
     except Exception:
         pass
 
+    global _ACTIVE_PREVIEW_PROC
     if pywebview_available:
         try:
+            w, h = map(int, win_size.split(","))
             if getattr(sys, "frozen", False):
                 cmd = [sys.executable, "--preview-html", launch_uri]
             else:
-                w, h = map(int, win_size.split(","))
                 cmd = [
                     sys.executable, "-c",
-                    f"import webview; webview.create_window({repr(title)}, {repr(launch_uri)}, width={w}, height={h}); webview.start()"
+                    f"import os, sys, webview\n"
+                    f"class Api:\n"
+                    f"    def close_window(self):\n"
+                    f"        try:\n"
+                    f"            for w in getattr(webview, 'windows', []): w.destroy()\n"
+                    f"        except Exception: pass\n"
+                    f"webview.create_window({repr(title)}, {repr(launch_uri)}, width={w}, height={h}, js_api=Api())\n"
+                    f"webview.start()\n"
+                    f"os._exit(0)\n"
                 ]
             cflags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if IS_WINDOWS else 0
-            subprocess.Popen(cmd, creationflags=cflags)
+            _ACTIVE_PREVIEW_PROC = subprocess.Popen(cmd, creationflags=cflags)
             if on_log:
                 on_log("[PREVIEW] Launched preview window via pywebview subprocess.")
             return temp_html
@@ -341,9 +380,9 @@ def open_video_preview(
     browser_exe = _find_chromeless_browser()
     if browser_exe:
         app_arg = f"--app={launch_uri}"
-        cmd = [browser_exe, app_arg, f"--window-size={win_size}"]
+        cmd = [browser_exe, "--new-window", app_arg, f"--window-size={win_size}"]
         try:
-            subprocess.Popen(cmd)
+            _ACTIVE_PREVIEW_PROC = subprocess.Popen(cmd)
             if on_log:
                 on_log(f"[PREVIEW] Launched native chromeless preview window via {os.path.basename(browser_exe)}.")
             return temp_html
