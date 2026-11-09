@@ -14,7 +14,7 @@ from .engine_resumer import EngineResumerMixin
 from ..utils.url_utils import parse_filename_from_cd_header
 
 
-GOOGLEVIDEO_WINDOW_BYTES = 8 * 1024 * 1024  # 8 MB Safe Window to prevent throttling without choking routers
+GOOGLEVIDEO_WINDOW_BYTES = 2 * 1024 * 1024  # 2 MB Fast Burst Window to bypass YouTube Range throttling
 
 class EngineWorkersMixin(EngineResumerMixin):
     """Mixin providing worker management, chunk streaming, dynamic splitting, and rate limiting."""
@@ -53,6 +53,9 @@ class EngineWorkersMixin(EngineResumerMixin):
         has_ua = any(k.lower() == "user-agent" for k in self.headers)
         if not has_ua:
             req.add_header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0.0.0")
+
+        if not any(k.lower() == "connection" for k in self.headers):
+            req.add_header("Connection", "keep-alive")
 
         for k, v in self.headers.items():
             req.add_header(k, v)
@@ -138,7 +141,7 @@ class EngineWorkersMixin(EngineResumerMixin):
                     with self._lock:
                         self._active_connections.append(resp)
 
-                    BUF_SIZE = 65536
+                    BUF_SIZE = 131072
                     seg_bytes_read = 0
                     expected_seg_bytes = (req_end - cur_offset + 1) if (req_end is not None) else None
 

@@ -173,7 +173,7 @@ class TestPreviewReopenAndNetworkStability(unittest.TestCase):
         engine.is_running = True
         engine.supports_ranges = True
         engine.is_googlevideo = True
-        total_test_size = 20 * 1024 * 1024  # 20 MB stream (requires 3 windows: 8MB, 8MB, 4MB)
+        total_test_size = GOOGLEVIDEO_WINDOW_BYTES * 2 + (GOOGLEVIDEO_WINDOW_BYTES // 2)  # Stream requires 3 windows
         engine.total_size = total_test_size
 
         chunk = DownloadChunk(
@@ -216,10 +216,7 @@ class TestPreviewReopenAndNetworkStability(unittest.TestCase):
             self.assertEqual(chunk.status, "completed")
             self.assertEqual(chunk.downloaded_bytes, total_test_size)
 
-            # 2. Sequential 8MB windows were requested:
-            # Window 1: 0 - 8388607 (8 MB)
-            # Window 2: 8388608 - 16777215 (8 MB)
-            # Window 3: 16777216 - 20971519 (4 MB)
+            # 2. Sequential windows were requested:
             expected_w1 = f"bytes=0-{GOOGLEVIDEO_WINDOW_BYTES - 1}"
             expected_w2 = f"bytes={GOOGLEVIDEO_WINDOW_BYTES}-{2 * GOOGLEVIDEO_WINDOW_BYTES - 1}"
             expected_w3 = f"bytes={2 * GOOGLEVIDEO_WINDOW_BYTES}-{total_test_size - 1}"
@@ -274,9 +271,12 @@ class TestPreviewReopenAndNetworkStability(unittest.TestCase):
         # Verify safe reconnect arguments exist in the command
         cmd_str = " ".join(captured_cmd)
         self.assertIn("-reconnect 1", cmd_str)
-        self.assertIn("-reconnect_streamed 1", cmd_str)
+        self.assertNotIn("-reconnect_streamed 1", cmd_str)
         self.assertIn("-reconnect_on_network_error 1", cmd_str)
+        self.assertIn("-reconnect_on_http_error 4xx,5xx", cmd_str)
         self.assertIn("-reconnect_delay_max 4", cmd_str)
+        self.assertIn("-multiple_requests 1", cmd_str)
+        self.assertIn("-seekable 1", cmd_str)
         self.assertIn("-rw_timeout 15000000", cmd_str)
 
     def test_e2e_second_copy_open_video_preview_after_cached_modal(self):

@@ -315,7 +315,8 @@ class StreamDownloadCoordinator:
                     on_chunk_update=self.on_chunk_update,
                     on_log=self.on_log,
                     on_complete=_on_single_complete,
-                    on_error=_on_single_error
+                    on_error=_on_single_error,
+                    pre_probed_info={"total_size": int(getattr(self.stream_info, "video_size", 0) or 0), "supports_ranges": True} if int(getattr(self.stream_info, "video_size", 0) or 0) > 0 else None
                 )
                 with self._lock:
                     self.current_engine = engine
@@ -430,15 +431,16 @@ class StreamDownloadCoordinator:
                 on_chunk_update=self.on_chunk_update,
                 on_log=self.on_log,
                 on_complete=_on_v_complete,
-                on_error=_on_v_error
+                on_error=_on_v_error,
+                pre_probed_info={"total_size": int(getattr(self.stream_info, "video_size", 0) or 0), "supports_ranges": True} if int(getattr(self.stream_info, "video_size", 0) or 0) > 0 else None
             )
 
-            a_conn = 2 if self.max_connections >= 4 else 1  # Wi-Fi safe balance: a_conn = 1 on slower connections
+            a_conn = min(4, max(2, self.max_connections // 2)) if self.max_connections >= 4 else 1  # Wi-Fi safe: a_conn = 1 on single-stream
             a_engine = TurboDownloadEngine(
                 url=self.stream_info.audio_url,
                 destination_path=audio_tmp,
                 max_connections=a_conn,
-                allow_dynamic_split=(a_conn > 1),  # Dynamic split: allow_dynamic_split=False when a_conn <= 1
+                allow_dynamic_split=(a_conn > 1),  # Wi-Fi safe: allow_dynamic_split=False when a_conn <= 1
                 rate_limit_bytes_per_sec=self.rate_limit,
                 ssl_context=self.ssl_context,
                 headers=self.stream_info.audio_headers,
@@ -446,7 +448,8 @@ class StreamDownloadCoordinator:
                 on_chunk_update=self.on_chunk_update,
                 on_log=self.on_log,
                 on_complete=_on_a_complete,
-                on_error=_on_a_error
+                on_error=_on_a_error,
+                pre_probed_info={"total_size": int(getattr(self.stream_info, "audio_size", 0) or 0), "supports_ranges": True} if int(getattr(self.stream_info, "audio_size", 0) or 0) > 0 else None
             )
 
             with self._lock:

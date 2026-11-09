@@ -143,11 +143,8 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
     def set_speed_limit(self, bytes_per_sec: float):
         """Update speed limit on the fly."""
         self.rate_limiter.set_limit(bytes_per_sec)
-        if bytes_per_sec <= 0:
-            self.log("Speed limit set to: Unlimited")
-        else:
-            spd = f"{bytes_per_sec / (1024*1024):.2f} MB/s" if bytes_per_sec >= 1024*1024 else f"{bytes_per_sec / 1024:.1f} KB/s"
-            self.log(f"Speed limit set to: {spd}")
+        spd = "Unlimited" if bytes_per_sec <= 0 else (f"{bytes_per_sec / (1024*1024):.2f} MB/s" if bytes_per_sec >= 1024*1024 else f"{bytes_per_sec / 1024:.1f} KB/s")
+        self.log(f"Speed limit set to: {spd}")
 
     def get_chunks_snapshot(self) -> List[DownloadChunk]:
         """Returns a thread-safe snapshot copy of the current chunk list."""
@@ -170,6 +167,21 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
         Uses HEAD with fallback to GET Range: bytes=0-0 to bypass servers blocking HEAD.
         """
         self.log(f"Probing server capabilities: {self.url}")
+        if self.is_googlevideo:
+            try:
+                clen = urllib.parse.parse_qs(urllib.parse.urlsplit(self.url).query).get("clen")
+                if clen and clen[0].isdigit():
+                    self.total_size, self.supports_ranges = int(clen[0]), True
+                    self.log(f"Fast clen probe: {self.total_size:,} bytes (Accept-Ranges verified)")
+                    if not self.filename or os.path.isdir(self.destination_path) or self.filename in (".", "..", "download.bin"):
+                        url_fn = os.path.basename(urllib.parse.unquote(urllib.parse.urlsplit(self.url).path.rstrip("/")))
+                        if url_fn: self.filename = url_fn
+                    if os.path.isdir(self.destination_path) or self.destination_path.endswith(("/", "\\")):
+                        self.destination_path = os.path.join(self.destination_path, self.filename or "download.bin")
+                    return
+            except Exception:
+                pass
+
         req = self._create_request(method="HEAD")
 
         head_succeeded = False
@@ -260,16 +272,10 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
         # Additional defense for googlevideo.com streams: extract clen query parameter if total_size is missing
         if (self.is_googlevideo or "googlevideo.com" in self.url) and self.total_size <= 0:
             try:
-                q_map = urllib.parse.parse_qs(urllib.parse.urlsplit(self.url).query)
-                clen = q_map.get("clen")
-                if clen and clen[0].isdigit():
-                    self.total_size = int(clen[0])
-                    self.supports_ranges = True
-            except Exception:
-                pass
-
-        if self.is_googlevideo and self.total_size > 0:
-            self.supports_ranges = True
+                clen = urllib.parse.parse_qs(urllib.parse.urlsplit(self.url).query).get("clen")
+                if clen and clen[0].isdigit(): self.total_size, self.supports_ranges = int(clen[0]), True
+            except Exception: pass
+        if self.is_googlevideo and self.total_size > 0: self.supports_ranges = True
 
         # Fallback filename extraction from URL if Content-Disposition was absent
         if not self.filename or os.path.isdir(self.destination_path) or self.filename in (".", "..", "download.bin"):
