@@ -162,7 +162,10 @@ def stream_upstream_media(
                 import urllib3
                 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
                 session = requests.Session()
-                s_headers = dict(custom_headers or {})
+                s_headers = {
+                    k: v for k, v in (custom_headers or {}).items()
+                    if k.lower() not in ("host", "range", "content-length", "connection")
+                }
                 s_headers["User-Agent"] = ua
                 first_end = (start_byte + WINDOW_SIZE - 1) if end_byte_target is None else min(start_byte + WINDOW_SIZE - 1, end_byte_target)
                 s_headers["Range"] = f"bytes={start_byte}-{first_end}"
@@ -223,7 +226,7 @@ def stream_upstream_media(
                                 w_cr = win_resp.headers.get("Content-Range", "")
                                 w_match = re.search(r"bytes\s+(\d+)-(\d+)", w_cr, re.IGNORECASE) if w_cr else None
                                 if w_match:
-                                    cur_start = int(w_match.group(2)) + 1
+                                    cur_start = max(cur_start + 1, int(w_match.group(2)) + 1)
                                 else:
                                     cur_start = cur_end + 1
                         except (ConnectionResetError, BrokenPipeError, ConnectionAbortedError, OSError):

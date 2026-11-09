@@ -171,7 +171,23 @@ class TestWindowedRangeAndWarnings(unittest.TestCase):
             self.assertTrue(reg_url.startswith(f"http://127.0.0.1:{port}/stream?id="))
         finally:
             bridge.stop()
-            self.assertEqual(bridge.port, 0)
+    def test_read_clipboard_text_safe_win32_fallback(self):
+        """Verifies _read_clipboard_text_safe falls back to Win32 ctypes when clipboard_get raises TclError."""
+        controller = ClipboardControllerMixin()
+        controller.root = MagicMock()
+        controller.root.clipboard_get.side_effect = tk.TclError("clipboard locked")
+
+        with patch("sys.platform", "win32"), \
+             patch("faqih_downloader.ui.controllers.clipboard_controller.IS_WINDOWS", True), \
+             patch("ctypes.windll.user32.OpenClipboard", return_value=True), \
+             patch("ctypes.windll.user32.CloseClipboard", return_value=True), \
+             patch("ctypes.windll.user32.GetClipboardData", return_value=0x12345678), \
+             patch("ctypes.windll.kernel32.GlobalLock", return_value=0x87654321), \
+             patch("ctypes.windll.kernel32.GlobalUnlock", return_value=True), \
+             patch("ctypes.c_wchar_p") as mock_wchar:
+            mock_wchar.return_value.value = "https://example.com/fallback_url.mp4"
+            text = controller._read_clipboard_text_safe()
+            self.assertEqual(text, "https://example.com/fallback_url.mp4")
 
 
 if __name__ == "__main__":

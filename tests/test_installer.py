@@ -43,14 +43,64 @@ except ImportError:
 if pytest is not None:
     @pytest.fixture(autouse=True)
     def isolate_installer_system(tmp_path):
-        """Autouse fixture isolating tests from real user desktop, start menu, and processes."""
+        """Autouse fixture isolating tests from real user desktop, start menu, startup folder, and registry."""
         fake_dt = str(tmp_path / "FakeDesktop")
         fake_sm = str(tmp_path / "FakeStartMenu")
+        fake_su = str(tmp_path / "FakeStartup")
         os.makedirs(fake_dt, exist_ok=True)
         os.makedirs(fake_sm, exist_ok=True)
+        os.makedirs(fake_su, exist_ok=True)
+
+        # Backup HKCU Run and Uninstall registry entries if on Windows
+        saved_run_val = None
+        saved_uninst_vals = None
+        has_winreg = False
+        try:
+            import winreg
+            has_winreg = True
+        except ImportError:
+            has_winreg = False
+
+        if has_winreg and sys.platform.startswith("win"):
+            # Backup Run value
+            try:
+                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run", 0, winreg.KEY_READ) as rk:
+                    saved_run_val = winreg.QueryValueEx(rk, "FaqihDownloader")
+            except Exception:
+                saved_run_val = None
+
+            # Backup Uninstall values
+            try:
+                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Uninstall\FaqihDownloader", 0, winreg.KEY_READ) as uk:
+                    saved_uninst_vals = []
+                    info = winreg.QueryInfoKey(uk)
+                    for i in range(info[1]):
+                        saved_uninst_vals.append(winreg.EnumValue(uk, i))
+            except Exception:
+                saved_uninst_vals = None
+
         with patch("faqih_downloader.installer.installer_ops.get_desktop_dir", return_value=fake_dt), \
-             patch("faqih_downloader.installer.installer_ops.get_start_menu_programs_dir", return_value=fake_sm):
-            yield
+             patch("faqih_downloader.installer.installer_ops.get_start_menu_programs_dir", return_value=fake_sm), \
+             patch("faqih_downloader.installer.installer_registry.get_startup_dir", return_value=fake_su):
+            try:
+                yield
+            finally:
+                if has_winreg and sys.platform.startswith("win"):
+                    # Restore Run key
+                    if saved_run_val is not None:
+                        try:
+                            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run", 0, winreg.KEY_SET_VALUE) as rk:
+                                winreg.SetValueEx(rk, "FaqihDownloader", 0, saved_run_val[1], saved_run_val[0])
+                        except Exception:
+                            pass
+                    # Restore Uninstall key
+                    if saved_uninst_vals is not None:
+                        try:
+                            with winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Uninstall\FaqihDownloader") as uk:
+                                for name, val, typ in saved_uninst_vals:
+                                    winreg.SetValueEx(uk, name, 0, typ, val)
+                        except Exception:
+                            pass
 
 try:
     import tkinter as tk

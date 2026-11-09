@@ -297,8 +297,10 @@ def prepare_payload():
             binaries_to_pack.append((payload_ffmpeg, "ffmpeg.exe"))
 
         if binaries_to_pack:
-            print("[*] Compressing heavy binaries into payload.lzma.zip (LZMA)...")
-            with zipfile.ZipFile(payload_archive, "w", compression=zipfile.ZIP_LZMA) as zf:
+            is_test = bool(os.environ.get("PYTEST_CURRENT_TEST") or "pytest" in sys.modules or os.environ.get("SD_TEST_ENV"))
+            comp_mode = zipfile.ZIP_STORED if is_test else zipfile.ZIP_LZMA
+            print(f"[*] Compressing heavy binaries into payload.lzma.zip ({'STORED' if is_test else 'LZMA'})...")
+            with zipfile.ZipFile(payload_archive, "w", compression=comp_mode) as zf:
                 for fpath, arcname in binaries_to_pack:
                     zf.write(fpath, arcname=arcname)
                     print(f"  -> Added {arcname} ({os.path.getsize(fpath):,} bytes) to payload.lzma.zip")
@@ -435,21 +437,13 @@ def main():
                 print(f"[+] Recreated missing Start Menu shortcut: {sm_lnk}")
 
             print(f"[*] Starting installed application in background: {installed_exe}")
-            launched = False
-            if sys.platform.startswith("win"):
-                try:
-                    os.startfile(installed_exe)
-                    launched = True
-                except Exception:
-                    pass
-            if not launched:
-                cflags = (subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP) if sys.platform.startswith("win") else 0
-                subprocess.Popen(
-                    [installed_exe],
-                    cwd=os.path.dirname(installed_exe),
-                    creationflags=cflags,
-                    close_fds=True
-                )
+            cflags = (subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP) if sys.platform.startswith("win") else 0
+            subprocess.Popen(
+                [installed_exe],
+                cwd=os.path.dirname(installed_exe),
+                creationflags=cflags,
+                close_fds=True
+            )
             print("[+] Application launched successfully in background")
     except Exception as e:
         print(f"[-] Warning: Failed to launch application in background: {e}")

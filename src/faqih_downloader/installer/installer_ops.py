@@ -445,10 +445,8 @@ def uninstall_application(
         for name in (APP_NAME, "Smart Download (SD)", "Smart Download", "SmartDownload", "TurboDownloader", "Turbo Download Manager Pro"):
             dt_lnk = os.path.join(dt_dir, f"{name}.lnk")
             if os.path.isfile(dt_lnk):
-                try:
-                    os.remove(dt_lnk)
-                except Exception:
-                    pass
+                try: os.remove(dt_lnk)
+                except Exception: pass
 
     # Start menu shortcut
     sm_dirs = [getattr(sys.modules.get("installer"), "get_start_menu_programs_dir", get_start_menu_programs_dir)()]
@@ -458,10 +456,8 @@ def uninstall_application(
         for name in (APP_NAME, "Smart Download (SD)", "Smart Download", "SmartDownload", "TurboDownloader", "Turbo Download Manager Pro"):
             sm_lnk = os.path.join(sm_dir, f"{name}.lnk")
             if os.path.isfile(sm_lnk):
-                try:
-                    os.remove(sm_lnk)
-                except Exception:
-                    pass
+                try: os.remove(sm_lnk)
+                except Exception: pass
 
     _notify(0.65, "Removing automatic background startup entries...")
     unregister_startup_entries()

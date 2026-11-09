@@ -95,6 +95,16 @@ class ClipboardControllerMixin(ClipboardDialogMixin):
             try:
                 u32 = ctypes.windll.user32
                 k32 = ctypes.windll.kernel32
+                u32.OpenClipboard.argtypes = [ctypes.c_void_p]
+                u32.OpenClipboard.restype = ctypes.c_bool
+                u32.CloseClipboard.argtypes = []
+                u32.CloseClipboard.restype = ctypes.c_bool
+                u32.GetClipboardData.argtypes = [ctypes.c_uint]
+                u32.GetClipboardData.restype = ctypes.c_void_p
+                k32.GlobalLock.argtypes = [ctypes.c_void_p]
+                k32.GlobalLock.restype = ctypes.c_void_p
+                k32.GlobalUnlock.argtypes = [ctypes.c_void_p]
+                k32.GlobalUnlock.restype = ctypes.c_bool
                 if u32.OpenClipboard(0):
                     try:
                         CF_UNICODETEXT = 13
@@ -233,10 +243,17 @@ class ClipboardControllerMixin(ClipboardDialogMixin):
         allow_retrigger = seq_changed and (prev_seq not in (None, 0)) and not is_fetching and not modal_open
 
         if not allow_retrigger:
-            if url == getattr(self, "_last_clipboard_url", None):
+            if force and (url == getattr(self, "_last_forced_url", None)):
                 return
-            if url == getattr(self, "_last_detected_url", None):
+            if not force and (url == getattr(self, "_last_clipboard_url", None)):
                 return
+            if not force and (url == getattr(self, "_last_detected_url", None)):
+                return
+
+        if force:
+            self._last_forced_url = url
+        else:
+            self._last_forced_url = None
 
         self._last_clipboard_url = url
         self._last_detected_url = url
@@ -255,6 +272,7 @@ class ClipboardControllerMixin(ClipboardDialogMixin):
             try: self._last_clipboard_seq = ctypes.windll.user32.GetClipboardSequenceNumber()
             except Exception: pass
         self._last_detected_url = None
+        self._last_forced_url = None
         try:
             if url: self._last_clipboard_url = url.strip()
             else:
