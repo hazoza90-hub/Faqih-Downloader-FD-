@@ -414,23 +414,24 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
                     shutil.rmtree(self.temp_dir, ignore_errors=True)
                 os.makedirs(self.temp_dir, exist_ok=True)
 
-                # Allocate initial chunk 0
-                # If total_size > 0, initial_end MUST be total_size - 1 even in single-stream mode!
-                initial_end = (self.total_size - 1) if self.total_size > 0 else 0
-                chunk0 = DownloadChunk(
-                    chunk_id=0,
-                    start_byte=0,
-                    end_byte=initial_end,
-                    downloaded_bytes=0,
-                    status="pending",
-                    part_filepath=os.path.join(self.temp_dir, f"{os.path.basename(self.destination_path)}.part_0")
-                )
+                # Pre-split contiguous chunks immediately at start if multi-connection ranges supported
                 with self._lock:
                     self.chunks.clear()
-                    self.chunks.append(chunk0)
+                    if self.supports_ranges and self.allow_dynamic_split and self.total_size >= self.min_split_threshold and self.max_connections > 1:
+                        init_parts = min(self.max_connections, max(1, self.total_size // self.min_split_threshold))
+                        part_sz = self.total_size // init_parts
+                        for i in range(init_parts):
+                            s_b = i * part_sz
+                            e_b = (self.total_size - 1) if (i == init_parts - 1) else ((i + 1) * part_sz - 1)
+                            self.chunks.append(DownloadChunk(i, s_b, e_b, part_filepath=os.path.join(self.temp_dir, f"{self.filename}.part_{i}")))
+                    else:
+                        init_end = (self.total_size - 1) if self.total_size > 0 else 0
+                        self.chunks.append(DownloadChunk(0, 0, init_end, part_filepath=os.path.join(self.temp_dir, f"{self.filename}.part_0")))
+                    to_spawn = list(self.chunks)
 
                 self.save_state()
-                self._spawn_worker(chunk0)
+                for c in to_spawn:
+                    self._spawn_worker(c)
             else:
                 self.log(f"Resuming download from existing chunks ({len(self.chunks)} parts)...")
                 os.makedirs(self.temp_dir, exist_ok=True)
