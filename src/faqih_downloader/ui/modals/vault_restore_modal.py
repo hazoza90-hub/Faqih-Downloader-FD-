@@ -129,19 +129,11 @@ class VaultRestoreModal(tk.Toplevel if tk is not None else object):
         # ── 1. Top Header Bar ────────────────────────────────────────────────
         hdr = tk.Frame(self, bg=self.c_panel, padx=16, pady=12)
         hdr.pack(fill=tk.X)
-
         lbl_icon = tk.Label(hdr, text="↻", font=("Segoe UI", 13, "bold"), bg=self.c_panel, fg=self.c_accent)
         lbl_icon.pack(side=tk.LEFT, padx=(0, 8))
-
-        lbl_title = tk.Label(
-            hdr, text=tr("vault_restore_dlg_title", "Restore Files to Completed Vault"),
-            font=("Segoe UI", 11, "bold"), bg=self.c_panel, fg=self.c_text_bright
-        )
+        lbl_title = tk.Label(hdr, text=tr("vault_restore_dlg_title", "Restore Files to Completed Vault"), font=("Segoe UI", 11, "bold"), bg=self.c_panel, fg=self.c_text_bright)
         lbl_title.pack(side=tk.LEFT)
-
-        btn_close = tk.Label(
-            hdr, text="✕", font=("Segoe UI", 11, "bold"), bg=self.c_panel, fg=self.c_text_muted, cursor="hand2"
-        )
+        btn_close = tk.Label(hdr, text="✕", font=("Segoe UI", 11, "bold"), bg=self.c_panel, fg=self.c_text_muted, cursor="hand2")
         btn_close.pack(side=tk.RIGHT)
         btn_close.bind("<Enter>", lambda e: btn_close.configure(fg=self.c_danger))
         btn_close.bind("<Leave>", lambda e: btn_close.configure(fg=self.c_text_muted))
@@ -150,12 +142,7 @@ class VaultRestoreModal(tk.Toplevel if tk is not None else object):
         # ── 2. Search & Select Controls Bar ──────────────────────────────────
         filter_bar = tk.Frame(self, bg=self.c_bg, padx=16, pady=8)
         filter_bar.pack(fill=tk.X)
-
-        self.entry_search = tk.Entry(
-            filter_bar, font=("Segoe UI", 10), bg=self.c_card, fg=self.c_text_bright,
-            insertbackground=self.c_text_bright, relief=tk.FLAT, highlightthickness=1,
-            highlightbackground=self.c_border, highlightcolor=self.c_accent
-        )
+        self.entry_search = tk.Entry(filter_bar, font=("Segoe UI", 10), bg=self.c_card, fg=self.c_text_bright, insertbackground=self.c_text_bright, relief=tk.FLAT, highlightthickness=1, highlightbackground=self.c_border, highlightcolor=self.c_accent)
         self.entry_search.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=4, padx=(0, 10))
         self.entry_search.bind("<KeyRelease>", self._on_search_changed)
 
@@ -170,20 +157,11 @@ class VaultRestoreModal(tk.Toplevel if tk is not None else object):
         # ── 3. Current Folder Bar ────────────────────────────────────────────
         folder_bar = tk.Frame(self, bg=self.c_panel, padx=16, pady=6)
         folder_bar.pack(fill=tk.X)
-
-        self.btn_browse_folder_top = tk.Button(
-            folder_bar, text=tr("vault_btn_browse_folder", "📁 Browse Folder..."),
-            font=("Segoe UI", 9, "bold"), bg=self.c_card, fg=self.c_accent,
-            activebackground=self.c_border, activeforeground=self.c_accent,
-            relief=tk.FLAT, padx=10, pady=3, cursor="hand2", command=self.browse_folder
-        )
+        self.btn_browse_folder_top = tk.Button(folder_bar, text=tr("vault_btn_browse_folder", "📁 Browse Folder..."), font=("Segoe UI", 9, "bold"), bg=self.c_card, fg=self.c_accent, activebackground=self.c_border, activeforeground=self.c_accent, relief=tk.FLAT, padx=10, pady=3, cursor="hand2", command=self.browse_folder)
         self.btn_browse_folder_top.pack(side=tk.RIGHT)
 
         disp_path = self._current_scan_dir or tr("downloads_title", "Downloads")
-        self.lbl_current_folder = tk.Label(
-            folder_bar, text=f"📂 {disp_path}", font=("Segoe UI", 9),
-            bg=self.c_panel, fg=self.c_text_muted, anchor="w"
-        )
+        self.lbl_current_folder = tk.Label(folder_bar, text=f"📂 {disp_path}", font=("Segoe UI", 9), bg=self.c_panel, fg=self.c_text_muted, anchor="w")
         self.lbl_current_folder.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
         # ── 4. Bottom Action Buttons Bar (Packed to BOTTOM before list) ──────
@@ -220,6 +198,7 @@ class VaultRestoreModal(tk.Toplevel if tk is not None else object):
             "<Configure>", lambda e: self.canvas.itemconfig(self._canvas_win_id, width=e.width)
         )
         self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
+        self.bind("<Enter>", lambda e: not getattr(self, "_closing", False) and self.canvas.bind_all("<MouseWheel>", self._on_mousewheel))
 
     def _schedule_scrollregion_update(self, event=None):
         """Debounces canvas scrollregion updates so rapid additions batch bbox('all')."""
@@ -241,19 +220,36 @@ class VaultRestoreModal(tk.Toplevel if tk is not None else object):
         except Exception:
             pass
 
+    def _get_scroll_bounds(self) -> Tuple[float, float]:
+        try:
+            if hasattr(self, "canvas") and self.canvas.winfo_exists() and hasattr(self.canvas, "yview"):
+                t, b = self.canvas.yview()
+                return float(t), float(b)
+            if hasattr(self, "scrollbar") and self.scrollbar.winfo_exists():
+                t, b = self.scrollbar.get()
+                return float(t), float(b)
+        except Exception:
+            pass
+        return 0.0, 1.0
+
     def _on_mousewheel(self, event):
-        """Scrolls canvas smoothly with pixel-stepped interpolation only when overflowing."""
+        """Scrolls canvas smoothly with instant direction reversal and edge clamping."""
         if getattr(self, "_closing", False):
             return
         try:
             if not self.winfo_exists() or not hasattr(self, "canvas") or not self.canvas.winfo_exists():
                 return
-            if hasattr(self, "scrollbar") and self.scrollbar.winfo_exists():
-                top, btm = self.scrollbar.get()
-                if top <= 0.0 and btm >= 1.0:
-                    return
+            top, btm = self._get_scroll_bounds()
+            if top <= 0.0 and btm >= 1.0:
+                self._scroll_steps_remaining = 0
+                return
             notch = int(-1 * (event.delta / 120))
             if notch == 0:
+                return
+            if (notch < 0 and self._scroll_steps_remaining > 0) or (notch > 0 and self._scroll_steps_remaining < 0):
+                self._scroll_steps_remaining = 0
+            if (notch < 0 and top <= 0.0) or (notch > 0 and btm >= 1.0):
+                self._scroll_steps_remaining = 0
                 return
             self._scroll_steps_remaining = max(-90, min(90, self._scroll_steps_remaining + notch * 18))
             if self._scroll_timer_id is None:
@@ -271,11 +267,14 @@ class VaultRestoreModal(tk.Toplevel if tk is not None else object):
             if not self.winfo_exists() or not hasattr(self, "canvas") or not self.canvas.winfo_exists():
                 self._scroll_steps_remaining = 0
                 return
-            if self._scroll_steps_remaining == 0:
+            top, btm = self._get_scroll_bounds()
+            if top <= 0.0 and btm >= 1.0 or self._scroll_steps_remaining == 0:
+                self._scroll_steps_remaining = 0
                 return
-            step = int(self._scroll_steps_remaining * 0.35)
-            if step == 0:
-                step = 1 if self._scroll_steps_remaining > 0 else -1
+            step = int(self._scroll_steps_remaining * 0.35) or (1 if self._scroll_steps_remaining > 0 else -1)
+            if (step < 0 and top <= 0.0) or (step > 0 and btm >= 1.0):
+                self._scroll_steps_remaining = 0
+                return
             self.canvas.yview_scroll(step, "units")
             self._scroll_steps_remaining -= step
             if self._scroll_steps_remaining != 0:

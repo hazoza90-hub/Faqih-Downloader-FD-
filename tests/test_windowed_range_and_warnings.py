@@ -673,7 +673,7 @@ class TestWindowedRangeAndWarnings(unittest.TestCase):
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
     def test_vault_restore_modal_smooth_scrolling_and_debouncing(self):
-        """Verifies yscrollincrement=2, debounced configure, and eased smooth scrolling on VaultRestoreModal."""
+        """Verifies yscrollincrement=2, debounced configure, instant direction reversal, and edge clamping."""
         if not self.root:
             self.skipTest("Tkinter GUI not available")
 
@@ -717,23 +717,36 @@ class TestWindowedRangeAndWarnings(unittest.TestCase):
                 self.root.update_idletasks()
                 self.assertFalse(modal._scrollregion_pending)
 
-                # Mock scrollbar.get() to simulate overflowing content (top=0.0, btm=0.5)
-                with patch.object(modal.scrollbar, "get", return_value=(0.0, 0.5)):
-                    wheel_evt = MagicMock()
-                    wheel_evt.delta = -120  # Scroll down 1 notch
+                # Non-overflowing content (0.0, 1.0) must not scroll
+                with patch.object(modal, "_get_scroll_bounds", return_value=(0.0, 1.0)):
+                    down_evt = MagicMock(delta=-120)
+                    modal._on_mousewheel(down_evt)
+                    self.assertEqual(modal._scroll_steps_remaining, 0)
+                    self.assertIsNone(modal._scroll_timer_id)
 
+                # Active overflowing content (top=0.2, btm=0.8)
+                with patch.object(modal, "_get_scroll_bounds", return_value=(0.2, 0.8)):
                     with patch.object(modal.canvas, "yview_scroll") as mock_scroll:
-                        modal._on_mousewheel(wheel_evt)
-                        # 18 units accumulated; first step int(18 * 0.35) = 6 units executed immediately
+                        modal._on_mousewheel(down_evt)
+                        # 18 accumulated; first step int(18 * 0.35) = 6 units executed immediately
                         mock_scroll.assert_called_with(6, "units")
                         self.assertEqual(modal._scroll_steps_remaining, 12)
                         self.assertIsNotNone(modal._scroll_timer_id)
 
-                        # Advance smooth scroll step
+                        # Test instant direction reversal: scroll up (delta=120) resets positive steps
+                        up_evt = MagicMock(delta=120)
+                        modal._on_mousewheel(up_evt)
+                        # Previous 12 positive steps reset to 0; -18 accumulated for next tick
+                        self.assertEqual(modal._scroll_steps_remaining, -18)
+                        # On the next tick, it scrolls in the new direction
                         modal._step_smooth_scroll()
-                        # next step = int(12 * 0.35) = 4 units
-                        mock_scroll.assert_called_with(4, "units")
-                        self.assertEqual(modal._scroll_steps_remaining, 8)
+                        mock_scroll.assert_called_with(-6, "units")
+                        self.assertEqual(modal._scroll_steps_remaining, -12)
+
+                # At top boundary (0.0, 0.5), scrolling up (delta=120) is guarded
+                with patch.object(modal, "_get_scroll_bounds", return_value=(0.0, 0.5)):
+                    modal._on_mousewheel(MagicMock(delta=120))
+                    self.assertEqual(modal._scroll_steps_remaining, 0)
 
                 # Clean destruction cancels timer without errors
                 modal.destroy()
@@ -742,7 +755,7 @@ class TestWindowedRangeAndWarnings(unittest.TestCase):
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
     def test_kanban_vault_canvas_smooth_scrolling_and_debouncing(self):
-        """Verifies yscrollincrement=2, debounced configure, and smooth 10ms interpolation on Completed Vault."""
+        """Verifies yscrollincrement=2, debounced configure, non-overflowing guard, and direction reversal."""
         if not self.root:
             self.skipTest("Tkinter GUI not available")
 
@@ -772,21 +785,45 @@ class TestWindowedRangeAndWarnings(unittest.TestCase):
         self.root.update_idletasks()
         self.assertFalse(getattr(cv, "_scrollregion_pending", False))
 
-        # Test smooth mousewheel interpolation on panel
-        wheel_evt = MagicMock()
-        wheel_evt.delta = -120  # 1 notch down
-        with patch.object(cv, "yview_scroll") as mock_scroll:
-            panel._on_vault_mousewheel(wheel_evt)
-            # 14 units accumulated; first step int(14 * 0.35) = 4 units executed immediately
-            mock_scroll.assert_called_with(4, "units")
-            self.assertEqual(panel._vault_scroll_steps, 10)
-            self.assertIsNotNone(panel._vault_scroll_timer)
+        # 1. Non-overflowing vault canvas (0.0, 1.0) does NOT scroll
+        with patch.object(cv, "yview", return_value=(0.0, 1.0)):
+            panel._on_vault_mousewheel(MagicMock(delta=-120))
+            self.assertEqual(panel._vault_scroll_steps, 0)
+            self.assertIsNone(panel._vault_scroll_timer)
 
-            # Advance step
-            panel._step_vault_smooth_scroll()
-            # step = int(10 * 0.35) = 3 units
-            mock_scroll.assert_called_with(3, "units")
-            self.assertEqual(panel._vault_scroll_steps, 7)
+        # 2. Active overflowing vault canvas (0.2, 0.8) scrolls smoothly
+        with patch.object(cv, "yview", return_value=(0.2, 0.8)):
+            with patch.object(cv, "yview_scroll") as mock_scroll:
+                panel._on_vault_mousewheel(MagicMock(delta=-120))
+                # 14 accumulated; first step int(14 * 0.35) = 4 units executed immediately
+                mock_scroll.assert_called_with(4, "units")
+                self.assertEqual(panel._vault_scroll_steps, 10)
+                self.assertIsNotNone(panel._vault_scroll_timer)
+
+                # Advance step
+                panel._step_vault_smooth_scroll()
+                mock_scroll.assert_called_with(3, "units")
+                self.assertEqual(panel._vault_scroll_steps, 7)
+
+                # 3. Reversing scroll direction (delta = 120) immediately resets positive steps
+                panel._on_vault_mousewheel(MagicMock(delta=120))
+                self.assertEqual(panel._vault_scroll_steps, -14)
+                # On the next tick, it scrolls in the new direction
+                panel._step_vault_smooth_scroll()
+                mock_scroll.assert_called_with(-4, "units")
+                self.assertEqual(panel._vault_scroll_steps, -10)
+
+        # 4. At top boundary (0.0, 0.5), scrolling up is clamped
+        with patch.object(cv, "yview", return_value=(0.0, 0.5)):
+            panel._on_vault_mousewheel(MagicMock(delta=120))
+            self.assertEqual(panel._vault_scroll_steps, 0)
+
+        # 5. Verify kanban_vault_helpers.py does NOT contain unbind_all("<MouseWheel>")
+        import faqih_downloader.ui.panels.kanban_vault_helpers as kvh_mod
+        with open(kvh_mod.__file__, "r", encoding="utf-8") as f:
+            helpers_code = f.read()
+        self.assertNotIn('unbind_all("<MouseWheel>")', helpers_code)
+        self.assertNotIn("unbind_all('<MouseWheel>')", helpers_code)
 
         col_frame.destroy()
 

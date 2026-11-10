@@ -284,9 +284,20 @@ def setup_vault_scroll_view(col_frame: Any, body: Any, panel: Any = None) -> tup
     cv._vault_scroll_steps = 0
     cv._vault_scroll_timer = None
 
+    def _get_cv_bounds():
+        try:
+            top, btm = cv.yview()
+            return float(top), float(btm)
+        except Exception:
+            return 0.0, 1.0
+
     def _step_cv_smooth_scroll():
         cv._vault_scroll_timer = None
         if not cv.winfo_exists():
+            cv._vault_scroll_steps = 0
+            return
+        top, btm = _get_cv_bounds()
+        if top <= 0.0 and btm >= 1.0:
             cv._vault_scroll_steps = 0
             return
         steps = cv._vault_scroll_steps
@@ -295,6 +306,9 @@ def setup_vault_scroll_view(col_frame: Any, body: Any, panel: Any = None) -> tup
         step = int(steps * 0.35)
         if step == 0:
             step = 1 if steps > 0 else -1
+        if (step < 0 and top <= 0.0) or (step > 0 and btm >= 1.0):
+            cv._vault_scroll_steps = 0
+            return
         try:
             cv.yview_scroll(step, "units")
             cv._vault_scroll_steps -= step
@@ -307,32 +321,35 @@ def setup_vault_scroll_view(col_frame: Any, body: Any, panel: Any = None) -> tup
         if not cv.winfo_exists() or not getattr(e, "delta", None):
             return
         try:
-            if _is_vault_target(cv.winfo_containing(e.x_root, e.y_root)):
+            target = cv.winfo_containing(e.x_root, e.y_root) or getattr(e, "widget", None)
+            if target is not None:
+                top_win = target.winfo_toplevel()
+                if top_win is not cv.winfo_toplevel() and hasattr(top_win, "_on_mousewheel"):
+                    top_win._on_mousewheel(e)
+                    return
+            if _is_vault_target(target):
                 if panel and hasattr(panel, "_on_vault_mousewheel"):
                     panel._on_vault_mousewheel(e)
                 else:
+                    top, btm = _get_cv_bounds()
+                    if top <= 0.0 and btm >= 1.0:
+                        cv._vault_scroll_steps = 0
+                        return
                     notch = int(-1 * (e.delta / 120))
-                    if notch != 0:
-                        cv._vault_scroll_steps = max(-70, min(70, cv._vault_scroll_steps + notch * 14))
-                        if cv._vault_scroll_timer is None:
-                            _step_cv_smooth_scroll()
+                    if notch == 0:
+                        return
+                    if (notch < 0 and cv._vault_scroll_steps > 0) or (notch > 0 and cv._vault_scroll_steps < 0):
+                        cv._vault_scroll_steps = 0
+                    if (notch < 0 and top <= 0.0) or (notch > 0 and btm >= 1.0):
+                        cv._vault_scroll_steps = 0
+                        return
+                    cv._vault_scroll_steps = max(-70, min(70, cv._vault_scroll_steps + notch * 14))
+                    if cv._vault_scroll_timer is None:
+                        _step_cv_smooth_scroll()
         except Exception:
             pass
 
-    def _on_enter(e=None):
-        cv.bind_all("<MouseWheel>", _on_wheel)
-
-    def _on_leave(e):
-        try:
-            if not _is_vault_target(cv.winfo_containing(e.x_root, e.y_root)):
-                cv.unbind_all("<MouseWheel>")
-        except Exception:
-            cv.unbind_all("<MouseWheel>")
-
-    for w in (col_frame, body, cv, container):
-        w.bind("<Enter>", _on_enter, add="+")
-        w.bind("<Leave>", _on_leave, add="+")
-
+    cv.bind_all("<MouseWheel>", _on_wheel)
     return cv, container
 
 
