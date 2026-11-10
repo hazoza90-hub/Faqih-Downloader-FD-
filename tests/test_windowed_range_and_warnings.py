@@ -3,7 +3,9 @@ Tests for Windowed Range Proxy, Clipboard URL Sniffing Fixes, and 32 Connections
 """
 import io
 import os
+import re
 import sys
+import tempfile
 import unittest
 from unittest.mock import MagicMock, patch, Mock
 
@@ -297,6 +299,108 @@ class TestWindowedRangeAndWarnings(unittest.TestCase):
         with patch("ctypes.windll.user32.GetClipboardSequenceNumber", return_value=105):
             controller._check_clipboard_now()
             controller._trigger_clipboard_url.assert_not_called()
+
+
+    def test_windowed_range_proxy_urllib_multi_window_fallback(self):
+        """Verifies Windowed Range Proxy streams multiple 2MB windows via urllib when requests is missing."""
+        handler = MagicMock()
+        handler.headers = {"Range": "bytes=0-"}
+        handler.wfile = io.BytesIO()
+
+        target_url = "https://rr1---sn-4g5ednsl.googlevideo.com/videoplayback?id=stream789"
+        tot_size = 5 * 1024 * 1024  # 5 MB total
+
+        def _mock_urlopen(req, *args, **kwargs):
+            rng = req.headers.get("Range")
+            m = re.match(r"bytes=(\d+)-(\d+)", rng)
+            s, e = int(m.group(1)), int(m.group(2))
+            chunk_data = b"W" * (e - s + 1)
+
+            resp = MagicMock()
+            resp.getcode.return_value = 206
+            resp.headers = {
+                "Content-Type": "video/mp4",
+                "Content-Range": f"bytes {s}-{e}/{tot_size}",
+            }
+            # Stream in 64KB sub-chunks
+            sub_chunks = [chunk_data[i:i + 65536] for i in range(0, len(chunk_data), 65536)] + [b""]
+            resp.read.side_effect = sub_chunks
+            return resp
+
+        with patch.dict(sys.modules, {"requests": None}), \
+             patch("urllib.request.urlopen", side_effect=_mock_urlopen) as mock_urlopen:
+
+            stream_upstream_media(handler, target_url, {"User-Agent": "MultiUA"}, is_head=False)
+
+            # 5MB in 2MB windows -> 3 windows: [0-2MB-1], [2MB-4MB-1], [4MB-5MB-1]
+            self.assertEqual(mock_urlopen.call_count, 3)
+            self.assertEqual(len(handler.wfile.getvalue()), tot_size)
+            handler.send_response.assert_called_with(206)
+            handler.send_header.assert_any_call("Content-Range", f"bytes 0-{tot_size - 1}/{tot_size}")
+
+    def test_idle_modals_dismissal_on_new_link(self):
+        """Verifies opening a direct or YouTube link closes any existing idle modals of the other types."""
+        from faqih_downloader.ui.controllers.clipboard_dialog_mixin import ClipboardDialogMixin
+        from faqih_downloader.ui.controllers.youtube_download_controller import YouTubeDownloadControllerMixin
+
+        class DummyApp(ClipboardDialogMixin, YouTubeDownloadControllerMixin):
+            def __init__(self):
+                self.root = MagicMock()
+                self.root.winfo_exists.return_value = True
+                self.engine = None
+                self.conn_var = MagicMock(get=lambda: "8")
+                self.entry_custom_speed = MagicMock(get=lambda: "0")
+                self.entry_url = MagicMock()
+                self.entry_dest = MagicMock()
+                self.btn_start = MagicMock()
+                self.btn_pause = MagicMock()
+                self.btn_cancel = MagicMock()
+                self.txt_log = MagicMock()
+                self.tree_chunks = MagicMock()
+                self.card_size = MagicMock()
+                self.is_window_hidden_or_minimized = MagicMock(return_value=False)
+
+            def log(self, *args): pass
+            def _show_fetching_toast(self, *args, **kwargs): pass
+            def _close_fetching_toast(self): pass
+            def _get_base_downloads_dir(self): return tempfile.gettempdir()
+            def _theme_dict(self): return {}
+
+        app = DummyApp()
+
+        # Case 1: _quality_modal and _candidates_modal are open; user copies direct download link
+        q_modal = MagicMock()
+        q_modal.winfo_exists.return_value = True
+        app._quality_modal = q_modal
+
+        c_modal = MagicMock()
+        c_modal.winfo_exists.return_value = True
+        app._candidates_modal = c_modal
+
+        with patch("faqih_downloader.ui.controllers.clipboard_dialog_mixin.DownloadConfirmationModal") as mock_conf:
+            app._show_download_confirmation_dialog("https://example.com/file.zip", "/dest/file.zip")
+            q_modal.destroy.assert_called_once()
+            c_modal.destroy.assert_called_once()
+            self.assertIsNone(app._quality_modal)
+            self.assertIsNone(app._candidates_modal)
+
+        # Case 2: _confirm_modal (idle) is open; user copies YouTube link
+        conf_modal = MagicMock()
+        conf_modal.winfo_exists.return_value = True
+        conf_modal.is_in_progress_view = False
+        app._confirm_modal = conf_modal
+
+        c_modal2 = MagicMock()
+        c_modal2.winfo_exists.return_value = True
+        app._candidates_modal = c_modal2
+
+        with patch("faqih_downloader.ui.controllers.youtube_download_controller.threading.Thread") as mock_thread, \
+             patch.object(app, "_show_fetching_toast"):
+            app._start_youtube_download("https://www.youtube.com/watch?v=abcdef12345", "/dest/video.mp4")
+            conf_modal.destroy.assert_called_once()
+            c_modal2.destroy.assert_called_once()
+            self.assertIsNone(app._confirm_modal)
+            self.assertIsNone(app._candidates_modal)
 
 
 if __name__ == "__main__":

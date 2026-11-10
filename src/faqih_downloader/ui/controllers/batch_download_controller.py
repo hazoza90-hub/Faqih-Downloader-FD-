@@ -23,6 +23,25 @@ class BatchDownloadControllerMixin:
         if hasattr(self, "_close_fetching_toast") and callable(self._close_fetching_toast):
             self._close_fetching_toast()
 
+        for attr in ("_candidates_modal", "_quality_modal"):
+            m = getattr(self, attr, None)
+            if m:
+                try:
+                    if m.winfo_exists():
+                        m.destroy()
+                except Exception:
+                    pass
+                setattr(self, attr, None)
+
+        confirm_m = getattr(self, "_confirm_modal", None)
+        if confirm_m:
+            try:
+                if confirm_m.winfo_exists() and not getattr(confirm_m, "is_in_progress_view", False):
+                    confirm_m.destroy()
+                    self._confirm_modal = None
+            except Exception:
+                pass
+
         def _on_download_selected(selected: List[Dict[str, Any]]):
             if not selected:
                 return

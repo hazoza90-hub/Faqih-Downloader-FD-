@@ -167,6 +167,22 @@ class ClipboardDialogMixin:
                 pass
             self._confirm_modal = None
 
+        if hasattr(self, "_quality_modal") and self._quality_modal:
+            try:
+                if self._quality_modal.winfo_exists():
+                    self._quality_modal.destroy()
+            except Exception:
+                pass
+            self._quality_modal = None
+
+        if hasattr(self, "_candidates_modal") and self._candidates_modal:
+            try:
+                if self._candidates_modal.winfo_exists():
+                    self._candidates_modal.destroy()
+            except Exception:
+                pass
+            self._candidates_modal = None
+
         def _on_start_in_window(final_dest: str, max_conn: int, bytes_limit: float, modal: DownloadConfirmationModal):
             def _proceed_start(info: Dict[str, Any]):
                 resolved_url = info.get("url") or url

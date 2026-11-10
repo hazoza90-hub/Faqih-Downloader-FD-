@@ -267,7 +267,14 @@ def stream_upstream_media(
                         cur_end = min(cur_start + WINDOW_SIZE - 1, final_end)
                         s_headers["Range"] = f"bytes={cur_start}-{cur_end}"
                         try:
-                            win_resp, win_code, w_cr, _, win_chunks = _open_window_stream(target_url, s_headers, session)
+                            try:
+                                win_resp, win_code, w_cr, _, win_chunks = _open_window_stream(target_url, s_headers, session)
+                            except Exception:
+                                if session is not None:
+                                    session = None
+                                    win_resp, win_code, w_cr, _, win_chunks = _open_window_stream(target_url, s_headers, None)
+                                else:
+                                    raise
                             try:
                                 if win_code not in (200, 206):
                                     break

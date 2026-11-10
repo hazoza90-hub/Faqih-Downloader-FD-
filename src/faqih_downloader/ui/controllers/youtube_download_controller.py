@@ -55,6 +55,22 @@ class YouTubeDownloadControllerMixin:
             except Exception:
                 pass
         self._yt_cancel_event = threading.Event()
+
+        if hasattr(self, "_confirm_modal") and self._confirm_modal:
+            try:
+                if self._confirm_modal.winfo_exists() and not getattr(self._confirm_modal, "is_in_progress_view", False):
+                    self._confirm_modal.destroy()
+                    self._confirm_modal = None
+            except Exception:
+                pass
+
+        if hasattr(self, "_candidates_modal") and self._candidates_modal:
+            try:
+                if self._candidates_modal.winfo_exists():
+                    self._candidates_modal.destroy()
+                    self._candidates_modal = None
+            except Exception:
+                pass
         if not is_busy:
             try:
                 self.btn_start.configure(state="disabled")
@@ -257,6 +273,22 @@ class YouTubeDownloadControllerMixin:
                             except Exception:
                                 pass
                             self._quality_modal = None
+
+                        if hasattr(self, "_confirm_modal") and self._confirm_modal:
+                            try:
+                                if self._confirm_modal.winfo_exists() and not getattr(self._confirm_modal, "is_in_progress_view", False):
+                                    self._confirm_modal.destroy()
+                                    self._confirm_modal = None
+                            except Exception:
+                                pass
+
+                        if hasattr(self, "_candidates_modal") and self._candidates_modal:
+                            try:
+                                if self._candidates_modal.winfo_exists():
+                                    self._candidates_modal.destroy()
+                                    self._candidates_modal = None
+                            except Exception:
+                                pass
 
                         self._pending_media_context = {
                             "url": url,
