@@ -403,7 +403,7 @@ class TestWindowedRangeAndWarnings(unittest.TestCase):
             self.assertIsNone(app._candidates_modal)
 
     def test_vault_restore_modal_interactive_row_selection(self):
-        """Verifies clicking row or name_lbl toggles BooleanVar and highlights row in #1e3a5f."""
+        """Verifies clicking row or name_lbl toggles BooleanVar, highlights row in #1e3a5f, and has no double mousewheel."""
         if not self.root:
             self.skipTest("Tkinter GUI not available")
 
@@ -435,32 +435,30 @@ class TestWindowedRangeAndWarnings(unittest.TestCase):
 
                 self.assertFalse(modal._item_vars[f1].get())
                 row_widget = modal._row_widgets[f1]["row"]
-                name_lbl = modal._row_widgets[f1]["name"]
-                indicator = modal._row_widgets[f1]["indicator"]
+                cb = modal._row_widgets[f1]["cb"]
 
-                # Initially unselected: bg is card color (#1c2333), indicator is empty box
+                # Verify no duplicate <MouseWheel> binding on row sub-widget
+                self.assertEqual(row_widget.bind("<MouseWheel>"), "")
+
+                # Initially unselected: bg is card color (#1c2333)
                 self.assertEqual(row_widget.cget("bg"), modal.c_card)
-                self.assertEqual(indicator.cget("text"), "☐")
 
                 # Click row to toggle selection
                 modal._toggle_item(f1)
                 self.assertTrue(modal._item_vars[f1].get())
                 self.assertEqual(row_widget.cget("bg"), "#1e3a5f")
-                self.assertEqual(indicator.cget("text"), "☑")
                 self.assertIn("1", modal.btn_restore_sel.cget("text"))
 
                 # Toggle off via _toggle_all_selection
                 modal._toggle_all_selection(False)
                 self.assertFalse(modal._item_vars[f1].get())
                 self.assertEqual(row_widget.cget("bg"), modal.c_card)
-                self.assertEqual(indicator.cget("text"), "☐")
 
                 # Toggle on via _toggle_all_selection
                 modal._toggle_all_selection(True)
                 self.assertTrue(modal._item_vars[f1].get())
                 self.assertTrue(modal._item_vars[f2].get())
                 self.assertEqual(row_widget.cget("bg"), "#1e3a5f")
-                self.assertEqual(indicator.cget("text"), "☑")
                 self.assertIn("2", modal.btn_restore_sel.cget("text"))
 
                 modal.destroy()
@@ -468,7 +466,7 @@ class TestWindowedRangeAndWarnings(unittest.TestCase):
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
     def test_vault_restore_browse_folder_and_scan_custom_dir(self):
-        """Verifies browse_folder() scans a custom directory tree and populates selectable files."""
+        """Verifies browse_folder() defaults checkboxes to False, then selectively restores."""
         if not self.root:
             self.skipTest("Tkinter GUI not available")
 
@@ -517,7 +515,11 @@ class TestWindowedRangeAndWarnings(unittest.TestCase):
 
                 self.assertEqual(modal._current_scan_dir, tmp_custom)
                 self.assertIn(tmp_custom, modal.lbl_current_folder.cget("text"))
-                # Verify custom folder items are auto-selected
+                # Verify custom folder items default to False so user can inspect first
+                self.assertFalse(modal._item_vars[doc_file].get())
+
+                # Select item
+                modal._toggle_item(doc_file)
                 self.assertTrue(modal._item_vars[doc_file].get())
 
                 # Restore selected
@@ -529,6 +531,103 @@ class TestWindowedRangeAndWarnings(unittest.TestCase):
         finally:
             shutil.rmtree(tmp_base, ignore_errors=True)
             shutil.rmtree(tmp_custom, ignore_errors=True)
+
+    def test_vault_restore_batch_pagination_and_load_more(self):
+        """Verifies pagination limits rendering to 40 items and Show More appends remaining rows."""
+        if not self.root:
+            self.skipTest("Tkinter GUI not available")
+
+        import shutil
+        from faqih_downloader.ui.modals.vault_restore_modal import VaultRestoreModal
+        from faqih_downloader.core.history import DownloadHistoryManager
+
+        tmp_dir = tempfile.mkdtemp(prefix="sd_test_vr_page_")
+        try:
+            # Create 45 files
+            for i in range(45):
+                f_path = os.path.join(tmp_dir, f"file_{i:02d}.bin")
+                with open(f_path, "wb") as f: f.write(b"x")
+
+            hist_db = os.path.join(tmp_dir, "test_hist.json")
+            hm = DownloadHistoryManager(history_file=hist_db)
+
+            class DummyGUI:
+                def __init__(self, root, hm):
+                    self.root = root
+                    self.history_manager = hm
+                def refresh_kanban_col3(self): pass
+                def _refresh_history_table(self, force=False): pass
+
+            gui = DummyGUI(self.root, hm)
+            with patch("faqih_downloader.config.get_setting", return_value=tmp_dir):
+                modal = VaultRestoreModal(gui)
+                self.root.update_idletasks()
+
+                self.assertEqual(len(modal._all_files), 45)
+                # First page should display exactly 40 rows
+                self.assertEqual(len(modal._row_widgets), 40)
+                # Load more button must be present
+                self.assertIsNotNone(modal._btn_load_more)
+                self.assertIn("5", modal._btn_load_more.cget("text"))
+
+                # Click Load More
+                modal._on_load_more(modal._all_files)
+                self.root.update_idletasks()
+
+                # All 45 should now be rendered
+                self.assertEqual(len(modal._row_widgets), 45)
+                # Load more button should be cleaned up
+                self.assertIsNone(modal._btn_load_more)
+
+                modal.destroy()
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    def test_scan_unregistered_disk_files_ignores_dirs_and_caps_max_results(self):
+        """Verifies fast scanner skips ignored directories (node_modules, appdata) and caps results."""
+        import shutil
+        from faqih_downloader.ui.panels.kanban_vault_ops import scan_unregistered_disk_files
+        from faqih_downloader.core.history import DownloadHistoryManager
+
+        tmp_dir = tempfile.mkdtemp(prefix="sd_test_vr_scan_")
+        try:
+            # Create normal dir with file
+            norm_dir = os.path.join(tmp_dir, "NormalFolder")
+            os.makedirs(norm_dir, exist_ok=True)
+            norm_f = os.path.join(norm_dir, "movie.mp4")
+            with open(norm_f, "wb") as f: f.write(b"video")
+
+            # Create ignored dirs with files
+            for ig in ["node_modules", "AppData", ".git"]:
+                ig_dir = os.path.join(tmp_dir, ig)
+                os.makedirs(ig_dir, exist_ok=True)
+                with open(os.path.join(ig_dir, "bad.js"), "wb") as f: f.write(b"bad")
+
+            hist_db = os.path.join(tmp_dir, "test_hist.json")
+            hm = DownloadHistoryManager(history_file=hist_db)
+
+            class DummyGUI:
+                def __init__(self, hm):
+                    self.history_manager = hm
+
+            gui = DummyGUI(hm)
+
+            # Test scanning skips ignored dirs
+            scanned = scan_unregistered_disk_files(gui, custom_dir=tmp_dir, max_results=10)
+            paths = [s["file_path"] for s in scanned]
+            self.assertIn(norm_f, paths)
+            for p in paths:
+                rel_path = os.path.relpath(p, tmp_dir)
+                parts = [part.lower() for part in rel_path.split(os.sep)]
+                self.assertNotIn("node_modules", parts)
+                self.assertNotIn("appdata", parts)
+                self.assertNotIn(".git", parts)
+
+            # Test max_results capping
+            capped = scan_unregistered_disk_files(gui, custom_dir=tmp_dir, max_results=1)
+            self.assertLessEqual(len(capped), 1)
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
 
     def test_vault_restore_refreshes_history_and_kanban_col3(self):
         """Verifies _finalize_and_close resets filter to 'all' and invokes both refresh callbacks."""

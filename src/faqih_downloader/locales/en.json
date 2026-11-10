@@ -340,6 +340,8 @@
   "vault_select_all": "Select All",
   "vault_deselect_all": "Deselect All",
   "vault_no_unregistered_files": "No unregistered files found on disk",
+  "vault_load_more": "Show More",
+  "vault_remaining": "remaining",
   "staged_btn_start": "▶ Start Download",
   "staged_btn_quality": "⚙ Quality, Dubbing & Subtitles",
   "staged_btn_info": "ℹ Info",

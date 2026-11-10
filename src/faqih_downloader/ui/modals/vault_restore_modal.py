@@ -9,7 +9,7 @@ try:
     from tkinter import ttk, filedialog
 except Exception:
     tk = ttk = filedialog = None  # type: ignore
-from typing import Any, List, Dict, Optional
+from typing import Any, List, Dict, Optional, Tuple
 
 from faqih_downloader.locales.i18n import tr
 from faqih_downloader.config import get_resource_path
@@ -42,6 +42,8 @@ class VaultRestoreModal(tk.Toplevel if tk is not None else object):
         self.parent = parent
         self._closing = False
         self._modal_icon_photo = None
+        self._display_limit = 40
+        self._btn_load_more = None
 
         # Theme colors
         self.c_bg = "#0b0e14"
@@ -57,10 +59,6 @@ class VaultRestoreModal(tk.Toplevel if tk is not None else object):
 
         self.title(tr("vault_restore_dlg_title", "Restore Files to Completed Vault"))
         self.configure(bg=self.c_bg)
-        try:
-            self.attributes("-alpha", 0.96)
-        except Exception:
-            pass
 
         # Set safe window icon
         ico_path = get_resource_path("app_icon.png")
@@ -163,21 +161,15 @@ class VaultRestoreModal(tk.Toplevel if tk is not None else object):
             highlightbackground=self.c_border, highlightcolor=self.c_accent
         )
         self.entry_search.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=4, padx=(0, 10))
-        self.entry_search.bind("<KeyRelease>", lambda e: self._display_files())
+        self.entry_search.bind("<KeyRelease>", self._on_search_changed)
 
-        btn_sel_all = tk.Label(
-            filter_bar, text=tr("vault_select_all", "Select All"),
-            font=("Segoe UI", 9, "bold"), bg=self.c_bg, fg=self.c_accent_blue, cursor="hand2"
-        )
-        btn_sel_all.pack(side=tk.LEFT, padx=(0, 8))
-        btn_sel_all.bind("<Button-1>", lambda e: self._toggle_all_selection(True))
+        btn_sel = tk.Label(filter_bar, text=tr("vault_select_all", "Select All"), font=("Segoe UI", 9, "bold"), bg=self.c_bg, fg=self.c_accent_blue, cursor="hand2")
+        btn_sel.pack(side=tk.LEFT, padx=(0, 8))
+        btn_sel.bind("<Button-1>", lambda e: self._toggle_all_selection(True))
 
-        btn_desel_all = tk.Label(
-            filter_bar, text=tr("vault_deselect_all", "Deselect All"),
-            font=("Segoe UI", 9), bg=self.c_bg, fg=self.c_text_muted, cursor="hand2"
-        )
-        btn_desel_all.pack(side=tk.LEFT)
-        btn_desel_all.bind("<Button-1>", lambda e: self._toggle_all_selection(False))
+        btn_desel = tk.Label(filter_bar, text=tr("vault_deselect_all", "Deselect All"), font=("Segoe UI", 9), bg=self.c_bg, fg=self.c_text_muted, cursor="hand2")
+        btn_desel.pack(side=tk.LEFT)
+        btn_desel.bind("<Button-1>", lambda e: self._toggle_all_selection(False))
 
         # ── 3. Current Folder Bar ────────────────────────────────────────────
         folder_bar = tk.Frame(self, bg=self.c_panel, padx=16, pady=6)
@@ -202,36 +194,16 @@ class VaultRestoreModal(tk.Toplevel if tk is not None else object):
         btn_bar = tk.Frame(self, bg=self.c_panel, padx=16, pady=12)
         btn_bar.pack(side=tk.BOTTOM, fill=tk.X)
 
-        self.btn_restore_sel = tk.Button(
-            btn_bar, text=tr("vault_btn_restore_selected", "✓ Restore Selected"),
-            font=("Segoe UI", 9, "bold"), bg="#2563eb", fg="#ffffff",
-            activebackground="#1d4ed8", activeforeground="#ffffff",
-            relief=tk.FLAT, padx=14, pady=6, cursor="hand2", command=self.restore_selected
-        )
+        self.btn_restore_sel = tk.Button(btn_bar, text=tr("vault_btn_restore_selected", "✓ Restore Selected"), font=("Segoe UI", 9, "bold"), bg="#2563eb", fg="#ffffff", activebackground="#1d4ed8", activeforeground="#ffffff", relief=tk.FLAT, padx=14, pady=6, cursor="hand2", command=self.restore_selected)
         self.btn_restore_sel.pack(side=tk.LEFT, padx=(0, 8))
 
-        self.btn_browse_folder = tk.Button(
-            btn_bar, text=tr("vault_btn_browse_folder", "📁 Browse Folder..."),
-            font=("Segoe UI", 9, "bold"), bg=self.c_card, fg=self.c_accent,
-            activebackground=self.c_border, activeforeground=self.c_accent,
-            relief=tk.FLAT, padx=12, pady=6, cursor="hand2", command=self.browse_folder
-        )
+        self.btn_browse_folder = tk.Button(btn_bar, text=tr("vault_btn_browse_folder", "📁 Browse Folder..."), font=("Segoe UI", 9, "bold"), bg=self.c_card, fg=self.c_accent, activebackground=self.c_border, activeforeground=self.c_accent, relief=tk.FLAT, padx=12, pady=6, cursor="hand2", command=self.browse_folder)
         self.btn_browse_folder.pack(side=tk.LEFT, padx=(0, 8))
 
-        self.btn_browse = tk.Button(
-            btn_bar, text=tr("vault_btn_browse_file", "▣ Browse File..."),
-            font=("Segoe UI", 9, "bold"), bg=self.c_card, fg=self.c_text_bright,
-            activebackground=self.c_border, activeforeground="#ffffff",
-            relief=tk.FLAT, padx=12, pady=6, cursor="hand2", command=self.browse_files
-        )
+        self.btn_browse = tk.Button(btn_bar, text=tr("vault_btn_browse_file", "▣ Browse File..."), font=("Segoe UI", 9, "bold"), bg=self.c_card, fg=self.c_text_bright, activebackground=self.c_border, activeforeground="#ffffff", relief=tk.FLAT, padx=12, pady=6, cursor="hand2", command=self.browse_files)
         self.btn_browse.pack(side=tk.LEFT, padx=(0, 8))
 
-        self.btn_restore_all = tk.Button(
-            btn_bar, text=tr("vault_btn_restore_all", "↻ Restore All"),
-            font=("Segoe UI", 9), bg=self.c_card, fg=self.c_accent,
-            activebackground=self.c_border, activeforeground=self.c_accent,
-            relief=tk.FLAT, padx=12, pady=6, cursor="hand2", command=self.restore_all
-        )
+        self.btn_restore_all = tk.Button(btn_bar, text=tr("vault_btn_restore_all", "↻ Restore All"), font=("Segoe UI", 9), bg=self.c_card, fg=self.c_accent, activebackground=self.c_border, activeforeground=self.c_accent, relief=tk.FLAT, padx=12, pady=6, cursor="hand2", command=self.restore_all)
         self.btn_restore_all.pack(side=tk.RIGHT)
 
         # ── 5. Scrollable File List Container ────────────────────────────────
@@ -256,14 +228,26 @@ class VaultRestoreModal(tk.Toplevel if tk is not None else object):
         self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
 
     def _on_mousewheel(self, event):
-        """Scrolls the canvas with mouse wheel if window exists."""
+        """Scrolls canvas smoothly with mouse wheel only when content overflows."""
         if getattr(self, "_closing", False):
             return
         try:
-            if self.winfo_exists() and hasattr(self, "canvas") and self.canvas.winfo_exists():
-                self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            if not self.winfo_exists() or not hasattr(self, "canvas") or not self.canvas.winfo_exists():
+                return
+            if hasattr(self, "scrollbar") and self.scrollbar.winfo_exists():
+                top, btm = self.scrollbar.get()
+                if top <= 0.0 and btm >= 1.0:
+                    return
+            delta = int(-1 * (event.delta / 120))
+            if delta != 0:
+                self.canvas.yview_scroll(delta, "units")
         except Exception:
             pass
+
+    def _on_search_changed(self, event=None):
+        """Reset pagination limit and re-render files on live search query edit."""
+        self._display_limit = 40
+        self._display_files()
 
     def _toggle_all_selection(self, select: bool):
         """Sets all checkboxes to either checked or unchecked and refreshes visuals."""
@@ -285,7 +269,7 @@ class VaultRestoreModal(tk.Toplevel if tk is not None else object):
         self._update_restore_btn_text()
 
     def _update_row_visual(self, path: str):
-        """Updates row background, border, and indicator icon to reflect selection state."""
+        """Updates row background, border, and checkbox to reflect selection state."""
         widgets = getattr(self, "_row_widgets", {}).get(path)
         if not widgets:
             return
@@ -294,12 +278,9 @@ class VaultRestoreModal(tk.Toplevel if tk is not None else object):
 
         bg = "#1e3a5f" if is_selected else self.c_card
         border = "#38bdf8" if is_selected else self.c_border
-        icon = "☑" if is_selected else "☐"
-        icon_fg = self.c_accent if is_selected else "#64748b"
 
         try:
             widgets["row"].configure(bg=bg, highlightbackground=border)
-            widgets["indicator"].configure(text=icon, bg=bg, fg=icon_fg)
             widgets["cb"].configure(bg=bg, activebackground=bg)
             widgets["name"].configure(bg=bg)
             widgets["cat"].configure(bg=bg)
@@ -322,30 +303,9 @@ class VaultRestoreModal(tk.Toplevel if tk is not None else object):
         base_text = tr("vault_btn_restore_selected", "✓ Restore Selected")
         self.btn_restore_sel.configure(text=f"{base_text} ({sel_count})" if sel_count > 0 else base_text)
 
-    def _display_files(self):
-        """Renders file rows in scrollable frame, filtering by search query."""
-        if hasattr(self, "_row_widgets"):
-            self._row_widgets.clear()
-
-        for child in self.scrollable_frame.winfo_children():
-            try:
-                child.destroy()
-            except Exception:
-                pass
-
-        query = self.entry_search.get().strip().lower() if hasattr(self, "entry_search") else ""
-        filtered = [f for f in self._all_files if not query or query in f["filename"].lower()]
-
-        if not filtered:
-            lbl_empty = tk.Label(
-                self.scrollable_frame, text=tr("vault_no_unregistered_files", "No unregistered files found on disk"),
-                font=("Segoe UI", 10), bg=self.c_bg, fg=self.c_text_muted, pady=40
-            )
-            lbl_empty.pack(fill=tk.BOTH, expand=True)
-            self._update_restore_btn_text()
-            return
-
-        for f_info in filtered:
+    def _append_file_rows(self, files_slice: List[Dict[str, Any]]):
+        """Renders a batch of file rows in scrollable frame."""
+        for f_info in files_slice:
             path = f_info["file_path"]
             var = self._item_vars.get(path)
             if var is None:
@@ -355,20 +315,12 @@ class VaultRestoreModal(tk.Toplevel if tk is not None else object):
             is_selected = bool(var.get())
             bg_color = "#1e3a5f" if is_selected else self.c_card
             border_color = "#38bdf8" if is_selected else self.c_border
-            icon_text = "☑" if is_selected else "☐"
-            icon_fg = self.c_accent if is_selected else "#64748b"
 
             row = tk.Frame(
                 self.scrollable_frame, bg=bg_color, padx=10, pady=8,
                 highlightthickness=1, highlightbackground=border_color, cursor="hand2"
             )
             row.pack(fill=tk.X, pady=2)
-
-            lbl_indicator = tk.Label(
-                row, text=icon_text, font=("Segoe UI", 12, "bold"),
-                bg=bg_color, fg=icon_fg, cursor="hand2"
-            )
-            lbl_indicator.pack(side=tk.LEFT, padx=(0, 4))
 
             cb = tk.Checkbutton(
                 row, variable=var, bg=bg_color, activebackground=bg_color,
@@ -396,16 +348,84 @@ class VaultRestoreModal(tk.Toplevel if tk is not None else object):
             size_lbl.pack(side=tk.RIGHT, padx=(6, 6))
 
             self._row_widgets[path] = {
-                "row": row, "indicator": lbl_indicator, "cb": cb,
-                "name": name_lbl, "cat": cat_lbl, "size": size_lbl,
+                "row": row, "cb": cb, "name": name_lbl, "cat": cat_lbl, "size": size_lbl,
             }
 
-            for w in (row, lbl_indicator, name_lbl, cat_lbl, size_lbl):
+            for w in (row, name_lbl, cat_lbl, size_lbl):
                 w.bind("<Button-1>", lambda e, p=path: self._toggle_item(p))
-                w.bind("<MouseWheel>", self._on_mousewheel)
-            cb.bind("<MouseWheel>", self._on_mousewheel)
+
+    def _create_load_more_button(self, filtered: List[Dict[str, Any]], remaining: int):
+        """Creates an elegant load more button at the bottom of the scrollable frame."""
+        btn_txt = f"⬇ {tr('vault_load_more', 'Show More')} ({remaining} {tr('vault_remaining', 'remaining')})"
+        self._btn_load_more = tk.Button(
+            self.scrollable_frame, text=btn_txt, font=("Segoe UI", 9, "bold"),
+            bg=self.c_card, fg=self.c_accent_blue, activebackground=self.c_border,
+            activeforeground="#ffffff", relief=tk.FLAT, padx=14, pady=8, cursor="hand2",
+            command=lambda: self._on_load_more(filtered)
+        )
+        self._btn_load_more.pack(fill=tk.X, pady=6)
+
+    def _on_load_more(self, filtered: List[Dict[str, Any]]):
+        """Loads and appends the next batch of files without recreating previous rows."""
+        if hasattr(self, "_btn_load_more") and self._btn_load_more:
+            try:
+                self._btn_load_more.destroy()
+            except Exception:
+                pass
+            self._btn_load_more = None
+
+        old_limit = self._display_limit
+        self._display_limit += 40
+        next_slice = filtered[old_limit:self._display_limit]
+        self._append_file_rows(next_slice)
+
+        remaining = len(filtered) - self._display_limit
+        if remaining > 0:
+            self._create_load_more_button(filtered, remaining)
+
+        try:
+            self.update_idletasks()
+            self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+        except Exception:
+            pass
+
+    def _display_files(self):
+        """Renders paginated file rows in scrollable frame, filtering by search query."""
+        if hasattr(self, "_row_widgets"):
+            self._row_widgets.clear()
+
+        for child in self.scrollable_frame.winfo_children():
+            try:
+                child.destroy()
+            except Exception:
+                pass
+        self._btn_load_more = None
+
+        query = self.entry_search.get().strip().lower() if hasattr(self, "entry_search") else ""
+        filtered = [f for f in self._all_files if not query or query in f["filename"].lower()]
+
+        if not filtered:
+            lbl_empty = tk.Label(
+                self.scrollable_frame, text=tr("vault_no_unregistered_files", "No unregistered files found on disk"),
+                font=("Segoe UI", 10), bg=self.c_bg, fg=self.c_text_muted, pady=40
+            )
+            lbl_empty.pack(fill=tk.BOTH, expand=True)
+            self._update_restore_btn_text()
+            return
+
+        visible = filtered[:self._display_limit]
+        self._append_file_rows(visible)
+
+        remaining = len(filtered) - self._display_limit
+        if remaining > 0:
+            self._create_load_more_button(filtered, remaining)
 
         self._update_restore_btn_text()
+        try:
+            self.update_idletasks()
+            self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+        except Exception:
+            pass
 
     def browse_folder(self) -> int:
         """Prompts user to select a folder from disk and loads unregistered files from it."""
@@ -425,67 +445,72 @@ class VaultRestoreModal(tk.Toplevel if tk is not None else object):
             self._row_widgets.clear()
 
         for f_info in self._all_files:
-            self._item_vars[f_info["file_path"]] = tk.BooleanVar(master=self, value=True)
+            self._item_vars[f_info["file_path"]] = tk.BooleanVar(master=self, value=False)
 
+        self._display_limit = 40
         self._display_files()
         return len(self._all_files)
 
-    def restore_selected(self) -> int:
-        """Restores only files with active checkbox checked."""
+    def _batch_add_entries(self, items: List[Tuple[str, int]]) -> int:
+        """Adds a batch of files to history_manager efficiently with a single flush."""
         history_mgr = getattr(self.gui, "history_manager", None)
-        if not history_mgr:
-            self.destroy()
+        if not history_mgr or not items:
             return 0
-        restored_count = 0
-        for f_info in self._all_files:
-            var = self._item_vars.get(f_info["file_path"])
-            if var and var.get():
+        added = 0
+        for path, sz in items:
+            try:
                 history_mgr.add_or_update_entry(
-                    url="", file_path=f_info["file_path"],
-                    size_bytes=f_info.get("size_bytes", 0), status="Completed"
+                    url="", file_path=path, size_bytes=sz, status="Completed", save=False
                 )
-                restored_count += 1
-        self._finalize_and_close()
-        return restored_count
-
-    def restore_all(self) -> int:
-        """Restores all discovered files regardless of filter or checkbox state."""
-        history_mgr = getattr(self.gui, "history_manager", None)
-        if not history_mgr:
-            self.destroy()
-            return 0
-        restored_count = 0
-        for f_info in self._all_files:
-            history_mgr.add_or_update_entry(
-                url="", file_path=f_info["file_path"],
-                size_bytes=f_info.get("size_bytes", 0), status="Completed"
-            )
-            restored_count += 1
-        self._finalize_and_close()
-        return restored_count
-
-    def browse_files(self) -> int:
-        """Prompts user to select arbitrary files from disk and adds them to history."""
-        history_mgr = getattr(self.gui, "history_manager", None)
-        if not history_mgr:
-            return 0
-        selected_files = filedialog.askopenfilenames(
-            parent=self, title=tr("vault_btn_browse_file", "▣ Browse File...")
-        )
-        if not selected_files:
-            return 0
-        restored_count = 0
-        for path in selected_files:
-            if os.path.isfile(path):
-                try: sz = os.path.getsize(path)
-                except Exception: sz = 0
+            except TypeError:
                 history_mgr.add_or_update_entry(
                     url="", file_path=path, size_bytes=sz, status="Completed"
                 )
-                restored_count += 1
-        if restored_count > 0:
+            added += 1
+
+        for s_fn in ("_save_entries", "save_entries", "save"):
+            fn = getattr(history_mgr, s_fn, None)
+            if callable(fn):
+                try:
+                    fn()
+                    break
+                except Exception:
+                    pass
+        return added
+
+    def restore_selected(self) -> int:
+        """Restores only files with active checkbox checked."""
+        items = [
+            (f["file_path"], f.get("size_bytes", 0))
+            for f in self._all_files
+            if self._item_vars.get(f["file_path"]) and self._item_vars[f["file_path"]].get()
+        ]
+        count = self._batch_add_entries(items)
+        self._finalize_and_close()
+        return count
+
+    def restore_all(self) -> int:
+        """Restores all discovered files regardless of filter or checkbox state."""
+        items = [(f["file_path"], f.get("size_bytes", 0)) for f in self._all_files]
+        count = self._batch_add_entries(items)
+        self._finalize_and_close()
+        return count
+
+    def browse_files(self) -> int:
+        """Prompts user to select arbitrary files from disk and adds them to history."""
+        selected = filedialog.askopenfilenames(
+            parent=self, title=tr("vault_btn_browse_file", "▣ Browse File...")
+        )
+        if not selected:
+            return 0
+        items = [
+            (p, os.path.getsize(p) if os.path.isfile(p) else 0)
+            for p in selected if os.path.isfile(p)
+        ]
+        count = self._batch_add_entries(items)
+        if count > 0:
             self._finalize_and_close()
-        return restored_count
+        return count
 
     def _finalize_and_close(self):
         """Refreshes Column 3 and history table, then cleanly destroys modal dialog."""

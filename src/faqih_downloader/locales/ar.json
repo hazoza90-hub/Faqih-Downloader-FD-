@@ -340,6 +340,8 @@
   "vault_select_all": "تحديد الكل",
   "vault_deselect_all": "إلغاء التحديد",
   "vault_no_unregistered_files": "لم يتم العثور على ملفات غير مسجلة في المجلد",
+  "vault_load_more": "عرض المزيد",
+  "vault_remaining": "ملف متبقي",
   "staged_btn_start": "▶ ابدأ التحميل",
   "staged_btn_quality": "⚙ الجودة والدبلجة والترجمة",
   "staged_btn_info": "ℹ معلومات",

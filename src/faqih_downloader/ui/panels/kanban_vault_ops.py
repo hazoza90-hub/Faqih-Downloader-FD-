@@ -66,10 +66,14 @@ def clear_completed_vault_entries(gui: Any) -> bool:
     return True
 
 
-def scan_unregistered_disk_files(gui: Any, custom_dir: Optional[str] = None) -> List[Dict[str, Any]]:
+def scan_unregistered_disk_files(
+    gui: Any,
+    custom_dir: Optional[str] = None,
+    max_results: int = 300
+) -> List[Dict[str, Any]]:
     """
-    Scans the base downloads directory or custom_dir and subfolders for completed files
-    that are not currently registered in DownloadHistoryManager.
+    Fast, non-blocking scan of the base downloads directory or custom_dir using
+    depth-limited os.scandir (max depth 2, max results capped) to prevent UI freezing.
     """
     history_mgr = getattr(gui, "history_manager", None)
     if not history_mgr:
@@ -92,6 +96,11 @@ def scan_unregistered_disk_files(gui: Any, custom_dir: Optional[str] = None) -> 
 
     ignored_suffixes = (".part", ".ytdl", ".tmp", ".sd_parts", ".json", ".ini")
     ignored_names = {"desktop.ini", "thumbs.db", ".ds_store"}
+    ignored_dirs = {
+        "windows", "program files", "program files (x86)", "programdata",
+        "appdata", "node_modules", ".git", ".venv", "venv", "__pycache__",
+        "$recycle.bin", "system volume information", "library", "cargo", "rustup"
+    }
 
     existing_paths = set()
     existing_names = set()
@@ -111,86 +120,54 @@ def scan_unregistered_disk_files(gui: Any, custom_dir: Optional[str] = None) -> 
     if cat_fn is None:
         from faqih_downloader.ui.panels.kanban_vault_helpers import get_entry_category as cat_fn
 
-    results = []
+    results: List[Dict[str, Any]] = []
     seen_paths = set()
+    queue = [(base_dir, 0)]  # (directory_path, depth)
 
-    if is_custom:
-        for root, dirs, files in os.walk(base_dir):
-            dirs[:] = [d for d in dirs if not d.startswith(".")]
-            for name in files:
-                lower_name = name.lower()
-                if lower_name in ignored_names or any(lower_name.endswith(sfx) for sfx in ignored_suffixes):
-                    continue
-                full_path = os.path.join(root, name)
-                try:
-                    abs_path = os.path.normcase(os.path.abspath(full_path))
-                except Exception:
-                    abs_path = full_path
-
-                if abs_path in existing_paths or abs_path in seen_paths:
-                    continue
-                seen_paths.add(abs_path)
-
-                try:
-                    size_bytes = os.path.getsize(full_path)
-                except Exception:
-                    size_bytes = 0
-
-                cat = cat_fn({"filename": name})
-                results.append({
-                    "filename": name,
-                    "file_path": full_path,
-                    "size_bytes": size_bytes,
-                    "category": cat
-                })
-    else:
-        sub_dirs = ["", "Video", "Music", "Audio", "Compressed", "Documents", "Programs"]
-        all_sub_dirs = list(sub_dirs)
+    while queue and len(results) < max_results:
+        cur_dir, depth = queue.pop(0)
         try:
-            with os.scandir(base_dir) as it:
+            with os.scandir(cur_dir) as it:
                 for item in it:
-                    if item.is_dir() and not item.name.startswith("."):
-                        if item.name not in all_sub_dirs:
-                            all_sub_dirs.append(item.name)
+                    if len(results) >= max_results:
+                        break
+                    try:
+                        if item.is_dir(follow_symlinks=False):
+                            name_lower = item.name.lower()
+                            if depth < 2 and name_lower not in ignored_dirs and not item.name.startswith("."):
+                                queue.append((item.path, depth + 1))
+                        elif item.is_file(follow_symlinks=False):
+                            name = item.name
+                            lower_name = name.lower()
+                            if lower_name in ignored_names or any(lower_name.endswith(sfx) for sfx in ignored_suffixes):
+                                continue
+                            try:
+                                abs_path = os.path.normcase(os.path.abspath(item.path))
+                            except Exception:
+                                abs_path = item.path
+
+                            if abs_path in existing_paths or abs_path in seen_paths:
+                                continue
+                            if not is_custom and lower_name in existing_names:
+                                continue
+
+                            seen_paths.add(abs_path)
+                            try:
+                                size_bytes = item.stat().st_size
+                            except Exception:
+                                size_bytes = 0
+
+                            cat = cat_fn({"filename": name})
+                            results.append({
+                                "filename": name,
+                                "file_path": item.path,
+                                "size_bytes": size_bytes,
+                                "category": cat
+                            })
+                    except Exception:
+                        pass
         except Exception:
             pass
-
-        for sub in all_sub_dirs:
-            scan_dir = os.path.join(base_dir, sub) if sub else base_dir
-            if not os.path.isdir(scan_dir):
-                continue
-            try:
-                with os.scandir(scan_dir) as it:
-                    for item in it:
-                        if not item.is_file():
-                            continue
-                        name = item.name
-                        lower_name = name.lower()
-                        if lower_name in ignored_names or any(lower_name.endswith(sfx) for sfx in ignored_suffixes):
-                            continue
-                        try:
-                            abs_path = os.path.normcase(os.path.abspath(item.path))
-                        except Exception:
-                            abs_path = item.path
-
-                        if abs_path in existing_paths or lower_name in existing_names or abs_path in seen_paths:
-                            continue
-                        seen_paths.add(abs_path)
-
-                        try:
-                            size_bytes = item.stat().st_size
-                        except Exception:
-                            size_bytes = 0
-
-                        cat = cat_fn({"filename": name})
-                        results.append({
-                            "filename": name,
-                            "file_path": item.path,
-                            "size_bytes": size_bytes,
-                            "category": cat
-                        })
-            except Exception:
-                pass
 
     return results
 
@@ -204,15 +181,32 @@ def restore_vault_entries_from_disk(gui: Any) -> int:
     files = scan_unregistered_disk_files(gui)
     restored_count = 0
     for f_info in files:
-        history_mgr.add_or_update_entry(
-            url="",
-            file_path=f_info["file_path"],
-            size_bytes=f_info["size_bytes"],
-            status="Completed"
-        )
+        try:
+            history_mgr.add_or_update_entry(
+                url="",
+                file_path=f_info["file_path"],
+                size_bytes=f_info["size_bytes"],
+                status="Completed",
+                save=False
+            )
+        except TypeError:
+            history_mgr.add_or_update_entry(
+                url="",
+                file_path=f_info["file_path"],
+                size_bytes=f_info["size_bytes"],
+                status="Completed"
+            )
         restored_count += 1
 
     if restored_count > 0:
+        for s_fn in ("_save_entries", "save_entries", "save"):
+            fn = getattr(history_mgr, s_fn, None)
+            if callable(fn):
+                try:
+                    fn()
+                    break
+                except Exception:
+                    pass
         if hasattr(gui, "_vault_filter_category"):
             gui._vault_filter_category = "all"
         _safe_refresh_history(gui)

@@ -64,6 +64,10 @@ class DownloadHistoryManager:
                 except Exception:
                     return False
 
+    def save_entries(self) -> bool:
+        """Explicitly flush all in-memory entries to disk (useful for bulk batch operations)."""
+        return self._save_entries()
+
     def add_or_update_entry(
         self,
         url: str,
@@ -71,7 +75,8 @@ class DownloadHistoryManager:
         size_bytes: int = 0,
         status: str = "Completed",
         elapsed_sec: float = 0.0,
-        entry_id: Optional[str] = None
+        entry_id: Optional[str] = None,
+        save: bool = True
     ) -> Dict[str, Any]:
         with self._lock:
             norm_path = os.path.abspath(file_path) if file_path else ""
@@ -122,7 +127,8 @@ class DownloadHistoryManager:
                         if elapsed_val > 0:
                             entry["elapsed_sec"] = elapsed_val
                         entry["_epoch"] = now_epoch
-                        self._save_entries()
+                        if save:
+                            self._save_entries()
                         return dict(entry)
 
             incomplete_statuses = {"paused", "in progress", "failed", "queued", "متوقف مؤقتاً", "قيد التحميل", "فشل", "في الانتظار"}
@@ -218,7 +224,8 @@ class DownloadHistoryManager:
             if len(self._entries) > self.max_entries:
                 self._entries = self._entries[:self.max_entries]
 
-            self._save_entries()
+            if save:
+                self._save_entries()
             return dict(record)
 
     def get_active_or_queued_paths(self) -> List[str]:
