@@ -190,5 +190,114 @@ class TestWindowedRangeAndWarnings(unittest.TestCase):
             self.assertEqual(text, "https://example.com/fallback_url.mp4")
 
 
+    def test_windowed_range_proxy_urllib_fallback_when_requests_missing(self):
+        """Verifies Windowed Range Proxy uses urllib.request.urlopen when requests library is unavailable."""
+        handler = MagicMock()
+        handler.headers = {"Range": "bytes=0-"}
+        handler.wfile = io.BytesIO()
+
+        target_url = "https://rr1---sn-4g5ednsl.googlevideo.com/videoplayback?id=stream456"
+
+        mock_upstream = MagicMock()
+        mock_upstream.getcode.return_value = 206
+        mock_upstream.headers = {
+            "Content-Type": "video/mp4",
+            "Content-Range": "bytes 0-2097151/2097152",
+        }
+        mock_upstream.read.side_effect = [b"X" * 65536, b"Y" * 65536, b""]
+
+        with patch.dict(sys.modules, {"requests": None}), \
+             patch("urllib.request.urlopen", return_value=mock_upstream) as mock_urlopen:
+
+            stream_upstream_media(handler, target_url, {"User-Agent": "TestUA"}, is_head=False)
+
+            # Verify urllib.request.urlopen was called
+            self.assertTrue(mock_urlopen.called)
+            req_called = mock_urlopen.call_args[0][0]
+            # Verify the Request has the 2MB range header
+            self.assertEqual(req_called.headers.get("Range"), "bytes=0-2097151")
+
+            # Assert client response was sent with 206 and Content-Range
+            handler.send_response.assert_called_with(206)
+            handler.send_header.assert_any_call("Content-Range", "bytes 0-2097151/2097152")
+            handler.send_header.assert_any_call("Content-Length", "2097152")
+
+            # Assert data was written to handler.wfile
+            self.assertEqual(len(handler.wfile.getvalue()), 131072)
+
+    def test_trigger_clipboard_url_respects_hidden_tray_state(self):
+        """Verifies _trigger_clipboard_url does not deiconify root when hidden in tray with auto_start enabled."""
+        controller = ClipboardControllerMixin()
+        controller.root = MagicMock()
+        controller._on_clipboard_url_detected = MagicMock()
+
+        # Case 1: Hidden in tray, auto_start is True -> should NOT deiconify or lift
+        controller._auto_start_clipboard = True
+        controller.is_window_hidden_or_minimized = MagicMock(return_value=True)
+        controller._trigger_clipboard_url("https://example.com/file1.zip")
+        controller.root.deiconify.assert_not_called()
+        controller.root.lift.assert_not_called()
+        controller._on_clipboard_url_detected.assert_called_once_with("https://example.com/file1.zip")
+
+        # Case 2: Visible (not hidden), auto_start is True -> should lift, not deiconify
+        controller.root.reset_mock()
+        controller._on_clipboard_url_detected.reset_mock()
+        controller.is_window_hidden_or_minimized.return_value = False
+        controller._trigger_clipboard_url("https://example.com/file2.zip")
+        controller.root.deiconify.assert_not_called()
+        controller.root.lift.assert_called_once()
+        controller._on_clipboard_url_detected.assert_called_once_with("https://example.com/file2.zip")
+
+        # Case 3: auto_start is False -> should deiconify and lift to show main window inputs
+        controller.root.reset_mock()
+        controller._on_clipboard_url_detected.reset_mock()
+        controller._auto_start_clipboard = False
+        controller.is_window_hidden_or_minimized.return_value = True
+        controller._trigger_clipboard_url("https://example.com/file3.zip")
+        controller.root.deiconify.assert_called_once()
+        controller.root.lift.assert_called_once()
+        controller._on_clipboard_url_detected.assert_called_once_with("https://example.com/file3.zip")
+
+    def test_clipboard_sniffer_modal_and_sequence_handling(self):
+        """Verifies clipboard captures new URL when non-progress modal is open, but blocks when modal is in progress view."""
+        controller = ClipboardControllerMixin()
+        controller.root = MagicMock()
+        controller._last_clipboard_seq = 100
+        controller._last_clipboard_url = "https://example.com/first.mp4"
+        controller._trigger_clipboard_url = MagicMock()
+
+        dummy_modal = MagicMock()
+        dummy_modal.winfo_exists.return_value = True
+        dummy_modal.is_completed = False
+        dummy_modal.is_closed = False
+        dummy_modal.is_in_progress_view = False
+        controller._confirm_modal = dummy_modal
+
+        # Scenario 1: Seq changed, modal is open but NOT in progress -> should capture new URL
+        new_url = "https://example.com/second.mp4"
+        with patch("ctypes.windll.user32.GetClipboardSequenceNumber", return_value=105), \
+             patch.object(controller, "_read_clipboard_text_safe", return_value=new_url):
+            controller._check_clipboard_now()
+            self.assertEqual(controller._last_clipboard_seq, 105)
+            controller._trigger_clipboard_url.assert_called_once_with(new_url)
+
+        # Scenario 2: Seq changed, but modal IS in active progress view -> should block capture
+        controller._trigger_clipboard_url.reset_mock()
+        dummy_modal.is_in_progress_view = True
+        third_url = "https://example.com/third.mp4"
+        with patch("ctypes.windll.user32.GetClipboardSequenceNumber", return_value=110), \
+             patch.object(controller, "_read_clipboard_text_safe", return_value=third_url):
+            controller._check_clipboard_now()
+            # trigger should NOT be called
+            controller._trigger_clipboard_url.assert_not_called()
+
+        # Scenario 3: Seq did NOT change and modal is open -> should exit early
+        dummy_modal.is_in_progress_view = False
+        controller._trigger_clipboard_url.reset_mock()
+        with patch("ctypes.windll.user32.GetClipboardSequenceNumber", return_value=105):
+            controller._check_clipboard_now()
+            controller._trigger_clipboard_url.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

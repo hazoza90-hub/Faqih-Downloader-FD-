@@ -128,9 +128,14 @@ class ClipboardControllerMixin(ClipboardDialogMixin):
         """Dispatches an intercepted downloadable URL from clipboard and restores window if needed."""
         try:
             if hasattr(self, "root") and self.root:
-                self.root.deiconify()
-                self.root.lift()
-                self.root.focus_force()
+                is_hidden = hasattr(self, "is_window_hidden_or_minimized") and self.is_window_hidden_or_minimized()
+                if not getattr(self, "_auto_start_clipboard", True):
+                    self.root.deiconify()
+                    self.root.lift()
+                    self.root.focus_force()
+                elif not is_hidden:
+                    self.root.lift()
+                    self.root.focus_force()
         except Exception:
             pass
         self._on_clipboard_url_detected(url)
@@ -194,15 +199,6 @@ class ClipboardControllerMixin(ClipboardDialogMixin):
 
     def _check_clipboard_now(self, force: bool = False):
         """Checks if current clipboard contains a new downloadable URL and processes it."""
-        if not force:
-            for m in (getattr(self, "_fetching_toast", None), getattr(self, "_confirm_modal", None), getattr(self, "_candidates_modal", None)):
-                if m is not None:
-                    try:
-                        if m.winfo_exists() and not getattr(m, "is_completed", False) and not getattr(m, "is_closed", False):
-                            return
-                    except Exception:
-                        pass
-
         seq = None
         if IS_WINDOWS:
             try:
@@ -215,8 +211,25 @@ class ClipboardControllerMixin(ClipboardDialogMixin):
         seq_changed = (seq is None or prev_seq is None or seq == 0 or prev_seq == 0 or seq != prev_seq)
 
         if not force:
-            if not seq_changed and getattr(self, "_last_clipboard_url", None) is not None:
-                return
+            if not seq_changed:
+                if getattr(self, "_last_clipboard_url", None) is not None:
+                    return
+                for m in (getattr(self, "_fetching_toast", None), getattr(self, "_confirm_modal", None), getattr(self, "_candidates_modal", None), getattr(self, "_quality_modal", None)):
+                    if m is not None:
+                        try:
+                            if m.winfo_exists() and not getattr(m, "is_completed", False) and not getattr(m, "is_closed", False):
+                                return
+                        except Exception:
+                            pass
+            else:
+                # When seq_changed is True, only block if confirm_modal is in active downloading progress view
+                confirm_modal = getattr(self, "_confirm_modal", None)
+                if confirm_modal is not None:
+                    try:
+                        if confirm_modal.winfo_exists() and getattr(confirm_modal, "is_in_progress_view", False):
+                            return
+                    except Exception:
+                        pass
 
         text = self._read_clipboard_text_safe()
         if not text or not isinstance(text, str):
@@ -229,18 +242,8 @@ class ClipboardControllerMixin(ClipboardDialogMixin):
             self._last_clipboard_seq = seq
 
         # Check re-triggering of the same URL
-        modal_open = False
-        for m in (getattr(self, "_confirm_modal", None), getattr(self, "_candidates_modal", None)):
-            if m is not None:
-                try:
-                    if m.winfo_exists() and not getattr(m, "is_completed", False) and not getattr(m, "is_closed", False):
-                        modal_open = True
-                        break
-                except Exception:
-                    pass
-
         is_fetching = getattr(self, "_is_fetching", False) or getattr(self, "_is_resolving_start", False)
-        allow_retrigger = seq_changed and (prev_seq not in (None, 0)) and not is_fetching and not modal_open
+        allow_retrigger = seq_changed and (prev_seq not in (None, 0)) and not is_fetching
 
         if not allow_retrigger:
             if force and (url == getattr(self, "_last_forced_url", None)):

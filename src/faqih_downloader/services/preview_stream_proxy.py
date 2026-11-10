@@ -113,6 +113,42 @@ def resolve_preview_audio_target(session: Any, a_idx: int, q_idx: Optional[int] 
     return str(track.get("url") or ""), headers
 
 
+def _open_window_stream(target_url: str, headers: Dict[str, str], session: Any = None):
+    """
+    Opens a single window HTTP range stream.
+    Uses requests.Session if provided, or urllib.request fallback if requests is unavailable.
+    """
+    if session is not None:
+        resp = session.get(target_url, headers=headers, stream=True, timeout=15, verify=False)
+        status = resp.status_code
+        cr = resp.headers.get("Content-Range", "")
+        ct = resp.headers.get("Content-Type", "video/mp4")
+
+        def _iter():
+            for chunk in resp.iter_content(chunk_size=64 * 1024):
+                if not chunk:
+                    break
+                yield chunk
+
+        return resp, status, cr, ct, _iter
+    else:
+        req = urllib.request.Request(target_url, headers=headers)
+        ctx = get_permissive_ssl_context()
+        resp = urllib.request.urlopen(req, timeout=15, context=ctx)
+        status = resp.getcode() or 200
+        cr = resp.headers.get("Content-Range", "")
+        ct = resp.headers.get("Content-Type", "video/mp4")
+
+        def _iter():
+            while True:
+                chunk = resp.read(64 * 1024)
+                if not chunk:
+                    break
+                yield chunk
+
+        return resp, status, cr, ct, _iter
+
+
 def stream_upstream_media(
     handler: http.server.BaseHTTPRequestHandler,
     target_url: str,
@@ -157,24 +193,40 @@ def stream_upstream_media(
         needs_windowed = is_open_ended or (req_len is not None and req_len > WINDOW_SIZE)
 
         if needs_windowed:
+            session = None
             try:
                 import requests
-                import urllib3
-                urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-                session = requests.Session()
-                s_headers = {
-                    k: v for k, v in (custom_headers or {}).items()
-                    if k.lower() not in ("host", "range", "content-length", "connection")
-                }
-                s_headers["User-Agent"] = ua
-                first_end = (start_byte + WINDOW_SIZE - 1) if end_byte_target is None else min(start_byte + WINDOW_SIZE - 1, end_byte_target)
-                s_headers["Range"] = f"bytes={start_byte}-{first_end}"
+                if hasattr(requests, "Session"):
+                    try:
+                        import urllib3
+                        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+                    except Exception:
+                        pass
+                    session = requests.Session()
+            except Exception:
+                session = None
 
-                first_resp = session.get(target_url, headers=s_headers, stream=True, timeout=15, verify=False)
-                cr = first_resp.headers.get("Content-Range", "")
+            s_headers = {
+                k: str(v) for k, v in (custom_headers or {}).items()
+                if k.lower() not in ("host", "range", "content-length", "connection")
+            }
+            s_headers["User-Agent"] = ua
+            first_end = (start_byte + WINDOW_SIZE - 1) if end_byte_target is None else min(start_byte + WINDOW_SIZE - 1, end_byte_target)
+            s_headers["Range"] = f"bytes={start_byte}-{first_end}"
+
+            first_resp = None
+            try:
+                if session is not None:
+                    try:
+                        first_resp, status_code, cr, ct, chunks = _open_window_stream(target_url, s_headers, session)
+                    except Exception:
+                        session = None
+                if session is None:
+                    first_resp, status_code, cr, ct, chunks = _open_window_stream(target_url, s_headers, None)
+
                 cr_match = re.search(r"bytes\s+(\d+)-(\d+)/(\d+|\*)", cr, re.IGNORECASE) if cr else None
 
-                if first_resp.status_code == 206 and cr_match:
+                if status_code == 206 and cr_match:
                     c_start = int(cr_match.group(1))
                     c_end = int(cr_match.group(2))
                     tot_str = cr_match.group(3)
@@ -189,7 +241,7 @@ def stream_upstream_media(
 
                     resp_len = final_end - start_byte + 1
                     handler.send_response(206 if client_range else 200)
-                    handler.send_header("Content-Type", first_resp.headers.get("Content-Type", "video/mp4"))
+                    handler.send_header("Content-Type", ct)
                     handler.send_header("Accept-Ranges", "bytes")
                     if client_range:
                         tot_disp = str(tot_size) if tot_size is not None else "*"
@@ -201,13 +253,12 @@ def stream_upstream_media(
                     handler.end_headers()
 
                     try:
-                        for chunk in first_resp.iter_content(chunk_size=64 * 1024):
-                            if not chunk:
-                                break
+                        for chunk in chunks():
                             handler.wfile.write(chunk)
                     except (ConnectionResetError, BrokenPipeError, ConnectionAbortedError, OSError):
                         first_resp.close()
-                        session.close()
+                        if session:
+                            session.close()
                         return
                     first_resp.close()
 
@@ -216,30 +267,42 @@ def stream_upstream_media(
                         cur_end = min(cur_start + WINDOW_SIZE - 1, final_end)
                         s_headers["Range"] = f"bytes={cur_start}-{cur_end}"
                         try:
-                            with session.get(target_url, headers=s_headers, stream=True, timeout=15, verify=False) as win_resp:
-                                if win_resp.status_code not in (200, 206):
+                            win_resp, win_code, w_cr, _, win_chunks = _open_window_stream(target_url, s_headers, session)
+                            try:
+                                if win_code not in (200, 206):
                                     break
-                                for chunk in win_resp.iter_content(chunk_size=64 * 1024):
-                                    if not chunk:
-                                        break
+                                for chunk in win_chunks():
                                     handler.wfile.write(chunk)
-                                w_cr = win_resp.headers.get("Content-Range", "")
                                 w_match = re.search(r"bytes\s+(\d+)-(\d+)", w_cr, re.IGNORECASE) if w_cr else None
                                 if w_match:
                                     cur_start = max(cur_start + 1, int(w_match.group(2)) + 1)
                                 else:
                                     cur_start = cur_end + 1
+                            finally:
+                                win_resp.close()
                         except (ConnectionResetError, BrokenPipeError, ConnectionAbortedError, OSError):
                             break
                         except Exception:
                             break
-                    session.close()
+                    if session:
+                        session.close()
                     return
                 else:
-                    first_resp.close()
-                    session.close()
+                    if first_resp:
+                        first_resp.close()
+                    if session:
+                        session.close()
             except Exception:
-                pass
+                if first_resp:
+                    try:
+                        first_resp.close()
+                    except Exception:
+                        pass
+                if session:
+                    try:
+                        session.close()
+                    except Exception:
+                        pass
 
     # Standard direct streaming fallback
     req = urllib.request.Request(target_url)
