@@ -335,6 +335,7 @@
   "vault_restore_search_placeholder": "⌕ بحث في الملفات...",
   "vault_btn_restore_selected": "✓ استعادة المحدد",
   "vault_btn_browse_file": "▣ اختيار ملف من الجهاز...",
+  "vault_btn_browse_folder": "📁 اختيار مجلد...",
   "vault_btn_restore_all": "↻ استعادة الكل",
   "vault_select_all": "تحديد الكل",
   "vault_deselect_all": "إلغاء التحديد",

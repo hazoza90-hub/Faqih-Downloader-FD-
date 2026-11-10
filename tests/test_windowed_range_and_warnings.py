@@ -402,6 +402,177 @@ class TestWindowedRangeAndWarnings(unittest.TestCase):
             self.assertIsNone(app._confirm_modal)
             self.assertIsNone(app._candidates_modal)
 
+    def test_vault_restore_modal_interactive_row_selection(self):
+        """Verifies clicking row or name_lbl toggles BooleanVar and highlights row in #1e3a5f."""
+        if not self.root:
+            self.skipTest("Tkinter GUI not available")
+
+        import shutil
+        from faqih_downloader.ui.modals.vault_restore_modal import VaultRestoreModal
+        from faqih_downloader.core.history import DownloadHistoryManager
+
+        tmp_dir = tempfile.mkdtemp(prefix="sd_test_vr_inter_")
+        try:
+            f1 = os.path.join(tmp_dir, "sample_vid.mp4")
+            with open(f1, "wb") as f: f.write(b"data1")
+            f2 = os.path.join(tmp_dir, "sample_audio.mp3")
+            with open(f2, "wb") as f: f.write(b"data2")
+
+            hist_db = os.path.join(tmp_dir, "test_hist.json")
+            hm = DownloadHistoryManager(history_file=hist_db)
+
+            class DummyGUI:
+                def __init__(self, root, hm):
+                    self.root = root
+                    self.history_manager = hm
+                def refresh_kanban_col3(self): pass
+                def _refresh_history_table(self, force=False): pass
+
+            gui = DummyGUI(self.root, hm)
+            with patch("faqih_downloader.config.get_setting", return_value=tmp_dir):
+                modal = VaultRestoreModal(gui)
+                self.root.update_idletasks()
+
+                self.assertFalse(modal._item_vars[f1].get())
+                row_widget = modal._row_widgets[f1]["row"]
+                name_lbl = modal._row_widgets[f1]["name"]
+                indicator = modal._row_widgets[f1]["indicator"]
+
+                # Initially unselected: bg is card color (#1c2333), indicator is empty box
+                self.assertEqual(row_widget.cget("bg"), modal.c_card)
+                self.assertEqual(indicator.cget("text"), "☐")
+
+                # Click row to toggle selection
+                modal._toggle_item(f1)
+                self.assertTrue(modal._item_vars[f1].get())
+                self.assertEqual(row_widget.cget("bg"), "#1e3a5f")
+                self.assertEqual(indicator.cget("text"), "☑")
+                self.assertIn("1", modal.btn_restore_sel.cget("text"))
+
+                # Toggle off via _toggle_all_selection
+                modal._toggle_all_selection(False)
+                self.assertFalse(modal._item_vars[f1].get())
+                self.assertEqual(row_widget.cget("bg"), modal.c_card)
+                self.assertEqual(indicator.cget("text"), "☐")
+
+                # Toggle on via _toggle_all_selection
+                modal._toggle_all_selection(True)
+                self.assertTrue(modal._item_vars[f1].get())
+                self.assertTrue(modal._item_vars[f2].get())
+                self.assertEqual(row_widget.cget("bg"), "#1e3a5f")
+                self.assertEqual(indicator.cget("text"), "☑")
+                self.assertIn("2", modal.btn_restore_sel.cget("text"))
+
+                modal.destroy()
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    def test_vault_restore_browse_folder_and_scan_custom_dir(self):
+        """Verifies browse_folder() scans a custom directory tree and populates selectable files."""
+        if not self.root:
+            self.skipTest("Tkinter GUI not available")
+
+        import shutil
+        from faqih_downloader.ui.modals.vault_restore_modal import VaultRestoreModal
+        from faqih_downloader.ui.panels.kanban_vault_ops import scan_unregistered_disk_files
+        from faqih_downloader.core.history import DownloadHistoryManager
+
+        tmp_base = tempfile.mkdtemp(prefix="sd_test_vr_base_")
+        tmp_custom = tempfile.mkdtemp(prefix="sd_test_vr_custom_")
+        try:
+            # Create files in custom dir including a subfolder and a temp file to ignore
+            sub_dir = os.path.join(tmp_custom, "nested_folder")
+            os.makedirs(sub_dir, exist_ok=True)
+            doc_file = os.path.join(sub_dir, "contract.pdf")
+            with open(doc_file, "wb") as f: f.write(b"pdf data")
+            tmp_file = os.path.join(tmp_custom, "ignore.tmp")
+            with open(tmp_file, "wb") as f: f.write(b"temp")
+
+            hist_db = os.path.join(tmp_base, "test_hist.json")
+            hm = DownloadHistoryManager(history_file=hist_db)
+
+            class DummyGUI:
+                def __init__(self, root, hm):
+                    self.root = root
+                    self.history_manager = hm
+                def refresh_kanban_col3(self): pass
+                def _refresh_history_table(self, force=False): pass
+
+            gui = DummyGUI(self.root, hm)
+
+            # Test direct scan_unregistered_disk_files with custom_dir
+            scanned = scan_unregistered_disk_files(gui, custom_dir=tmp_custom)
+            scanned_paths = [s["file_path"] for s in scanned]
+            self.assertIn(doc_file, scanned_paths)
+            self.assertNotIn(tmp_file, scanned_paths)
+
+            with patch("faqih_downloader.config.get_setting", return_value=tmp_base):
+                modal = VaultRestoreModal(gui)
+                self.root.update_idletasks()
+
+                # Simulate browsing custom folder
+                with patch("tkinter.filedialog.askdirectory", return_value=tmp_custom):
+                    loaded_count = modal.browse_folder()
+                    self.assertEqual(loaded_count, 1)
+
+                self.assertEqual(modal._current_scan_dir, tmp_custom)
+                self.assertIn(tmp_custom, modal.lbl_current_folder.cget("text"))
+                # Verify custom folder items are auto-selected
+                self.assertTrue(modal._item_vars[doc_file].get())
+
+                # Restore selected
+                restored = modal.restore_selected()
+                self.assertEqual(restored, 1)
+                entries = hm.get_entries()
+                self.assertEqual(len(entries), 1)
+                self.assertEqual(entries[0]["filename"], "contract.pdf")
+        finally:
+            shutil.rmtree(tmp_base, ignore_errors=True)
+            shutil.rmtree(tmp_custom, ignore_errors=True)
+
+    def test_vault_restore_refreshes_history_and_kanban_col3(self):
+        """Verifies _finalize_and_close resets filter to 'all' and invokes both refresh callbacks."""
+        if not self.root:
+            self.skipTest("Tkinter GUI not available")
+
+        import shutil
+        from faqih_downloader.ui.modals.vault_restore_modal import VaultRestoreModal
+        from faqih_downloader.core.history import DownloadHistoryManager
+
+        tmp_dir = tempfile.mkdtemp(prefix="sd_test_vr_refresh_")
+        try:
+            f1 = os.path.join(tmp_dir, "ready.zip")
+            with open(f1, "wb") as f: f.write(b"zip")
+
+            hist_db = os.path.join(tmp_dir, "test_hist.json")
+            hm = DownloadHistoryManager(history_file=hist_db)
+
+            class DummyGUI:
+                def __init__(self, root, hm):
+                    self.root = root
+                    self.history_manager = hm
+                    self._vault_filter_category = "documents"
+                    self.refreshed_col3 = False
+                    self.refreshed_hist = False
+                def refresh_kanban_col3(self):
+                    self.refreshed_col3 = True
+                def _refresh_history_table(self, force=False):
+                    if force:
+                        self.refreshed_hist = True
+
+            gui = DummyGUI(self.root, hm)
+            with patch("faqih_downloader.config.get_setting", return_value=tmp_dir):
+                modal = VaultRestoreModal(gui)
+                self.root.update_idletasks()
+
+                count = modal.restore_all()
+                self.assertEqual(count, 1)
+                self.assertEqual(gui._vault_filter_category, "all")
+                self.assertTrue(gui.refreshed_col3)
+                self.assertTrue(gui.refreshed_hist)
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+
 
 if __name__ == "__main__":
     unittest.main()

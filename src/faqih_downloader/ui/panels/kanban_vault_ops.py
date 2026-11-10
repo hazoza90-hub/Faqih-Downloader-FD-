@@ -19,6 +19,25 @@ from faqih_downloader.locales.i18n import tr
 from faqih_downloader.config import is_test_environment
 
 
+def _safe_refresh_history(gui: Any) -> None:
+    """Invokes either refresh_history_table or _refresh_history_table safely."""
+    if hasattr(gui, "refresh_history_table") and callable(gui.refresh_history_table):
+        try:
+            gui.refresh_history_table()
+        except Exception:
+            pass
+    if hasattr(gui, "_refresh_history_table") and callable(gui._refresh_history_table):
+        try:
+            gui._refresh_history_table(force=True)
+        except TypeError:
+            try:
+                gui._refresh_history_table()
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+
 def clear_completed_vault_entries(gui: Any) -> bool:
     """Prompts user for confirmation and clears completed downloads from UI and history."""
     title = tr("vault_clear_confirm_title", "Confirm Clear List")
@@ -43,14 +62,13 @@ def clear_completed_vault_entries(gui: Any) -> bool:
 
     if hasattr(gui, "refresh_kanban_col3") and callable(gui.refresh_kanban_col3):
         gui.refresh_kanban_col3()
-    if hasattr(gui, "refresh_history_table") and callable(gui.refresh_history_table):
-        gui.refresh_history_table()
+    _safe_refresh_history(gui)
     return True
 
 
-def scan_unregistered_disk_files(gui: Any) -> List[Dict[str, Any]]:
+def scan_unregistered_disk_files(gui: Any, custom_dir: Optional[str] = None) -> List[Dict[str, Any]]:
     """
-    Scans the base downloads directory and subfolders for completed files
+    Scans the base downloads directory or custom_dir and subfolders for completed files
     that are not currently registered in DownloadHistoryManager.
     """
     history_mgr = getattr(gui, "history_manager", None)
@@ -58,17 +76,20 @@ def scan_unregistered_disk_files(gui: Any) -> List[Dict[str, Any]]:
         return []
 
     from faqih_downloader.config import get_setting, get_base_downloads_dir
-    base_dir = str(get_setting("last_download_dir", "") or "").strip()
-    if not base_dir or not os.path.isdir(base_dir):
-        if hasattr(gui, "_get_base_downloads_dir") and callable(gui._get_base_downloads_dir):
-            base_dir = gui._get_base_downloads_dir()
-        else:
-            base_dir = get_base_downloads_dir()
+    is_custom = bool(custom_dir and os.path.isdir(custom_dir))
+    if is_custom:
+        base_dir = os.path.abspath(custom_dir)  # type: ignore
+    else:
+        base_dir = str(get_setting("last_download_dir", "") or "").strip()
+        if not base_dir or not os.path.isdir(base_dir):
+            if hasattr(gui, "_get_base_downloads_dir") and callable(gui._get_base_downloads_dir):
+                base_dir = gui._get_base_downloads_dir()
+            else:
+                base_dir = get_base_downloads_dir()
 
     if not base_dir or not os.path.isdir(base_dir):
         return []
 
-    sub_dirs = ["", "Video", "Music", "Audio", "Compressed", "Documents", "Programs"]
     ignored_suffixes = (".part", ".ytdl", ".tmp", ".sd_parts", ".json", ".ini")
     ignored_names = {"desktop.ini", "thumbs.db", ".ds_store"}
 
@@ -85,7 +106,6 @@ def scan_unregistered_disk_files(gui: Any) -> List[Dict[str, Any]]:
         if fn:
             existing_names.add(fn.lower())
 
-    # Get entry category helper from vault helpers if present
     mod = sys.modules.get("faqih_downloader.ui.panels.kanban_vault_helpers")
     cat_fn = getattr(mod, "get_entry_category", None)
     if cat_fn is None:
@@ -93,42 +113,84 @@ def scan_unregistered_disk_files(gui: Any) -> List[Dict[str, Any]]:
 
     results = []
     seen_paths = set()
-    for sub in sub_dirs:
-        scan_dir = os.path.join(base_dir, sub) if sub else base_dir
-        if not os.path.isdir(scan_dir):
-            continue
+
+    if is_custom:
+        for root, dirs, files in os.walk(base_dir):
+            dirs[:] = [d for d in dirs if not d.startswith(".")]
+            for name in files:
+                lower_name = name.lower()
+                if lower_name in ignored_names or any(lower_name.endswith(sfx) for sfx in ignored_suffixes):
+                    continue
+                full_path = os.path.join(root, name)
+                try:
+                    abs_path = os.path.normcase(os.path.abspath(full_path))
+                except Exception:
+                    abs_path = full_path
+
+                if abs_path in existing_paths or abs_path in seen_paths:
+                    continue
+                seen_paths.add(abs_path)
+
+                try:
+                    size_bytes = os.path.getsize(full_path)
+                except Exception:
+                    size_bytes = 0
+
+                cat = cat_fn({"filename": name})
+                results.append({
+                    "filename": name,
+                    "file_path": full_path,
+                    "size_bytes": size_bytes,
+                    "category": cat
+                })
+    else:
+        sub_dirs = ["", "Video", "Music", "Audio", "Compressed", "Documents", "Programs"]
+        all_sub_dirs = list(sub_dirs)
         try:
-            with os.scandir(scan_dir) as it:
+            with os.scandir(base_dir) as it:
                 for item in it:
-                    if not item.is_file():
-                        continue
-                    name = item.name
-                    lower_name = name.lower()
-                    if lower_name in ignored_names or any(lower_name.endswith(sfx) for sfx in ignored_suffixes):
-                        continue
-                    try:
-                        abs_path = os.path.normcase(os.path.abspath(item.path))
-                    except Exception:
-                        abs_path = item.path
-
-                    if abs_path in existing_paths or lower_name in existing_names or abs_path in seen_paths:
-                        continue
-                    seen_paths.add(abs_path)
-
-                    try:
-                        size_bytes = item.stat().st_size
-                    except Exception:
-                        size_bytes = 0
-
-                    cat = cat_fn({"filename": name})
-                    results.append({
-                        "filename": name,
-                        "file_path": item.path,
-                        "size_bytes": size_bytes,
-                        "category": cat
-                    })
+                    if item.is_dir() and not item.name.startswith("."):
+                        if item.name not in all_sub_dirs:
+                            all_sub_dirs.append(item.name)
         except Exception:
             pass
+
+        for sub in all_sub_dirs:
+            scan_dir = os.path.join(base_dir, sub) if sub else base_dir
+            if not os.path.isdir(scan_dir):
+                continue
+            try:
+                with os.scandir(scan_dir) as it:
+                    for item in it:
+                        if not item.is_file():
+                            continue
+                        name = item.name
+                        lower_name = name.lower()
+                        if lower_name in ignored_names or any(lower_name.endswith(sfx) for sfx in ignored_suffixes):
+                            continue
+                        try:
+                            abs_path = os.path.normcase(os.path.abspath(item.path))
+                        except Exception:
+                            abs_path = item.path
+
+                        if abs_path in existing_paths or lower_name in existing_names or abs_path in seen_paths:
+                            continue
+                        seen_paths.add(abs_path)
+
+                        try:
+                            size_bytes = item.stat().st_size
+                        except Exception:
+                            size_bytes = 0
+
+                        cat = cat_fn({"filename": name})
+                        results.append({
+                            "filename": name,
+                            "file_path": item.path,
+                            "size_bytes": size_bytes,
+                            "category": cat
+                        })
+            except Exception:
+                pass
 
     return results
 
@@ -151,11 +213,9 @@ def restore_vault_entries_from_disk(gui: Any) -> int:
         restored_count += 1
 
     if restored_count > 0:
-        if hasattr(gui, "refresh_history_table") and callable(gui.refresh_history_table):
-            try:
-                gui.refresh_history_table()
-            except Exception:
-                pass
+        if hasattr(gui, "_vault_filter_category"):
+            gui._vault_filter_category = "all"
+        _safe_refresh_history(gui)
         if hasattr(gui, "refresh_kanban_col3") and callable(gui.refresh_kanban_col3):
             gui.refresh_kanban_col3()
 
@@ -208,8 +268,7 @@ def delete_vault_entry_with_confirm(
             gui.history_manager.remove_entry(entry_id)
         if hasattr(gui, "refresh_kanban_col3") and callable(gui.refresh_kanban_col3):
             gui.refresh_kanban_col3()
-        if hasattr(gui, "refresh_history_table") and callable(gui.refresh_history_table):
-            gui.refresh_history_table()
+        _safe_refresh_history(gui)
     return True
 
 
