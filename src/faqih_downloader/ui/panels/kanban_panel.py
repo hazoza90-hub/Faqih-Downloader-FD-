@@ -57,6 +57,8 @@ class KanbanPanelMixin(KanbanActiveColumnMixin):
         self._parsing_links: List[str] = getattr(self, "_parsing_links", [])
         self._staged_links: List[Dict[str, Any]] = getattr(self, "_staged_links", [])
         self._active_stream_live = False
+        self._vault_scroll_steps = 0
+        self._vault_scroll_timer = None
 
         # ── Column 1: Queued & Parsing ───────────────────────────────────────
         self._build_col1_queued(self.kanban_container)
@@ -224,7 +226,7 @@ class KanbanPanelMixin(KanbanActiveColumnMixin):
         # Scrollable container setup
         body = tk.Frame(col_frame, bg="#0b0e14")
         body.pack(fill=tk.BOTH, expand=True)
-        cv, container = setup_vault_scroll_view(col_frame, body)
+        cv, container = setup_vault_scroll_view(col_frame, body, panel=self)
         self.vault_cards_canvas = cv
         self.vault_cards_container = container
 
@@ -331,6 +333,56 @@ class KanbanPanelMixin(KanbanActiveColumnMixin):
         """Adds dynamically completed download to Completed Vault and resets active stream."""
         self.reset_kanban_active_stream()
         self.refresh_kanban_col3()
+
+    def _on_vault_mousewheel(self, event: Any):
+        """Smoothly scrolls Completed Vault canvas with 10ms eased interpolation."""
+        cv = getattr(self, "vault_cards_canvas", None)
+        if not cv or not cv.winfo_exists() or not getattr(event, "delta", None):
+            return
+        notch = int(-1 * (event.delta / 120))
+        if notch == 0:
+            return
+        steps = getattr(self, "_vault_scroll_steps", 0) + notch * 14
+        self._vault_scroll_steps = max(-70, min(70, steps))
+        if getattr(self, "_vault_scroll_timer", None) is None:
+            self._step_vault_smooth_scroll()
+
+    def _step_vault_smooth_scroll(self):
+        """Performs 10ms interpolation step for vault canvas smooth scrolling."""
+        self._vault_scroll_timer = None
+        cv = getattr(self, "vault_cards_canvas", None)
+        if not cv or not cv.winfo_exists():
+            self._vault_scroll_steps = 0
+            return
+        steps = getattr(self, "_vault_scroll_steps", 0)
+        if steps == 0:
+            return
+        step = int(steps * 0.35)
+        if step == 0:
+            step = 1 if steps > 0 else -1
+        try:
+            cv.yview_scroll(step, "units")
+            self._vault_scroll_steps -= step
+            if self._vault_scroll_steps != 0:
+                self._vault_scroll_timer = cv.after(10, self._step_vault_smooth_scroll)
+        except Exception:
+            self._vault_scroll_steps = 0
+
+    def _on_global_col3_wheel(self, event: Any):
+        """Global handler forwarding mousewheel to Completed Vault when pointer is over vault."""
+        cv = getattr(self, "vault_cards_canvas", None)
+        if not cv or not cv.winfo_exists() or not getattr(event, "delta", None):
+            return
+        try:
+            target = cv.winfo_containing(event.x_root, event.y_root)
+            curr = target
+            while curr is not None:
+                if curr in (cv, getattr(self, "vault_cards_container", None), getattr(self, "kanban_container", None)):
+                    self._on_vault_mousewheel(event)
+                    return
+                curr = getattr(curr, "master", None)
+        except Exception:
+            pass
 
 
 __all__ = ["KanbanPanelMixin", "KanbanActiveColumnMixin"]

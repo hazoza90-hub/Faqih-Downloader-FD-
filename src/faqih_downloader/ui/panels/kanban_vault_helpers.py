@@ -244,9 +244,9 @@ def build_load_more_button(
     return frame
 
 
-def setup_vault_scroll_view(col_frame: Any, body: Any) -> tuple[tk.Canvas, tk.Frame]:
+def setup_vault_scroll_view(col_frame: Any, body: Any, panel: Any = None) -> tuple[tk.Canvas, tk.Frame]:
     """Configures scrollable Canvas with ttk.Scrollbar and hierarchy-aware mousewheel scrolling."""
-    cv = tk.Canvas(body, bg="#0b0e14", bd=0, highlightthickness=0)
+    cv = tk.Canvas(body, bg="#0b0e14", bd=0, highlightthickness=0, yscrollincrement=2)
     sb_col3 = ttk.Scrollbar(body, orient="vertical", command=cv.yview)
     cv.configure(yscrollcommand=sb_col3.set)
     sb_col3.pack(side=tk.RIGHT, fill=tk.Y)
@@ -255,7 +255,22 @@ def setup_vault_scroll_view(col_frame: Any, body: Any) -> tuple[tk.Canvas, tk.Fr
     container = tk.Frame(cv, bg="#0b0e14")
     win_id = cv.create_window(0, 0, window=container, anchor="nw")
 
-    container.bind("<Configure>", lambda e: cv.winfo_exists() and cv.configure(scrollregion=cv.bbox("all")))
+    cv._scrollregion_pending = False
+
+    def _schedule_vault_scrollregion(e=None):
+        if getattr(cv, "_scrollregion_pending", False):
+            return
+        cv._scrollregion_pending = True
+
+        def _apply():
+            cv._scrollregion_pending = False
+            if cv.winfo_exists():
+                cv.configure(scrollregion=cv.bbox("all"))
+
+        cv.after_idle(_apply)
+
+    cv._schedule_vault_scrollregion = _schedule_vault_scrollregion
+    container.bind("<Configure>", _schedule_vault_scrollregion)
     cv.bind("<Configure>", lambda e: cv.winfo_exists() and cv.itemconfigure(win_id, width=e.width))
 
     def _is_vault_target(w):
@@ -266,12 +281,41 @@ def setup_vault_scroll_view(col_frame: Any, body: Any) -> tuple[tk.Canvas, tk.Fr
             curr = getattr(curr, "master", None)
         return False
 
+    cv._vault_scroll_steps = 0
+    cv._vault_scroll_timer = None
+
+    def _step_cv_smooth_scroll():
+        cv._vault_scroll_timer = None
+        if not cv.winfo_exists():
+            cv._vault_scroll_steps = 0
+            return
+        steps = cv._vault_scroll_steps
+        if steps == 0:
+            return
+        step = int(steps * 0.35)
+        if step == 0:
+            step = 1 if steps > 0 else -1
+        try:
+            cv.yview_scroll(step, "units")
+            cv._vault_scroll_steps -= step
+            if cv._vault_scroll_steps != 0:
+                cv._vault_scroll_timer = cv.after(10, _step_cv_smooth_scroll)
+        except Exception:
+            cv._vault_scroll_steps = 0
+
     def _on_wheel(e):
         if not cv.winfo_exists() or not getattr(e, "delta", None):
             return
         try:
             if _is_vault_target(cv.winfo_containing(e.x_root, e.y_root)):
-                cv.yview_scroll(int(-1 * (e.delta / 120)), "units")
+                if panel and hasattr(panel, "_on_vault_mousewheel"):
+                    panel._on_vault_mousewheel(e)
+                else:
+                    notch = int(-1 * (e.delta / 120))
+                    if notch != 0:
+                        cv._vault_scroll_steps = max(-70, min(70, cv._vault_scroll_steps + notch * 14))
+                        if cv._vault_scroll_timer is None:
+                            _step_cv_smooth_scroll()
         except Exception:
             pass
 

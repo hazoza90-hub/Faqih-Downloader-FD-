@@ -672,6 +672,124 @@ class TestWindowedRangeAndWarnings(unittest.TestCase):
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
+    def test_vault_restore_modal_smooth_scrolling_and_debouncing(self):
+        """Verifies yscrollincrement=2, debounced configure, and eased smooth scrolling on VaultRestoreModal."""
+        if not self.root:
+            self.skipTest("Tkinter GUI not available")
+
+        import shutil
+        from faqih_downloader.ui.modals.vault_restore_modal import VaultRestoreModal
+        from faqih_downloader.core.history import DownloadHistoryManager
+
+        tmp_dir = tempfile.mkdtemp(prefix="sd_test_vr_smooth_")
+        try:
+            for i in range(25):
+                fp = os.path.join(tmp_dir, f"file_{i:02d}.bin")
+                with open(fp, "wb") as f:
+                    f.write(b"data" * 100)
+
+            hist_db = os.path.join(tmp_dir, "test_hist.json")
+            hm = DownloadHistoryManager(history_file=hist_db)
+
+            class DummyGUI:
+                def __init__(self, root, hm):
+                    self.root = root
+                    self.history_manager = hm
+                def refresh_kanban_col3(self): pass
+                def _refresh_history_table(self, force=False): pass
+
+            gui = DummyGUI(self.root, hm)
+            with patch("faqih_downloader.config.get_setting", return_value=tmp_dir):
+                modal = VaultRestoreModal(gui)
+                self.root.update_idletasks()
+
+                # Verify yscrollincrement=2
+                self.assertEqual(int(modal.canvas.cget("yscrollincrement")), 2)
+
+                # Verify initial state
+                self.assertEqual(modal._scroll_steps_remaining, 0)
+                self.assertIsNone(modal._scroll_timer_id)
+                self.assertFalse(modal._scrollregion_pending)
+
+                # Verify debounced scrollregion scheduling
+                modal._schedule_scrollregion_update()
+                self.assertTrue(modal._scrollregion_pending)
+                self.root.update_idletasks()
+                self.assertFalse(modal._scrollregion_pending)
+
+                # Mock scrollbar.get() to simulate overflowing content (top=0.0, btm=0.5)
+                with patch.object(modal.scrollbar, "get", return_value=(0.0, 0.5)):
+                    wheel_evt = MagicMock()
+                    wheel_evt.delta = -120  # Scroll down 1 notch
+
+                    with patch.object(modal.canvas, "yview_scroll") as mock_scroll:
+                        modal._on_mousewheel(wheel_evt)
+                        # 18 units accumulated; first step int(18 * 0.35) = 6 units executed immediately
+                        mock_scroll.assert_called_with(6, "units")
+                        self.assertEqual(modal._scroll_steps_remaining, 12)
+                        self.assertIsNotNone(modal._scroll_timer_id)
+
+                        # Advance smooth scroll step
+                        modal._step_smooth_scroll()
+                        # next step = int(12 * 0.35) = 4 units
+                        mock_scroll.assert_called_with(4, "units")
+                        self.assertEqual(modal._scroll_steps_remaining, 8)
+
+                # Clean destruction cancels timer without errors
+                modal.destroy()
+                self.assertIsNone(modal._scroll_timer_id)
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    def test_kanban_vault_canvas_smooth_scrolling_and_debouncing(self):
+        """Verifies yscrollincrement=2, debounced configure, and smooth 10ms interpolation on Completed Vault."""
+        if not self.root:
+            self.skipTest("Tkinter GUI not available")
+
+        from faqih_downloader.ui.panels.kanban_vault_helpers import setup_vault_scroll_view
+        from faqih_downloader.ui.panels.kanban_panel import KanbanPanelMixin
+
+        col_frame = tk.Frame(self.root)
+        body = tk.Frame(col_frame)
+
+        class DummyPipeline(KanbanPanelMixin):
+            def __init__(self, root):
+                self.root = root
+                self._vault_scroll_steps = 0
+                self._vault_scroll_timer = None
+
+        panel = DummyPipeline(self.root)
+        cv, container = setup_vault_scroll_view(col_frame, body, panel=panel)
+        panel.vault_cards_canvas = cv
+        panel.vault_cards_container = container
+
+        # Verify yscrollincrement=2
+        self.assertEqual(int(cv.cget("yscrollincrement")), 2)
+
+        # Verify debounced scrollregion update on container configure
+        cv._schedule_vault_scrollregion()
+        self.assertTrue(getattr(cv, "_scrollregion_pending", False))
+        self.root.update_idletasks()
+        self.assertFalse(getattr(cv, "_scrollregion_pending", False))
+
+        # Test smooth mousewheel interpolation on panel
+        wheel_evt = MagicMock()
+        wheel_evt.delta = -120  # 1 notch down
+        with patch.object(cv, "yview_scroll") as mock_scroll:
+            panel._on_vault_mousewheel(wheel_evt)
+            # 14 units accumulated; first step int(14 * 0.35) = 4 units executed immediately
+            mock_scroll.assert_called_with(4, "units")
+            self.assertEqual(panel._vault_scroll_steps, 10)
+            self.assertIsNotNone(panel._vault_scroll_timer)
+
+            # Advance step
+            panel._step_vault_smooth_scroll()
+            # step = int(10 * 0.35) = 3 units
+            mock_scroll.assert_called_with(3, "units")
+            self.assertEqual(panel._vault_scroll_steps, 7)
+
+        col_frame.destroy()
+
 
 if __name__ == "__main__":
     unittest.main()

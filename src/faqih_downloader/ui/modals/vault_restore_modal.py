@@ -44,18 +44,15 @@ class VaultRestoreModal(tk.Toplevel if tk is not None else object):
         self._modal_icon_photo = None
         self._display_limit = 40
         self._btn_load_more = None
+        self._scroll_steps_remaining = 0
+        self._scroll_timer_id = None
+        self._scrollregion_pending = False
 
         # Theme colors
-        self.c_bg = "#0b0e14"
-        self.c_panel = "#151a24"
-        self.c_card = "#1c2333"
-        self.c_border = "#283548"
-        self.c_accent = "#19f3ee"
-        self.c_accent_blue = "#38bdf8"
-        self.c_text_bright = "#f8fafc"
-        self.c_text_muted = "#94a3b8"
-        self.c_danger = "#ef4444"
-        self.c_success = "#22c55e"
+        self.c_bg, self.c_panel, self.c_card = "#0b0e14", "#151a24", "#1c2333"
+        self.c_border, self.c_accent, self.c_accent_blue = "#283548", "#19f3ee", "#38bdf8"
+        self.c_text_bright, self.c_text_muted = "#f8fafc", "#94a3b8"
+        self.c_danger, self.c_success = "#ef4444", "#22c55e"
 
         self.title(tr("vault_restore_dlg_title", "Restore Files to Completed Vault"))
         self.configure(bg=self.c_bg)
@@ -102,16 +99,15 @@ class VaultRestoreModal(tk.Toplevel if tk is not None else object):
         self._build_ui()
         self._display_files()
 
-    def grab_set(self):
-        """No-op: Eliminates Win32 modal input locks."""
-        pass
-
-    def grab_set_global(self):
-        """No-op: Eliminates Win32 modal input locks."""
-        pass
+    def grab_set(self): pass  # Eliminates Win32 modal input locks
+    def grab_set_global(self): pass
 
     def destroy(self):
         self._closing = True
+        if getattr(self, "_scroll_timer_id", None) is not None:
+            try: self.after_cancel(self._scroll_timer_id)
+            except Exception: pass
+            self._scroll_timer_id = None
         try:
             self.unbind_all("<MouseWheel>")
         except Exception:
@@ -210,7 +206,7 @@ class VaultRestoreModal(tk.Toplevel if tk is not None else object):
         list_outer = tk.Frame(self, bg=self.c_bg, padx=16, pady=4)
         list_outer.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
-        self.canvas = tk.Canvas(list_outer, bg=self.c_bg, highlightthickness=0)
+        self.canvas = tk.Canvas(list_outer, bg=self.c_bg, highlightthickness=0, bd=0, yscrollincrement=2)
         self.scrollbar = ttk.Scrollbar(list_outer, orient=tk.VERTICAL, command=self.canvas.yview)
         self.canvas.configure(yscrollcommand=self.scrollbar.set)
         self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -219,16 +215,34 @@ class VaultRestoreModal(tk.Toplevel if tk is not None else object):
         self.scrollable_frame = tk.Frame(self.canvas, bg=self.c_bg)
         self._canvas_win_id = self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
 
-        self.scrollable_frame.bind(
-            "<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
-        )
+        self.scrollable_frame.bind("<Configure>", self._schedule_scrollregion_update)
         self.canvas.bind(
             "<Configure>", lambda e: self.canvas.itemconfig(self._canvas_win_id, width=e.width)
         )
         self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
 
+    def _schedule_scrollregion_update(self, event=None):
+        """Debounces canvas scrollregion updates so rapid additions batch bbox('all')."""
+        if getattr(self, "_scrollregion_pending", False):
+            return
+        self._scrollregion_pending = True
+        try:
+            self.after_idle(self._apply_scrollregion)
+        except Exception:
+            self._scrollregion_pending = False
+
+    def _apply_scrollregion(self):
+        self._scrollregion_pending = False
+        if getattr(self, "_closing", False):
+            return
+        try:
+            if self.winfo_exists() and hasattr(self, "canvas") and self.canvas.winfo_exists():
+                self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+        except Exception:
+            pass
+
     def _on_mousewheel(self, event):
-        """Scrolls canvas smoothly with mouse wheel only when content overflows."""
+        """Scrolls canvas smoothly with pixel-stepped interpolation only when overflowing."""
         if getattr(self, "_closing", False):
             return
         try:
@@ -238,11 +252,36 @@ class VaultRestoreModal(tk.Toplevel if tk is not None else object):
                 top, btm = self.scrollbar.get()
                 if top <= 0.0 and btm >= 1.0:
                     return
-            delta = int(-1 * (event.delta / 120))
-            if delta != 0:
-                self.canvas.yview_scroll(delta, "units")
+            notch = int(-1 * (event.delta / 120))
+            if notch == 0:
+                return
+            self._scroll_steps_remaining = max(-90, min(90, self._scroll_steps_remaining + notch * 18))
+            if self._scroll_timer_id is None:
+                self._step_smooth_scroll()
         except Exception:
             pass
+
+    def _step_smooth_scroll(self):
+        """Executes smooth 10ms eased interpolation step for mousewheel scrolling."""
+        self._scroll_timer_id = None
+        if getattr(self, "_closing", False):
+            self._scroll_steps_remaining = 0
+            return
+        try:
+            if not self.winfo_exists() or not hasattr(self, "canvas") or not self.canvas.winfo_exists():
+                self._scroll_steps_remaining = 0
+                return
+            if self._scroll_steps_remaining == 0:
+                return
+            step = int(self._scroll_steps_remaining * 0.35)
+            if step == 0:
+                step = 1 if self._scroll_steps_remaining > 0 else -1
+            self.canvas.yview_scroll(step, "units")
+            self._scroll_steps_remaining -= step
+            if self._scroll_steps_remaining != 0:
+                self._scroll_timer_id = self.after(10, self._step_smooth_scroll)
+        except Exception:
+            self._scroll_steps_remaining = 0
 
     def _on_search_changed(self, event=None):
         """Reset pagination limit and re-render files on live search query edit."""
@@ -275,16 +314,13 @@ class VaultRestoreModal(tk.Toplevel if tk is not None else object):
             return
         var = self._item_vars.get(path)
         is_selected = bool(var.get()) if var else False
-
         bg = "#1e3a5f" if is_selected else self.c_card
         border = "#38bdf8" if is_selected else self.c_border
-
         try:
             widgets["row"].configure(bg=bg, highlightbackground=border)
             widgets["cb"].configure(bg=bg, activebackground=bg)
-            widgets["name"].configure(bg=bg)
-            widgets["cat"].configure(bg=bg)
-            widgets["size"].configure(bg=bg)
+            for k in ("name", "cat", "size"):
+                widgets[k].configure(bg=bg)
         except Exception:
             pass
 
@@ -383,11 +419,7 @@ class VaultRestoreModal(tk.Toplevel if tk is not None else object):
         if remaining > 0:
             self._create_load_more_button(filtered, remaining)
 
-        try:
-            self.update_idletasks()
-            self.canvas.configure(scrollregion=self.canvas.bbox("all"))
-        except Exception:
-            pass
+        self._schedule_scrollregion_update()
 
     def _display_files(self):
         """Renders paginated file rows in scrollable frame, filtering by search query."""
@@ -421,61 +453,46 @@ class VaultRestoreModal(tk.Toplevel if tk is not None else object):
             self._create_load_more_button(filtered, remaining)
 
         self._update_restore_btn_text()
-        try:
-            self.update_idletasks()
-            self.canvas.configure(scrollregion=self.canvas.bbox("all"))
-        except Exception:
-            pass
+        self._schedule_scrollregion_update()
 
     def browse_folder(self) -> int:
         """Prompts user to select a folder from disk and loads unregistered files from it."""
-        selected_dir = filedialog.askdirectory(
-            parent=self, title=tr("vault_btn_browse_folder", "📁 Browse Folder...")
-        )
+        selected_dir = filedialog.askdirectory(parent=self, title=tr("vault_btn_browse_folder", "📁 Browse Folder..."))
         if not selected_dir or not os.path.isdir(selected_dir):
             return 0
-
         self._current_scan_dir = selected_dir
         if hasattr(self, "lbl_current_folder") and self.lbl_current_folder:
             self.lbl_current_folder.configure(text=f"📂 {selected_dir}")
+            try: self.update_idletasks()
+            except Exception: pass
 
         self._all_files = scan_unregistered_disk_files(self.gui, custom_dir=selected_dir)
         self._item_vars.clear()
         if hasattr(self, "_row_widgets"):
             self._row_widgets.clear()
-
         for f_info in self._all_files:
             self._item_vars[f_info["file_path"]] = tk.BooleanVar(master=self, value=False)
-
         self._display_limit = 40
         self._display_files()
         return len(self._all_files)
 
     def _batch_add_entries(self, items: List[Tuple[str, int]]) -> int:
         """Adds a batch of files to history_manager efficiently with a single flush."""
-        history_mgr = getattr(self.gui, "history_manager", None)
-        if not history_mgr or not items:
+        hm = getattr(self.gui, "history_manager", None)
+        if not hm or not items:
             return 0
         added = 0
         for path, sz in items:
             try:
-                history_mgr.add_or_update_entry(
-                    url="", file_path=path, size_bytes=sz, status="Completed", save=False
-                )
+                hm.add_or_update_entry(url="", file_path=path, size_bytes=sz, status="Completed", save=False)
             except TypeError:
-                history_mgr.add_or_update_entry(
-                    url="", file_path=path, size_bytes=sz, status="Completed"
-                )
+                hm.add_or_update_entry(url="", file_path=path, size_bytes=sz, status="Completed")
             added += 1
-
         for s_fn in ("_save_entries", "save_entries", "save"):
-            fn = getattr(history_mgr, s_fn, None)
+            fn = getattr(hm, s_fn, None)
             if callable(fn):
-                try:
-                    fn()
-                    break
-                except Exception:
-                    pass
+                try: fn(); break
+                except Exception: pass
         return added
 
     def restore_selected(self) -> int:
@@ -498,15 +515,10 @@ class VaultRestoreModal(tk.Toplevel if tk is not None else object):
 
     def browse_files(self) -> int:
         """Prompts user to select arbitrary files from disk and adds them to history."""
-        selected = filedialog.askopenfilenames(
-            parent=self, title=tr("vault_btn_browse_file", "▣ Browse File...")
-        )
+        selected = filedialog.askopenfilenames(parent=self, title=tr("vault_btn_browse_file", "▣ Browse File..."))
         if not selected:
             return 0
-        items = [
-            (p, os.path.getsize(p) if os.path.isfile(p) else 0)
-            for p in selected if os.path.isfile(p)
-        ]
+        items = [(p, os.path.getsize(p) if os.path.isfile(p) else 0) for p in selected if os.path.isfile(p)]
         count = self._batch_add_entries(items)
         if count > 0:
             self._finalize_and_close()
@@ -516,18 +528,16 @@ class VaultRestoreModal(tk.Toplevel if tk is not None else object):
         """Refreshes Column 3 and history table, then cleanly destroys modal dialog."""
         if hasattr(self.gui, "_vault_filter_category"):
             self.gui._vault_filter_category = "all"
-        if hasattr(self.gui, "refresh_history_table") and callable(self.gui.refresh_history_table):
-            try: self.gui.refresh_history_table()
-            except Exception: pass
+        for fn_name in ("refresh_history_table", "refresh_kanban_col3"):
+            fn = getattr(self.gui, fn_name, None)
+            if callable(fn):
+                try: fn()
+                except Exception: pass
         if hasattr(self.gui, "_refresh_history_table") and callable(self.gui._refresh_history_table):
             try: self.gui._refresh_history_table(force=True)
-            except TypeError:
+            except Exception:
                 try: self.gui._refresh_history_table()
                 except Exception: pass
-            except Exception: pass
-        if hasattr(self.gui, "refresh_kanban_col3") and callable(self.gui.refresh_kanban_col3):
-            try: self.gui.refresh_kanban_col3()
-            except Exception: pass
         self.destroy()
 
 
