@@ -143,28 +143,40 @@ def build_audio_subtitle_row(
             except Exception:
                 pass
 
-        # Subtitle Position Combobox
-        tk.Label(row2, text=tr("lbl_subtitle_pos", "● الموضع:"), font=("Segoe UI", 9, "bold"), bg=c_panel, fg=c_text_bright).pack(side=tk.LEFT, padx=(10, 4))
-        pos_codes = ["bottom", "middle", "top"]
-        pos_labels = [tr("sub_pos_bottom", "أسفل (Bottom)"), tr("sub_pos_middle", "وسط (Middle)"), tr("sub_pos_top", "أعلى (Top)")]
-        cb_sub_pos = ttk.Combobox(row2, values=pos_labels, state="readonly", font=("Segoe UI", 8), width=14)
-        saved_pos = get_setting("subtitle_position", "bottom")
-        p_idx = pos_codes.index(saved_pos) if saved_pos in pos_codes else 0
-        cb_sub_pos.current(p_idx)
-        cb_sub_pos.pack(side=tk.LEFT, padx=(0, 6))
+        # Connections / Threads Combobox (replaces legacy subtitle position combobox)
+        is_ar = (tr("locale_lang", "") == "ar" or tr("app_title", "").startswith("فقيه"))
+        tk.Label(row2, text=tr("lbl_modal_threads", "⚡ المسارات:" if is_ar else "⚡ Threads:"), font=("Segoe UI", 9, "bold"), bg=c_panel, fg=c_text_bright).pack(side=tk.LEFT, padx=(10, 4))
+        conn_vals = ["1", "2", "4", "8", "16", "32"]
+        cb_conn = ttk.Combobox(row2, values=conn_vals, state="readonly", font=("Segoe UI", 8), width=8)
+        saved_conn = str(get_setting("max_connections", 8))
+        if saved_conn not in conn_vals: saved_conn = "8"
+        cb_conn.set(saved_conn)
+        cb_conn.pack(side=tk.LEFT, padx=(0, 6))
 
-        def _on_pos_changed(event=None):
-            c_p = cb_sub_pos.current()
-            if 0 <= c_p < len(pos_codes):
-                chosen_p = pos_codes[c_p]
-                cb_sub._selected_pos = chosen_p
-                if event is not None:
-                    set_setting("subtitle_position", chosen_p)
+        def _on_conn_changed(event=None):
+            val = str(cb_conn.get()).strip()
+            if val.isdigit() and int(val) in (1, 2, 4, 8, 16, 24, 32):
+                set_setting("max_connections", int(val))
+                cb_sub._selected_connections = int(val)
+                try:
+                    w = parent_frame
+                    while w:
+                        parent_app = getattr(w, "parent_app", None)
+                        if parent_app and hasattr(parent_app, "conn_var"):
+                            parent_app.conn_var.set(val)
+                            break
+                        w = getattr(w, "master", None)
+                except Exception:
+                    pass
 
-        cb_sub_pos.bind("<<ComboboxSelected>>", _on_pos_changed)
-        cb_sub._pos_combobox = cb_sub_pos
-        cb_sub._selected_pos = pos_codes[p_idx]
-        cb_sub.get_selected_pos = lambda: getattr(cb_sub, "_selected_pos", "bottom")
+        cb_conn.bind("<<ComboboxSelected>>", _on_conn_changed)
+        cb_sub._conn_combobox = cb_conn
+        cb_sub._selected_connections = int(saved_conn)
+        cb_sub.get_selected_connections = lambda: getattr(cb_sub, "_selected_connections", 8)
+        # Backward-compatibility attributes for existing tests/callers expecting pos attributes:
+        cb_sub._pos_combobox = cb_conn
+        cb_sub._selected_pos = "bottom"
+        cb_sub.get_selected_pos = lambda: "bottom"
 
         def _on_mode_cb_changed(event=None):
             cur_idx = cb_sub_mode.current()

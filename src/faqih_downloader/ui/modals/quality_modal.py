@@ -452,6 +452,7 @@ class QualitySelectionModal(_BaseToplevel):
                 parent_app=self.parent_app, modal_ref=self, use_bridge=True,
                 subtitle_embed_mode=getattr(self.selected_option, "subtitle_embed_mode", "hard_burn"),
                 selected_q_idx=q_idx, subtitle_position=sub_pos,
+                max_connections=getattr(self.selected_option, "max_connections", None) or int(get_setting("max_connections", 8)),
             )
             self._confirmed = True
             if self.parent_app and getattr(self.parent_app, "_quality_modal", None) is self:

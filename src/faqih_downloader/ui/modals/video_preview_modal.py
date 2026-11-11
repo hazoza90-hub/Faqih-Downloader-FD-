@@ -18,6 +18,7 @@ import webbrowser
 from typing import Dict, List, Optional, Any, Callable
 
 from ...locales.i18n import tr
+from ...config import get_setting
 from .preview_html_builder import generate_preview_html
 
 IS_WINDOWS = sys.platform.startswith("win")
@@ -169,6 +170,7 @@ def open_video_preview(
     subtitle_bg_mode: str = "box",
     subtitle_pos_x: float = 50.0,
     subtitle_pos_y: float = 86.0,
+    max_connections: Optional[int] = None,
 ) -> str:
     """
     Builds and opens a real, VidMate-style video preview with synchronized live audio dubbing,
@@ -187,6 +189,7 @@ def open_video_preview(
     eff_bg = str(getattr(cur_opt, "subtitle_bg_mode", subtitle_bg_mode or "box"))
     eff_px = float(getattr(cur_opt, "subtitle_pos_x", subtitle_pos_x or 50.0))
     eff_py = float(getattr(cur_opt, "subtitle_pos_y", subtitle_pos_y or 86.0))
+    eff_conn = int(max_connections or getattr(cur_opt, "max_connections", 0) or (getattr(parent_app, "conn_var", None).get() if getattr(parent_app, "conn_var", None) else 0) or get_setting("max_connections", 8))
 
     chapters = []
     try:
@@ -261,6 +264,7 @@ def open_video_preview(
                 chapters=chapters,
                 audio_boost=eff_boost,
                 chapter_title=eff_ch_title,
+                max_connections=eff_conn,
             )
             target_launch_url = f"http://127.0.0.1:{port}/player?sid={sid}"
             if not stream_url:
@@ -332,6 +336,7 @@ def open_video_preview(
         audio_boost=eff_boost,
         chapters=chapters,
         chapter_title=eff_ch_title,
+        max_connections=eff_conn,
     )
 
     temp_html = os.path.join(tempfile.gettempdir(), f"_sd_preview_{os.getpid()}_{int(time.time()*1000)}.html")

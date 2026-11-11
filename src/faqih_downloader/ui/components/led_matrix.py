@@ -1,11 +1,9 @@
 """
-LedEqualizerMatrix: 16-channel x 7-row LED Equalizer Spectrum Matrix widget for Smart Download (SD).
-Visualizes multi-threaded download chunk activity in real-time.
+LedEqualizerMatrix: Dynamic Turbo Stream Lanes visualizer widget for Smart Download (SD).
+Visualizes multi-threaded download chunk activity and connection progress in real-time.
 """
 from __future__ import annotations
 
-import math
-import random
 from typing import List, Optional, Any
 
 try:
@@ -16,14 +14,14 @@ except Exception:
 
 class LedEqualizerMatrix:
     """
-    Renders an 8-pair (16-channel) by 7-row LED matrix visualizer.
-    Channels correspond to active download workers / chunk streams.
+    Renders dynamic rectangular Turbo Stream Lanes matching download connection count (1..32).
+    Lanes correspond to active download workers / chunk streams.
     """
 
     NUM_COLUMNS = 16
     NUM_ROWS = 7
     COLOR_LIT = "#19f3ee"       # Neon Cyan glow
-    COLOR_LIT_TOP = "#5ffbf8"   # Slightly brighter top cap
+    COLOR_LIT_TOP = "#5ffbf8"   # Glowing top cap
     COLOR_UNLIT = "#16202c"     # Subtle dark slate
     COLOR_BORDER = "#1b2838"    # Block outline
     COLOR_BG = "#171f2a"        # Card background
@@ -32,8 +30,10 @@ class LedEqualizerMatrix:
         self.parent = parent
         self.height = height
         self.bg = bg
+        self._lane_count: int = 8
         self._levels: List[float] = [0.0] * self.NUM_COLUMNS
         self._target_levels: List[float] = [0.0] * self.NUM_COLUMNS
+        self._lane_statuses: List[str] = ["idle"] * self.NUM_COLUMNS
         self._animating = False
         self._anim_job: Optional[Any] = None
 
@@ -59,50 +59,55 @@ class LedEqualizerMatrix:
             self.canvas.grid(**kwargs)
 
     def set_levels(self, levels: List[float]):
-        """Sets the 16 channel levels (values from 0.0 to 1.0)."""
-        new_levels = list(levels)
-        if len(new_levels) < self.NUM_COLUMNS:
-            new_levels.extend([0.0] * (self.NUM_COLUMNS - len(new_levels)))
-        self._target_levels = [max(0.0, min(1.0, float(v))) for v in new_levels[:self.NUM_COLUMNS]]
-        self._levels = list(self._target_levels)
+        """Sets channel levels (values from 0.0 to 1.0)."""
+        self._levels = [max(0.0, min(1.0, float(v))) for v in levels]
+        self._target_levels = list(self._levels)
+        self._lane_count = max(1, len(self._levels))
+        self._lane_statuses = ["active" if v > 0 else "idle" for v in self._levels]
         self.redraw()
 
     def update_from_chunks(self, chunks: List[Any], active_count: int = 0, is_active: bool = True):
-        """Derives 16-channel levels from chunks snapshot."""
-        if not is_active or not chunks:
-            # Idle gentle baseline or zero
-            self.set_levels([0.0] * self.NUM_COLUMNS)
+        """Derives dynamic rectangular Turbo Stream Lanes from chunks snapshot."""
+        if not is_active or (not chunks and active_count <= 0):
+            self._lane_count = max(1, min(32, len(chunks) if chunks else (active_count if active_count > 0 else self._lane_count)))
+            self._levels = [0.0] * self._lane_count
+            self._target_levels = [0.0] * self._lane_count
+            self._lane_statuses = ["idle"] * self._lane_count
+            self.redraw()
             return
 
-        levels = [0.0] * self.NUM_COLUMNS
-        total_chunks = len(chunks)
+        n_lanes = max(1, min(32, len(chunks) if chunks else active_count))
+        self._lane_count = n_lanes
+        levels = [0.0] * n_lanes
+        statuses = ["pending"] * n_lanes
 
-        for i in range(self.NUM_COLUMNS):
-            if i < total_chunks:
+        for i in range(n_lanes):
+            if i < len(chunks):
                 chunk = chunks[i]
-                try:
-                    span = max(1, getattr(chunk, "end_byte", 1) - getattr(chunk, "start_byte", 0) + 1)
-                    dl = getattr(chunk, "downloaded_bytes", 0)
-                    pct = dl / span
-                    status = getattr(chunk, "status", "")
-                    if status == "completed":
-                        levels[i] = 1.0
-                    elif status == "downloading":
-                        # Active stream: minimum height 2/7, plus progress + minor pulse
-                        levels[i] = max(0.3, min(1.0, pct + random.uniform(0.05, 0.2)))
-                    else:
-                        levels[i] = min(0.9, pct)
-                except Exception:
-                    levels[i] = 0.2
-            elif active_count > 0 and i < active_count:
-                levels[i] = random.uniform(0.4, 0.9)
-            else:
-                levels[i] = 0.0
+                span = max(1, getattr(chunk, "end_byte", 1) - getattr(chunk, "start_byte", 0) + 1)
+                dl = max(0, getattr(chunk, "downloaded_bytes", 0))
+                pct = max(0.0, min(1.0, dl / span))
+                st = str(getattr(chunk, "status", "")).lower()
+                if st == "completed" or pct >= 0.999:
+                    levels[i] = 1.0
+                    statuses[i] = "completed"
+                elif st in ("active", "downloading"):
+                    levels[i] = max(0.08, min(1.0, pct))
+                    statuses[i] = "active"
+                else:
+                    levels[i] = pct
+                    statuses[i] = st or "pending"
+            elif i < active_count:
+                levels[i] = 0.5
+                statuses[i] = "active"
 
-        self.set_levels(levels)
+        self._levels = levels
+        self._target_levels = list(levels)
+        self._lane_statuses = statuses
+        self.redraw()
 
     def redraw(self):
-        """Draws the 16 columns of 7 LEDs on the canvas."""
+        """Draws dynamic rectangular Turbo Stream Lanes distributed across the canvas."""
         if not self.canvas or not self.canvas.winfo_exists():
             return
 
@@ -115,59 +120,89 @@ class LedEqualizerMatrix:
 
         self.canvas.delete("all")
 
-        # 16 columns arranged as 8 pairs
-        num_pairs = 8
-        cols_per_pair = 2
-        inter_pair_gap = 5.0
-        intra_pair_gap = 2.0
-        v_gap = 2.0
-        top_margin = 3.0
-        bottom_margin = 3.0
+        n = max(1, len(self._levels))
+        gap = 6.0 if n <= 4 else (4.0 if n <= 8 else (2.5 if n <= 16 else 1.5))
+        top_margin, bottom_margin = 4.0, 4.0
+        left_margin, right_margin = 6.0, 6.0
 
-        available_h = h - (top_margin + bottom_margin)
-        block_h = max(3.0, (available_h - (self.NUM_ROWS - 1) * v_gap) / self.NUM_ROWS)
+        avail_w = max(10.0, w - left_margin - right_margin - (n - 1) * gap)
+        lane_w = max(3.0, avail_w / n)
+        lane_h = max(10.0, h - top_margin - bottom_margin)
 
-        # Total horizontal gaps = 7 * inter_pair_gap + 8 * intra_pair_gap
-        total_gap_w = (num_pairs - 1) * inter_pair_gap + num_pairs * intra_pair_gap
-        block_w = max(4.0, (w - total_gap_w) / self.NUM_COLUMNS)
-        start_x = max(0.0, (w - (self.NUM_COLUMNS * block_w + total_gap_w)) / 2.0)
+        for i in range(n):
+            x0 = left_margin + i * (lane_w + gap)
+            x1 = x0 + lane_w
+            y0 = top_margin
+            y1 = y0 + lane_h
 
-        cur_x = start_x
-        for pair_idx in range(num_pairs):
-            for c_in_pair in range(cols_per_pair):
-                col_idx = pair_idx * cols_per_pair + c_in_pair
-                level = self._levels[col_idx] if col_idx < len(self._levels) else 0.0
-                lit_count = int(round(level * self.NUM_ROWS))
-                if level > 0.05 and lit_count == 0:
-                    lit_count = 1
+            status = self._lane_statuses[i] if i < len(self._lane_statuses) else "pending"
+            level = self._levels[i] if i < len(self._levels) else 0.0
 
-                for row_idx in range(self.NUM_ROWS):
-                    # row 0 is top, row 6 is bottom. LEDs light up from bottom to top!
-                    inv_row = (self.NUM_ROWS - 1) - row_idx
-                    is_lit = inv_row < lit_count
+            if status == "active":
+                bd_color = "#19f3ee"
+            elif status == "completed":
+                bd_color = "#10b981"
+            else:
+                bd_color = "#1e293b"
 
-                    y0 = top_margin + row_idx * (block_h + v_gap)
-                    y1 = y0 + block_h
-                    x0 = cur_x
-                    x1 = cur_x + block_w
+            # Outer lane rectangle with dark cyber-slate background
+            self.canvas.create_rectangle(
+                x0, y0, x1, y1,
+                fill="#111822",
+                outline=bd_color,
+                width=1
+            )
 
-                    color = self.COLOR_LIT if is_lit else self.COLOR_UNLIT
-                    if is_lit and inv_row == lit_count - 1 and lit_count > 1:
-                        color = self.COLOR_LIT_TOP
+            # Inside lane, fill from bottom to top
+            pad = 2.0
+            inner_h = max(0.0, lane_h - 2 * pad)
+            inner_w = max(0.0, lane_w - 2 * pad)
+            fill_h = max(0.0, min(inner_h, level * inner_h))
 
+            if fill_h > 0 and inner_w > 0:
+                fy1 = y1 - pad
+                fy0 = fy1 - fill_h
+                fx0 = x0 + pad
+                fx1 = x1 - pad
+
+                body_color = "#10b981" if status == "completed" else "#0284c7"
+                self.canvas.create_rectangle(
+                    fx0, fy0, fx1, fy1,
+                    fill=body_color,
+                    outline="",
+                    width=0
+                )
+
+                # Glowing top cap (3px) when active or completed
+                if fill_h >= 3.0:
+                    cap_color = "#10b981" if status == "completed" else "#19f3ee"
                     self.canvas.create_rectangle(
-                        x0, y0, x1, y1,
-                        fill=color,
-                        outline=self.COLOR_BORDER,
-                        width=1
+                        fx0, fy0, fx1, min(fy1, fy0 + 3.0),
+                        fill=cap_color,
+                        outline="",
+                        width=0
                     )
 
-                if c_in_pair == 0:
-                    cur_x += block_w + intra_pair_gap
-                else:
-                    cur_x += block_w
-                    if pair_idx < num_pairs - 1:
-                        cur_x += inter_pair_gap
+            # Overlay subtle horizontal grid lines every 7px across lane
+            grid_y = y0 + pad + 7.0
+            while grid_y < y1 - pad:
+                self.canvas.create_line(
+                    x0 + pad, grid_y, x1 - pad, grid_y,
+                    fill="#151a24",
+                    width=1
+                )
+                grid_y += 7.0
+
+            # Lane percentage text when n <= 8 and lane_w >= 26
+            if n <= 8 and lane_w >= 26:
+                txt = f"{int(round(level * 100))}%" if level > 0 else f"#{i+1}"
+                self.canvas.create_text(
+                    (x0 + x1) / 2.0,
+                    (y0 + y1) / 2.0,
+                    text=txt,
+                    fill="#e2e8f0",
+                    font=("Segoe UI", 7, "bold")
+                )
 
 
 __all__ = ["LedEqualizerMatrix"]

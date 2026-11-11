@@ -6,6 +6,7 @@ WebVTT subtitle tracks, and interactive format/quality/dubbing/subtitle controls
 from __future__ import annotations
 import html, json
 from typing import Dict, List, Optional, Any
+from ...config import get_setting
 from ...services.youtube_models import extract_media_platform, format_filesize
 from .preview_subtitle_studio import get_studio_css, get_studio_toolbar_html, get_studio_js
 from .preview_clipper_studio import get_clipper_css, get_clipper_toolbar_html, get_clipper_js
@@ -53,7 +54,7 @@ const optNeedsSeparateAudio = __OPT_NEEDS_AUDIO__;
 const videoEl = document.getElementById("videoEl"), dubAudioEl = document.getElementById("dubAudioEl");
 const iframeEl = document.getElementById("iframeEl"), toggleBtn = document.getElementById("toggleBtn");
 const audioBadge = document.getElementById("badgeAudio"), subBadge = document.getElementById("badgeSub"), resBadge = document.getElementById("badgeRes");
-const audioSelect = document.getElementById("audioSelect"), subSelect = document.getElementById("subSelect"), modeSelect = document.getElementById("modeSelect"), posSelect = document.getElementById("posSelect"), destInput = document.getElementById("destInput");
+const audioSelect = document.getElementById("audioSelect"), subSelect = document.getElementById("subSelect"), modeSelect = document.getElementById("modeSelect"), connSelect = document.getElementById("connSelect"), destInput = document.getElementById("destInput");
 const muteBtn = document.getElementById("muteBtn"), volSlider = document.getElementById("volSlider");
 let isUsingVideo = hasStream, selected_q_idx = __SELECTED_Q_IDX__, hasDubAudio = Boolean(initialDubAudioUrl);
 let actionSubmitted = false;
@@ -220,9 +221,9 @@ function applySubtitlePosition(pos) {
     applyLiveSubStyle();
 }
 
-function onPosChange() {
-    if (!posSelect) return;
-    applySubtitlePosition(posSelect.value);
+function onConnChange() {
+    if (!connSelect) return;
+    if (connSelect.value === "32" && typeof showToast === "function") showToast("⚡ 32 Threads: High server load / أقصى استهلاك للشبكة", "warn");
     syncStateToBridge();
 }
 
@@ -275,7 +276,7 @@ function getSyncPayload(extra) {
     return Object.assign({
         q_idx: selected_q_idx, a_idx: audioSelect ? parseInt(audioSelect.value) : 0,
         s_idx: subSelect ? parseInt(subSelect.value) : 0, sub_mode: modeSelect ? modeSelect.value : "hard_burn",
-        sub_pos: posSelect ? posSelect.value : "bottom", sub_preset: subPreset, sub_scale: subScale, sub_color: subColor,
+        max_connections: connSelect ? parseInt(connSelect.value) : 8, sub_pos: "bottom", sub_preset: subPreset, sub_scale: subScale, sub_color: subColor,
         sub_bg_mode: subBgMode, sub_pos_x: subPosX, sub_pos_y: subPosY, dest_path: destInput ? destInput.value.trim() : "",
         clip_start: (typeof clipStartSec !== "undefined" ? clipStartSec : 0.0),
         clip_end: (typeof clipEndSec !== "undefined" ? clipEndSec : 0.0),
@@ -455,11 +456,12 @@ def generate_preview_html(
         a_opts = [f'<option value="{i}"{" selected" if i == sel_a_idx else ""}>{html.escape(t.get("label") or t.get("language") or f"Audio #{i}")}</option>' for i, t in enumerate(audio_tracks or [])] or ['<option value="0">Original Audio (Default)</option>']
         s_opts = [f'<option value="{i}"{" selected" if i == sel_s_idx else ""}>{html.escape(t.get("label") or t.get("language") or f"Subtitle #{i}")}</option>' for i, t in enumerate(subtitle_tracks or [])] or ['<option value="0">No Subtitles</option>']
         m_opts = [f'<option value="soft_embed"{" selected" if subtitle_embed_mode == "soft_embed" else ""}>Soft Embed (دمج ناعم)</option>', f'<option value="hard_burn"{" selected" if subtitle_embed_mode == "hard_burn" else ""}>Burn into Video (حرق دائم)</option>', f'<option value="srt_only"{" selected" if subtitle_embed_mode == "srt_only" else ""}>Save External .srt (ملف خارجي)</option>']
-        p_opts = [f'<option value="bottom"{" selected" if subtitle_position == "bottom" else ""}>Bottom (أسفل الشاشة)</option>', f'<option value="middle"{" selected" if subtitle_position == "middle" else ""}>Middle (وسط الشاشة)</option>', f'<option value="top"{" selected" if subtitle_position == "top" else ""}>Top (أعلى الشاشة)</option>']
+        max_conn = int(kwargs.get("max_connections") or get_setting("max_connections", 8))
+        c_opts = [f'<option value="{c}"{" selected" if max_conn == c else ""}>{c} {"Track (مسار)" if c == 1 else "Tracks (مسارات)"}</option>' for c in [1, 2, 4, 8, 16, 32]]
         safe_dst = html.escape(default_dest_path or "")
         clipper_toolbar = get_clipper_toolbar_html(clip_start=clip_start, clip_end=clip_end, dual_sub=dual_sub, audio_boost=bool(kwargs.get("audio_boost", False)), chapters=kwargs.get("chapters", None))
         studio_toolbar = get_studio_toolbar_html(preset=subtitle_preset, scale=subtitle_font_scale, color=subtitle_text_color, bg_mode=subtitle_bg_mode, pos_x=subtitle_pos_x, pos_y=subtitle_pos_y)
-        settings_html = f"""<div class="settings-panel"><div class="settings-header"><span class="settings-title">⚡ Download Quality &amp; Controls</span><span class="settings-count">{len(options)} Formats Detected</span></div><div class="table-container"><table class="format-table"><thead><tr><th>Resolution / Quality</th><th class="col-center">Format</th><th class="col-right">Est. Size</th><th class="col-center">FPS</th><th>Stream Details</th></tr></thead><tbody>{"".join(rows)}</tbody></table></div><div class="controls-row"><div class="ctrl-group"><label>🔊 Audio / الدبلجة</label><select id="audioSelect" onchange="onAudioChange()">{"".join(a_opts)}</select></div><div class="ctrl-group"><label>💬 Subtitles / الترجمة</label><select id="subSelect" onchange="onSubChange()">{"".join(s_opts)}</select></div><div class="ctrl-group"><label>⚙️ Mode / الطريقة</label><select id="modeSelect" onchange="onModeChange()">{"".join(m_opts)}</select></div><div class="ctrl-group"><label>📍 Position / الموضع</label><select id="posSelect" onchange="onPosChange()">{"".join(p_opts)}</select></div></div>{clipper_toolbar}{studio_toolbar}<div class="dest-card"><label>📁 Save As / مسار الحفظ:</label><input type="text" id="destInput" value="{safe_dst}" /><button type="button" class="btn" style="padding:4px 8px;font-size:11px;" onclick="browseDestination()">📁 Browse...</button></div><div class="action-bar"><button class="btn btn-download" onclick="doAction('download')">⚡ Download Selected Quality</button><button class="btn btn-secondary" onclick="doAction('open_in_main')">🖥️ Open in Main Window</button><button class="btn btn-cancel" onclick="doAction('cancel')">✕ Cancel</button></div></div>"""
+        settings_html = f"""<div class="settings-panel"><div class="settings-header"><span class="settings-title">⚡ Download Quality &amp; Controls</span><span class="settings-count">{len(options)} Formats Detected</span></div><div class="table-container"><table class="format-table"><thead><tr><th>Resolution / Quality</th><th class="col-center">Format</th><th class="col-right">Est. Size</th><th class="col-center">FPS</th><th>Stream Details</th></tr></thead><tbody>{"".join(rows)}</tbody></table></div><div class="controls-row"><div class="ctrl-group"><label>🔊 Audio / الدبلجة</label><select id="audioSelect" onchange="onAudioChange()">{"".join(a_opts)}</select></div><div class="ctrl-group"><label>💬 Subtitles / الترجمة</label><select id="subSelect" onchange="onSubChange()">{"".join(s_opts)}</select></div><div class="ctrl-group"><label>⚙️ Mode / الطريقة</label><select id="modeSelect" onchange="onModeChange()">{"".join(m_opts)}</select></div><div class="ctrl-group"><label>⚡ Threads / المسارات</label><select id="connSelect" onchange="onConnChange()">{"".join(c_opts)}</select></div></div>{clipper_toolbar}{studio_toolbar}<div class="dest-card"><label>📁 Save As / مسار الحفظ:</label><input type="text" id="destInput" value="{safe_dst}" /><button type="button" class="btn" style="padding:4px 8px;font-size:11px;" onclick="browseDestination()">📁 Browse...</button></div><div class="action-bar"><button class="btn btn-download" onclick="doAction('download')">⚡ Download Selected Quality</button><button class="btn btn-secondary" onclick="doAction('open_in_main')">🖥️ Open in Main Window</button><button class="btn btn-cancel" onclick="doAction('cancel')">✕ Cancel</button></div></div>"""
 
     opt_needs_audio = [bool(not getattr(o, "is_progressive", False) and not getattr(o, "is_audio_only", False) and getattr(o, "audio_url", None)) for o in (options or [])]
     safe_tracks = [{k: v for k, v in t.items() if (isinstance(v, (str, int, float, bool)) or v is None) and k not in ("style_config", "secondary_track")} for t in (subtitle_tracks or []) if isinstance(t, dict)]

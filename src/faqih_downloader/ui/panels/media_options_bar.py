@@ -76,11 +76,15 @@ class MediaOptionsBarMixin(MediaOptionsActionsMixin):
         self.lbl_main_sub_mode.pack(side=tk.LEFT); self.cb_main_sub_mode.pack(side=tk.LEFT, padx=(4, 8))
         self.cb_main_sub_mode.bind("<<ComboboxSelected>>", self._on_main_sub_mode_changed)
 
-        self.lbl_main_sub_pos = tk.Label(row2, text=tr("lbl_main_sub_pos", "● Pos:"), font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_text_bright, width=6, anchor="w")
+        is_ar = (getattr(self, "current_language", "en") == "ar") or (get_setting("language", "ar") == "ar")
+        lbl_threads = tr("lbl_main_threads", "⚡ المسارات:" if is_ar else "⚡ Threads:")
+        self.lbl_main_sub_pos = tk.Label(row2, text=lbl_threads, font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_text_bright, width=9, anchor="w")
+        self._main_conn_values = ["1", "2", "4", "8", "16", "32"]
         self._main_sub_pos_codes = ["bottom", "middle", "top"]
-        pos_labels = [tr("sub_pos_bottom", "أسفل (Bottom)"), tr("sub_pos_middle", "وسط (Middle)"), tr("sub_pos_top", "أعلى (Top)")]
-        self.cb_main_sub_pos = ttk.Combobox(row2, values=pos_labels, state="readonly", font=("Segoe UI", 8), width=13)
-        self.cb_main_sub_pos.current(0)
+        self.cb_main_sub_pos = ttk.Combobox(row2, values=self._main_conn_values, state="readonly", font=("Segoe UI", 8), width=8)
+        init_conn = str(get_setting("max_connections", 8))
+        self.cb_main_sub_pos.set(init_conn if init_conn in self._main_conn_values else "8")
+        self.cb_main_conn = self.cb_main_sub_pos
         self.lbl_main_sub_pos.pack(side=tk.LEFT); self.cb_main_sub_pos.pack(side=tk.LEFT, padx=(4, 8))
         self.cb_main_sub_pos.bind("<<ComboboxSelected>>", self._on_main_sub_pos_changed)
 
@@ -215,15 +219,15 @@ class MediaOptionsBarMixin(MediaOptionsActionsMixin):
         mode = getattr(sel_opt, "subtitle_embed_mode", None) or get_setting("subtitle_embed_mode", "soft_embed")
         self.cb_main_sub_mode.current(self._main_sub_mode_codes.index(mode) if mode in self._main_sub_mode_codes else 0)
 
-        # 5. Position Selection
-        pos = getattr(sel_opt, "subtitle_position", None) or get_setting("subtitle_position", "bottom")
+        # 5. Connections / Threads Selection
+        cur_conn = str(get_setting("max_connections", 8))
+        if hasattr(self, "conn_var") and self.conn_var.get(): cur_conn = str(self.conn_var.get())
         if hasattr(self, "cb_main_sub_pos") and self.cb_main_sub_pos:
-            self.cb_main_sub_pos.current(self._main_sub_pos_codes.index(pos) if pos in self._main_sub_pos_codes else 0)
+            self.cb_main_sub_pos.set(cur_conn if cur_conn in getattr(self, "_main_conn_values", ["1", "2", "4", "8", "16", "32"]) else "8")
+            self.cb_main_sub_pos.configure(state="readonly")
 
         mode_st = "readonly" if len(self._main_subtitle_tracks) > 1 else "disabled"
         if hasattr(self, "cb_main_sub_mode") and self.cb_main_sub_mode: self.cb_main_sub_mode.configure(state=mode_st)
-        pos_st = "readonly" if sub_idx > 0 else "disabled"
-        if hasattr(self, "cb_main_sub_pos") and self.cb_main_sub_pos: self.cb_main_sub_pos.configure(state=pos_st)
 
         # Synchronize context and column 1 card immediately
         self._sync_media_bar_state()
@@ -286,9 +290,16 @@ class MediaOptionsBarMixin(MediaOptionsActionsMixin):
             opt.subtitle_embed_mode = sub_mode
             ctx["subtitle_embed_mode"] = sub_mode
 
-        # Subtitle position
-        p_idx = self.cb_main_sub_pos.current() if hasattr(self, "cb_main_sub_pos") else 0
-        sub_pos = self._main_sub_pos_codes[p_idx] if (hasattr(self, "_main_sub_pos_codes") and 0 <= p_idx < len(self._main_sub_pos_codes)) else "bottom"
+        # Connections / Threads and Subtitle position
+        conn_v = str(self.cb_main_sub_pos.get() if hasattr(self.cb_main_sub_pos, "get") else "").strip()
+        if conn_v.isdigit() and int(conn_v) in (1, 2, 4, 8, 16, 24, 32):
+            conn_int = int(conn_v)
+            if opt: opt.max_connections = conn_int
+            ctx["max_connections"] = conn_int
+            sub_pos = getattr(opt, "subtitle_position", "bottom") or "bottom"
+        else:
+            p_idx = self.cb_main_sub_pos.current() if hasattr(self.cb_main_sub_pos, "current") else 0
+            sub_pos = self._main_sub_pos_codes[p_idx] if (hasattr(self, "_main_sub_pos_codes") and 0 <= p_idx < len(self._main_sub_pos_codes)) else "bottom"
         if opt:
             opt.subtitle_position = sub_pos
             ctx["subtitle_position"] = sub_pos
@@ -376,7 +387,7 @@ class MediaOptionsBarMixin(MediaOptionsActionsMixin):
         if hasattr(self, "cb_main_sub_mode"):
             self.cb_main_sub_mode.configure(state="readonly" if has_s else "disabled")
         if hasattr(self, "cb_main_sub_pos"):
-            self.cb_main_sub_pos.configure(state="readonly" if idx > 0 else "disabled")
+            self.cb_main_sub_pos.configure(state="readonly")
         if event is not None and getattr(self, "_main_subtitle_tracks", None):
             lang = self._main_subtitle_tracks[idx].get("language") if (0 < idx < len(self._main_subtitle_tracks)) else "none"
             try: set_setting("preferred_subtitle_lang", lang or "none")
@@ -400,13 +411,20 @@ class MediaOptionsBarMixin(MediaOptionsActionsMixin):
         self._sync_media_bar_state(event)
 
     def _on_main_sub_pos_changed(self, event=None):
-        """Persists selected subtitle position."""
-        cur_idx = self.cb_main_sub_pos.current()
-        if 0 <= cur_idx < len(self._main_sub_pos_codes):
-            pos = self._main_sub_pos_codes[cur_idx]
-            if event is not None:
-                try: set_setting("subtitle_position", pos)
-                except Exception: pass
+        """Persists selected thread/connection count or fallback subtitle position."""
+        val = str(self.cb_main_sub_pos.get() if hasattr(self.cb_main_sub_pos, "get") else "").strip()
+        if val.isdigit() and int(val) in (1, 2, 4, 8, 16, 24, 32):
+            try:
+                set_setting("max_connections", int(val))
+                if hasattr(self, "conn_var"): self.conn_var.set(val)
+            except Exception: pass
+        else:
+            cur_idx = self.cb_main_sub_pos.current() if hasattr(self.cb_main_sub_pos, "current") else -1
+            if 0 <= cur_idx < len(getattr(self, "_main_sub_pos_codes", [])):
+                pos = self._main_sub_pos_codes[cur_idx]
+                if event is not None:
+                    try: set_setting("subtitle_position", pos)
+                    except Exception: pass
         self._sync_media_bar_state(event)
 
 

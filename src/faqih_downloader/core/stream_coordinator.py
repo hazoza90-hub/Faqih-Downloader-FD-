@@ -353,7 +353,7 @@ class StreamDownloadCoordinator:
                     combined_total = max(1, self._v_total_size + self._a_total_size)
                     combined_dl = min(combined_total, self._v_downloaded + self._a_downloaded)
                     combined_speed = self._v_speed + self._a_speed
-                    combined_active = self._v_active + self._a_active
+                    combined_active = self._v_active if not v_completed.is_set() else self._a_active
                     if combined_speed > 0:
                         self._last_active_speed = combined_speed
                     elif combined_dl > 0 and self._last_active_speed <= 0.0:

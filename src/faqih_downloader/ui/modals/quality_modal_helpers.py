@@ -33,13 +33,19 @@ def attach_selected_tracks_to_option(
             selected_option.selected_audio_track = audio_tracks[idx]
     sub_mode = "hard_burn"
     sub_pos = "bottom"
+    conn_val = None
     if cb_sub:
         mode_fn = getattr(cb_sub, "get_selected_mode", None)
         sub_mode = mode_fn() if callable(mode_fn) else getattr(cb_sub, "_selected_mode", "hard_burn")
         pos_fn = getattr(cb_sub, "get_selected_pos", None)
         sub_pos = pos_fn() if callable(pos_fn) else getattr(cb_sub, "_selected_pos", "bottom")
+        conn_fn = getattr(cb_sub, "get_selected_connections", None)
+        conn_val = conn_fn() if callable(conn_fn) else getattr(cb_sub, "_selected_connections", None)
     selected_option.subtitle_embed_mode = sub_mode or "hard_burn"
     selected_option.subtitle_position = sub_pos or "bottom"
+    if conn_val is not None:
+        try: selected_option.max_connections = int(conn_val)
+        except Exception: pass
     if subtitle_tracks and cb_sub:
         idx = cb_sub.current()
         if idx <= 0 and len(subtitle_tracks) > 1 and getattr(cb_sub, "_user_touched_mode", False):
@@ -129,12 +135,20 @@ def sync_modal_selection_to_staged(modal: Any) -> None:
         if sub_mode in codes:
             try: target.cb_main_sub_mode.current(codes.index(sub_mode))
             except Exception: pass
+    if hasattr(target, "conn_var") and getattr(opt, "max_connections", None):
+        try: target.conn_var.set(str(opt.max_connections))
+        except Exception: pass
     if hasattr(target, "cb_main_sub_pos"):
-        sub_pos = getattr(opt, "subtitle_position", "bottom")
-        pos_codes = getattr(target, "_main_sub_pos_codes", ["bottom", "middle", "top"])
-        if sub_pos in pos_codes:
-            try: target.cb_main_sub_pos.current(pos_codes.index(sub_pos))
+        conn_v = getattr(opt, "max_connections", None)
+        if conn_v is not None:
+            try: target.cb_main_sub_pos.set(str(conn_v))
             except Exception: pass
+        else:
+            sub_pos = getattr(opt, "subtitle_position", "bottom")
+            pos_codes = getattr(target, "_main_sub_pos_codes", ["bottom", "middle", "top"])
+            if sub_pos in pos_codes:
+                try: target.cb_main_sub_pos.current(pos_codes.index(sub_pos))
+                except Exception: pass
     if hasattr(target, "entry_dest") and cur_dest and tk:
         try:
             target.entry_dest.delete(0, tk.END)

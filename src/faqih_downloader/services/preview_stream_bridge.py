@@ -13,11 +13,8 @@ from .preview_stream_proxy import (
 )
 from .subtitle_downloader import download_subtitle_as_srt
 
-_SERVER_LOCK = threading.Lock()
-_BRIDGE_SERVER: Optional[http.server.ThreadingHTTPServer] = None
-_BRIDGE_PORT: int = 0
-_SESSIONS_LOCK = threading.Lock()
-_SESSIONS: Dict[str, "PreviewSession"] = {}
+_SERVER_LOCK = threading.Lock(); _BRIDGE_SERVER: Optional[http.server.ThreadingHTTPServer] = None
+_BRIDGE_PORT: int = 0; _SESSIONS_LOCK = threading.Lock(); _SESSIONS: Dict[str, "PreviewSession"] = {}
 
 @dataclass
 class PreviewSession:
@@ -25,36 +22,18 @@ class PreviewSession:
     sid: str
     url: str
     video_title: str
-    info_dict: Dict[str, Any] = field(default_factory=dict)
-    options: List[Any] = field(default_factory=list)
-    audio_tracks: List[Dict[str, Any]] = field(default_factory=list)
-    subtitle_tracks: List[Dict[str, Any]] = field(default_factory=list)
-    default_dest_path: str = ""
-    on_confirm: Optional[Callable[[Any, str], None]] = None
-    on_open_in_main: Optional[Callable[[Any, str], None]] = None
-    on_cancel: Optional[Callable[[], None]] = None
-    parent_app: Optional[Any] = None
-    modal_ref: Optional[Any] = None
-    cached_subtitles: Dict[int, str] = field(default_factory=dict)
-    selected_audio_track: Optional[Dict[str, Any]] = None
-    selected_sub_track: Optional[Dict[str, Any]] = None
-    subtitle_embed_mode: str = "soft_embed"
-    selected_q_idx: int = 0
-    subtitle_position: str = "bottom"
-    subtitle_preset: str = "youtube"
-    subtitle_font_scale: float = 1.0
-    subtitle_text_color: str = "#FFFFFF"
-    subtitle_bg_mode: str = "box"
-    subtitle_pos_x: float = 50.0
-    subtitle_pos_y: float = 86.0
-    clip_start: float = 0.0
-    clip_end: float = 0.0
-    sub_custom_edits: Dict[str, str] = field(default_factory=dict)
-    dual_sub: bool = False
-    sec_s_idx: int = -1
-    audio_boost: bool = False
-    chapter_title: str = ""
-    chapters: List[Dict[str, Any]] = field(default_factory=list)
+    info_dict: Dict[str, Any] = field(default_factory=dict); options: List[Any] = field(default_factory=list)
+    audio_tracks: List[Dict[str, Any]] = field(default_factory=list); subtitle_tracks: List[Dict[str, Any]] = field(default_factory=list)
+    default_dest_path: str = ""; on_confirm: Optional[Callable[[Any, str], None]] = None
+    on_open_in_main: Optional[Callable[[Any, str], None]] = None; on_cancel: Optional[Callable[[], None]] = None
+    parent_app: Optional[Any] = None; modal_ref: Optional[Any] = None; cached_subtitles: Dict[int, str] = field(default_factory=dict)
+    selected_audio_track: Optional[Dict[str, Any]] = None; selected_sub_track: Optional[Dict[str, Any]] = None
+    subtitle_embed_mode: str = "soft_embed"; selected_q_idx: int = 0
+    subtitle_position: str = "bottom"; max_connections: int = 8; subtitle_preset: str = "youtube"
+    subtitle_font_scale: float = 1.0; subtitle_text_color: str = "#FFFFFF"; subtitle_bg_mode: str = "box"
+    subtitle_pos_x: float = 50.0; subtitle_pos_y: float = 86.0; clip_start: float = 0.0; clip_end: float = 0.0
+    sub_custom_edits: Dict[str, str] = field(default_factory=dict); dual_sub: bool = False; sec_s_idx: int = -1
+    audio_boost: bool = False; chapter_title: str = ""; chapters: List[Dict[str, Any]] = field(default_factory=list)
 
 def start_preview_bridge(host: str = "127.0.0.1") -> int:
     """Starts the singleton background preview bridge HTTP server on an ephemeral loopback port."""
@@ -102,7 +81,7 @@ def register_preview_session(
         subtitle_position=subtitle_position or "bottom", subtitle_preset=subtitle_preset or "youtube",
         subtitle_font_scale=float(subtitle_font_scale or 1.0), subtitle_text_color=str(subtitle_text_color or "#FFFFFF"),
         subtitle_bg_mode=str(subtitle_bg_mode or "box"), subtitle_pos_x=float(subtitle_pos_x or 50.0),
-        subtitle_pos_y=float(subtitle_pos_y or 86.0),
+        subtitle_pos_y=float(subtitle_pos_y or 86.0), max_connections=int(kwargs.get("max_connections") or 8),
     )
     ch_list = kwargs.get("chapters")
     if not ch_list and (isinstance(info_dict, dict) or (info_dict is None and options)):
@@ -253,19 +232,11 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
             self.send_header("Access-Control-Allow-Origin", "*"); self.end_headers()
             self.wfile.write(b'{"ok": false, "error": "Forbidden: Untrusted Origin"}'); return
 
-        parsed = urllib.parse.urlparse(self.path)
-        params = urllib.parse.parse_qs(parsed.query)
-        sid = params.get("sid", [""])[0]
-        session = get_preview_session(sid)
-        if not session:
-            self.send_response(404); self.end_headers()
-            return
-
+        parsed = urllib.parse.urlparse(self.path); params = urllib.parse.parse_qs(parsed.query)
+        session = get_preview_session(params.get("sid", [""])[0])
+        if not session: self.send_response(404); self.end_headers(); return
         content_len = _safe_int(self.headers.get("Content-Length", 0))
-        if content_len > 65536:
-            self._send_json({"ok": False, "error": "Payload too large"}, code=413)
-            return
-
+        if content_len > 65536: self._send_json({"ok": False, "error": "Payload too large"}, code=413); return
         raw_body = self.rfile.read(content_len).decode("utf-8") if content_len > 0 else "{}"
         try: body = json.loads(raw_body)
         except Exception: body = {}
@@ -382,9 +353,7 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
     def _handle_api_browse(self, session: PreviewSession, body: Dict[str, Any], params: Dict[str, List[str]]) -> None:
         """Opens native file picker on Tkinter thread to choose download destination file."""
         current_dest = str(body.get("current_dest") or params.get("current_dest", [""])[0] or session.default_dest_path).strip()
-        chosen_holder: List[Optional[str]] = [None]
-        browse_evt = threading.Event()
-
+        chosen_holder: List[Optional[str]] = [None]; browse_evt = threading.Event()
         def _ask():
             try:
                 from tkinter import filedialog
@@ -395,7 +364,6 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
                 if res: chosen_holder[0] = str(res)
             except Exception: pass
             finally: browse_evt.set()
-
         _schedule_on_tk(session, _ask, 0); browse_evt.wait(timeout=60.0)
 
         chosen = chosen_holder[0]
@@ -416,9 +384,10 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
         """Processes download, open in main window, or cancel actions and dispatches safely to Tkinter."""
         action = str(body.get("action", "download"))
         q_idx, a_idx, s_idx = _safe_int(body.get("q_idx", 0)), _safe_int(body.get("a_idx", 0)), _safe_int(body.get("s_idx", 0))
-        sub_mode = str(body.get("sub_mode", "hard_burn"))
-        sub_pos = str(body.get("sub_pos", "bottom"))
+        sub_mode, sub_pos = str(body.get("sub_mode", "hard_burn")), str(body.get("sub_pos", "bottom"))
         dest_path = str(body.get("dest_path", "")).strip()
+        max_conn = _safe_int(body.get("max_connections", 0))
+        if max_conn in (1, 2, 4, 8, 16, 24, 32): session.max_connections = max_conn
 
         session.selected_q_idx, session.subtitle_position, session.subtitle_embed_mode = q_idx, sub_pos, sub_mode
         session.subtitle_preset, session.subtitle_font_scale = str(body.get("sub_preset", session.subtitle_preset or "youtube")), float(body.get("sub_scale", session.subtitle_font_scale or 1.0))
@@ -446,6 +415,9 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
         try:
             from ..config import set_setting
             set_setting("subtitle_embed_mode", sub_mode); set_setting("subtitle_position", sub_pos)
+            if getattr(session, "max_connections", 0) > 0:
+                set_setting("max_connections", session.max_connections)
+                if selected_opt: selected_opt.max_connections = session.max_connections
             if selected_opt:
                 set_setting("preferred_video_height", -1 if getattr(selected_opt, "is_audio_only", False) else getattr(selected_opt, "height", 0))
                 if getattr(selected_opt, "selected_audio_track", None): set_setting("preferred_audio_lang", selected_opt.selected_audio_track.get("language") or "original")
@@ -459,23 +431,30 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
                     session.modal_ref._confirmed = True
                     session.modal_ref.destroy()
                 except Exception: pass
-            if session.parent_app and hasattr(session.parent_app, "clear_last_clipboard_url"):
-                try: session.parent_app.clear_last_clipboard_url()
-                except Exception: pass
+            if session.parent_app:
+                if hasattr(session.parent_app, "clear_last_clipboard_url"):
+                    try: session.parent_app.clear_last_clipboard_url()
+                    except Exception: pass
+                if getattr(session, "max_connections", 0) > 0:
+                    if hasattr(session.parent_app, "conn_var"):
+                        try: session.parent_app.conn_var.set(str(session.max_connections))
+                        except Exception: pass
+                    if hasattr(session.parent_app, "cb_main_sub_pos") and session.parent_app.cb_main_sub_pos:
+                        try: session.parent_app.cb_main_sub_pos.set(str(session.max_connections))
+                        except Exception: pass
             if action == "download" and session.on_confirm:
                 session.on_confirm(selected_opt, final_dest)
             elif action == "open_in_main":
                 if session.on_open_in_main: session.on_open_in_main(selected_opt, final_dest)
             elif action == "cancel" and session.on_cancel:
                 session.on_cancel()
-            def _kill_preview():
+            def _kill_cleanup():
                 try:
                     from ..ui.modals.video_preview_modal import terminate_active_preview_proc
                     terminate_active_preview_proc()
                 except Exception: pass
-            _schedule_on_tk(session, _kill_preview, 250)
-            def _cleanup(): unregister_preview_session(session.sid)
-            _schedule_on_tk(session, _cleanup, 2000)
+                unregister_preview_session(session.sid)
+            _schedule_on_tk(session, _kill_cleanup, 250)
 
         _schedule_on_tk(session, _dispatch, 0)
 
@@ -484,9 +463,10 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
     def _handle_api_sync_state(self, session: PreviewSession, body: Dict[str, Any]) -> None:
         """Synchronizes format, dubbed audio, subtitle, and mode selections live to Tkinter modal."""
         q_idx, a_idx, s_idx = _safe_int(body.get("q_idx", 0)), _safe_int(body.get("a_idx", 0)), _safe_int(body.get("s_idx", 0))
-        sub_mode = str(body.get("sub_mode", "hard_burn"))
-        sub_pos = str(body.get("sub_pos", "bottom"))
+        sub_mode, sub_pos = str(body.get("sub_mode", "hard_burn")), str(body.get("sub_pos", "bottom"))
         dest_path = str(body.get("dest_path", "")).strip()
+        max_conn = _safe_int(body.get("max_connections", 0))
+        if max_conn in (1, 2, 4, 8, 16, 24, 32): session.max_connections = max_conn
 
         session.selected_q_idx, session.subtitle_position, session.subtitle_embed_mode = q_idx, sub_pos, sub_mode
         session.subtitle_preset, session.subtitle_font_scale = str(body.get("sub_preset", session.subtitle_preset or "youtube")), float(body.get("sub_scale", session.subtitle_font_scale or 1.0))
@@ -509,6 +489,9 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
         try:
             from ..config import set_setting
             set_setting("subtitle_embed_mode", sub_mode); set_setting("subtitle_position", sub_pos)
+            if getattr(session, "max_connections", 0) > 0:
+                set_setting("max_connections", session.max_connections)
+                if cur_opt: cur_opt.max_connections = session.max_connections
             if cur_opt: set_setting("preferred_video_height", -1 if getattr(cur_opt, "is_audio_only", False) else getattr(cur_opt, "height", 0))
             if session.selected_audio_track: set_setting("preferred_audio_lang", session.selected_audio_track.get("language") or "original")
             if session.selected_sub_track: set_setting("preferred_subtitle_lang", session.selected_sub_track.get("language") or "none")
@@ -525,6 +508,7 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
                     so.selected_audio_track, so.selected_subtitle_track = session.selected_audio_track, session.selected_sub_track
                     so.subtitle_embed_mode, so.subtitle_position, so.subtitle_preset, so.subtitle_font_scale = session.subtitle_embed_mode, session.subtitle_position, session.subtitle_preset, session.subtitle_font_scale
                     so.subtitle_text_color, so.subtitle_bg_mode, so.subtitle_pos_x, so.subtitle_pos_y = session.subtitle_text_color, session.subtitle_bg_mode, session.subtitle_pos_x, session.subtitle_pos_y
+                    if getattr(session, "max_connections", 0) > 0: so.max_connections = session.max_connections
                 if hasattr(m, "cb_audio") and m.cb_audio: m.cb_audio.current(a_idx)
                 if hasattr(m, "cb_sub") and m.cb_sub:
                     m.cb_sub.current(s_idx); m.cb_sub._selected_mode, m.cb_sub._user_touched_mode, m.cb_sub._selected_pos = sub_mode, True, sub_pos
@@ -535,11 +519,19 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
                         if sub_mode in codes: mode_cb.current(codes.index(sub_mode))
                         if hasattr(mode_cb, "configure"): mode_cb.configure(state="readonly" if s_idx > 0 else "disabled")
                     pos_cb = getattr(m.cb_sub, "_pos_combobox", None)
-                    if pos_cb and hasattr(pos_cb, "current") and sub_pos in ["bottom", "middle", "top"]:
-                        pos_cb.current(["bottom", "middle", "top"].index(sub_pos))
+                    if pos_cb and hasattr(pos_cb, "current"):
+                        if sub_pos in ["bottom", "middle", "top"]: pos_cb.current(["bottom", "middle", "top"].index(sub_pos))
+                        elif str(getattr(session, "max_connections", "")).isdigit(): pos_cb.set(str(session.max_connections))
                 if dest_path and hasattr(m, "entry_dest") and m.entry_dest:
                     m.entry_dest.delete(0, "end"); m.entry_dest.insert(0, dest_path)
                     if hasattr(m, "dest_path"): m.dest_path = dest_path
+                if session.parent_app and getattr(session, "max_connections", 0) > 0:
+                    if hasattr(session.parent_app, "conn_var"):
+                        try: session.parent_app.conn_var.set(str(session.max_connections))
+                        except Exception: pass
+                    if hasattr(session.parent_app, "cb_main_sub_pos") and session.parent_app.cb_main_sub_pos:
+                        try: session.parent_app.cb_main_sub_pos.set(str(session.max_connections))
+                        except Exception: pass
             except Exception: pass
 
         _schedule_on_tk(session, _sync_tk, 0)
