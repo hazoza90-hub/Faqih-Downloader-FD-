@@ -160,9 +160,15 @@ class EngineWorkersMixin(EngineResumerMixin):
                             req.add_header("Range", f"bytes={cur_offset}-{req_end}")
                         resp = urllib.request.urlopen(req, timeout=15, context=self.ssl_context)
                     else:
-                        hdrs = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0.0.0", "Connection": "keep-alive"}
-                        hdrs.update(self.headers)
-                        if self.supports_ranges and self.total_size > 0 and req_end is not None:
+                        hdrs = {
+                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0.0.0",
+                            "Connection": "keep-alive",
+                            "Accept-Encoding": "identity",
+                        }
+                        for hk, hv in self.headers.items():
+                            if not (is_gv and hk.lower() == "range"):
+                                hdrs[hk] = hv
+                        if self.supports_ranges and self.total_size > 0 and req_end is not None and not is_gv:
                             hdrs["Range"] = f"bytes={cur_offset}-{req_end}"
 
                         p = urllib.parse.urlsplit(win_url)
@@ -188,8 +194,7 @@ class EngineWorkersMixin(EngineResumerMixin):
                                 conn.request("GET", path_q, headers=req_h)
                                 raw_resp = conn.getresponse()
                                 break
-                            except (http.client.NotConnected, http.client.CannotSendRequest,
-                                    http.client.BadStatusLine, ConnectionError, OSError):
+                            except (http.client.HTTPException, ConnectionError, OSError):
                                 with self._lock:
                                     if conn in self._active_connections:
                                         self._active_connections.remove(conn)
@@ -213,6 +218,7 @@ class EngineWorkersMixin(EngineResumerMixin):
                                 except Exception: pass
                                 conn = None
                             current_url = urllib.parse.urljoin(current_url, loc)
+                            is_gv = is_gv or self.is_googlevideo_url(current_url)
                             win_url = _build_window_url(current_url, cur_offset, req_end, is_gv)
                             p = urllib.parse.urlsplit(win_url)
                             scheme, host = p.scheme or "http", p.hostname or "localhost"
@@ -227,15 +233,18 @@ class EngineWorkersMixin(EngineResumerMixin):
 
                         resp = _KeepAliveResponseWrapper(raw_resp, conn)
 
-                    if self.supports_ranges and self.total_size > 0:
-                        code = resp.getcode()
-                        if code not in (200, 206):
-                            if code in (401, 403, 410):
-                                self.has_expired_link = True
-                                chunk.error_msg = f"HTTP {code}: (Expired or Forbidden Link)"
-                            raise RuntimeError(f"Unexpected HTTP status {code}")
-                        if code == 200 and cur_offset > 0:
-                            raise RuntimeError("Server returned HTTP 200 instead of HTTP 206 for non-zero range")
+                    code = resp.getcode()
+                    if code not in (200, 206):
+                        self.last_http_status = code
+                        if code in (401, 403, 410):
+                            self.has_expired_link = True
+                            chunk.error_msg = f"HTTP {code}: Forbidden (Expired or Forbidden Link)"
+                            with chunk.lock:
+                                chunk.status = "failed"
+                            self._stop_workers_for_error()
+                        raise RuntimeError(f"Unexpected HTTP status {code}")
+                    if self.supports_ranges and self.total_size > 0 and code == 200 and cur_offset > 0 and not is_gv:
+                        raise RuntimeError("Server returned HTTP 200 instead of HTTP 206 for non-zero range")
 
                     if self._is_stopped():
                         break
@@ -297,6 +306,8 @@ class EngineWorkersMixin(EngineResumerMixin):
                         with self._lock:
                             if resp in self._active_connections:
                                 self._active_connections.remove(resp)
+                            if conn in self._active_connections:
+                                self._active_connections.remove(conn)
                         if resp:
                             try: resp.close()
                             except Exception: pass
@@ -318,8 +329,11 @@ class EngineWorkersMixin(EngineResumerMixin):
                         except Exception: pass
                         resp = None
                     else:
-                        if getattr(raw_resp, "will_close", False) or (expected_seg_bytes is not None and seg_bytes_read < expected_seg_bytes):
+                        if getattr(raw_resp, "will_close", False) or not getattr(raw_resp, "isclosed", lambda: True)() or (expected_seg_bytes is not None and seg_bytes_read < expected_seg_bytes):
                             if conn:
+                                with self._lock:
+                                    if conn in self._active_connections:
+                                        self._active_connections.remove(conn)
                                 try: conn.close()
                                 except Exception: pass
                                 conn = None
@@ -338,20 +352,27 @@ class EngineWorkersMixin(EngineResumerMixin):
                         return
 
             except Exception as e:
-                if self._is_stopped():
-                    return
-                if self._pause_event.is_set():
-                    if not self._wait_if_paused(): return
-                    continue
                 if isinstance(e, urllib.error.HTTPError):
                     e.close()
                     self.last_http_status = e.code
                     if e.code in (401, 403, 410):
                         self.has_expired_link = True
                         chunk.error_msg = f"HTTP {e.code}: {e.reason} (Expired or Forbidden Link)"
+                        with chunk.lock:
+                            chunk.status = "failed"
+                        self._stop_workers_for_error()
                         break
-                if self._is_stopped():
+                if self.has_expired_link:
+                    with chunk.lock:
+                        chunk.status = "failed"
+                    break
+                if self._cancel_event.is_set() or not self.is_running:
                     return
+                if self._error_abort_event.is_set():
+                    break
+                if self._pause_event.is_set():
+                    if not self._wait_if_paused(): return
+                    continue
                 retry_count = 0 if seg_bytes_read >= 65536 else (max(0, retry_count - 1) if seg_bytes_read > 0 else retry_count)
                 retry_count += 1
                 backoff = min(4.0, 0.8 * (1.4 ** min(retry_count, 5)))
@@ -359,8 +380,10 @@ class EngineWorkersMixin(EngineResumerMixin):
                 t_end = time.time() + backoff
                 while time.time() < t_end and not self._is_stopped() and not self._pause_event.is_set():
                     time.sleep(0.1)
-                if self._is_stopped():
+                if self._cancel_event.is_set() or not self.is_running:
                     return
+                if self._error_abort_event.is_set():
+                    break
             finally:
                 if out_file:
                     try: out_file.close()
@@ -383,7 +406,7 @@ class EngineWorkersMixin(EngineResumerMixin):
                 if self.on_chunk_update:
                     self.on_chunk_update()
 
-        if self._is_stopped():
+        if self._cancel_event.is_set() or not self.is_running:
             return
 
         with chunk.lock:

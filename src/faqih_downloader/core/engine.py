@@ -498,7 +498,7 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
                     any_failed = any(c.status == "failed" for c in self.chunks)
 
                 # Fail fast if a chunk failed permanently
-                if any_failed:
+                if any_failed or self._error_abort_event.is_set():
                     failed_chunks = [c for c in self.chunks if c.status == "failed"]
                     err = failed_chunks[0].error_msg if failed_chunks else "Chunk transfer failure"
                     self._stop_workers_for_error()
