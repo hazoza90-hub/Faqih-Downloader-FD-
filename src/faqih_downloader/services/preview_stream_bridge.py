@@ -473,8 +473,7 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
         session.subtitle_text_color, session.subtitle_bg_mode, session.subtitle_pos_x, session.subtitle_pos_y = str(body.get("sub_color", session.subtitle_text_color or "#FFFFFF")), str(body.get("sub_bg_mode", session.subtitle_bg_mode or "box")), float(body.get("sub_pos_x", session.subtitle_pos_x or 50.0)), float(body.get("sub_pos_y", session.subtitle_pos_y or 86.0))
         if dest_path: session.default_dest_path = dest_path
 
-        if session.audio_tracks and 0 <= a_idx < len(session.audio_tracks):
-            session.selected_audio_track = session.audio_tracks[a_idx]
+        if session.audio_tracks and 0 <= a_idx < len(session.audio_tracks): session.selected_audio_track = session.audio_tracks[a_idx]
         session.selected_sub_track = session.subtitle_tracks[s_idx] if (session.subtitle_tracks and 0 < s_idx < len(session.subtitle_tracks)) else None
 
         cur_opt = session.options[q_idx] if (session.options and 0 <= q_idx < len(session.options)) else None
@@ -518,10 +517,15 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
                         codes = getattr(m.cb_sub, "_mode_codes", ["soft_embed", "hard_burn", "srt_only"])
                         if sub_mode in codes: mode_cb.current(codes.index(sub_mode))
                         if hasattr(mode_cb, "configure"): mode_cb.configure(state="readonly" if s_idx > 0 else "disabled")
-                    pos_cb = getattr(m.cb_sub, "_pos_combobox", None)
-                    if pos_cb and hasattr(pos_cb, "current"):
-                        if sub_pos in ["bottom", "middle", "top"]: pos_cb.current(["bottom", "middle", "top"].index(sub_pos))
-                        elif str(getattr(session, "max_connections", "")).isdigit(): pos_cb.set(str(session.max_connections))
+                    conn_cb = getattr(m.cb_sub, "_conn_combobox", None) or getattr(m.cb_sub, "_pos_combobox", None)
+                    smc = str(getattr(session, "max_connections", "")).strip()
+                    if smc.isdigit() and int(smc) > 0:
+                        m.cb_sub._selected_connections = int(smc)
+                        if conn_cb and hasattr(conn_cb, "set"): conn_cb.set(smc)
+                    elif conn_cb and hasattr(conn_cb, "current") and sub_pos in ["bottom", "middle", "top"]:
+                        vals = getattr(conn_cb, "cget", lambda k: [])("values") if hasattr(conn_cb, "cget") else []
+                        if any("bottom" in str(v).lower() or "أسفل" in str(v) for v in vals):
+                            conn_cb.current(["bottom", "middle", "top"].index(sub_pos))
                 if dest_path and hasattr(m, "entry_dest") and m.entry_dest:
                     m.entry_dest.delete(0, "end"); m.entry_dest.insert(0, dest_path)
                     if hasattr(m, "dest_path"): m.dest_path = dest_path
@@ -530,7 +534,9 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
                         try: session.parent_app.conn_var.set(str(session.max_connections))
                         except Exception: pass
                     if hasattr(session.parent_app, "cb_main_sub_pos") and session.parent_app.cb_main_sub_pos:
-                        try: session.parent_app.cb_main_sub_pos.set(str(session.max_connections))
+                        try:
+                            session.parent_app.cb_main_sub_pos.set(str(session.max_connections))
+                            if hasattr(session.parent_app, "_sync_media_bar_state"): session.parent_app._sync_media_bar_state()
                         except Exception: pass
             except Exception: pass
 

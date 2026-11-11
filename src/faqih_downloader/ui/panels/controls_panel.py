@@ -401,6 +401,10 @@ class ControlsPanelMixin:
         try:
             val = int(self.conn_var.get())
             set_setting("max_connections", val)
+            if hasattr(self, "cb_main_sub_pos") and self.cb_main_sub_pos:
+                self.cb_main_sub_pos.set(str(val))
+                if hasattr(self, "_sync_media_bar_state"):
+                    self._sync_media_bar_state()
         except Exception:
             pass
 

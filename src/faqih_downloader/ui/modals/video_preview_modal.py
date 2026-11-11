@@ -18,7 +18,7 @@ import webbrowser
 from typing import Dict, List, Optional, Any, Callable
 
 from ...locales.i18n import tr
-from ...config import get_setting
+from ...config import get_setting, parse_safe_int
 from .preview_html_builder import generate_preview_html
 
 IS_WINDOWS = sys.platform.startswith("win")
@@ -189,7 +189,10 @@ def open_video_preview(
     eff_bg = str(getattr(cur_opt, "subtitle_bg_mode", subtitle_bg_mode or "box"))
     eff_px = float(getattr(cur_opt, "subtitle_pos_x", subtitle_pos_x or 50.0))
     eff_py = float(getattr(cur_opt, "subtitle_pos_y", subtitle_pos_y or 86.0))
-    eff_conn = int(max_connections or getattr(cur_opt, "max_connections", 0) or (getattr(parent_app, "conn_var", None).get() if getattr(parent_app, "conn_var", None) else 0) or get_setting("max_connections", 8))
+    eff_conn = (parse_safe_int(max_connections)
+                or parse_safe_int(getattr(cur_opt, "max_connections", None))
+                or (parse_safe_int(parent_app.conn_var.get()) if (parent_app and hasattr(parent_app, "conn_var")) else None)
+                or parse_safe_int(get_setting("max_connections", 8)) or 8)
 
     chapters = []
     try:

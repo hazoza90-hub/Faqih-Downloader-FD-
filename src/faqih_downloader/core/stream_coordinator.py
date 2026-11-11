@@ -47,21 +47,16 @@ class StreamDownloadCoordinator:
         self.current_engine: Optional[TurboDownloadEngine] = None
         self._active_subproc: Optional[Any] = None
         self._lock = threading.RLock()
-        self._cancel_event = threading.Event()
-        self._pause_event = threading.Event()
+        self._cancel_event, self._pause_event = threading.Event(), threading.Event()
         self._supervisor_thread: Optional[threading.Thread] = None
-        self._is_running = False
-        self._is_paused = False
-        self.start_time = 0.0
-        self._last_active_speed = 0.0
+        self._is_running = self._is_paused = False
+        self.start_time, self._last_active_speed = 0.0, 0.0
         self._active_engines: List[TurboDownloadEngine] = []
 
         # Aggregated stream metrics for smooth progress visualization
         self._v_total_size = max(0, self.stream_info.video_size)
         self._a_total_size = max(0, self.stream_info.audio_size) if not self.stream_info.is_progressive else 0
-        self._v_downloaded = 0
-        self._a_downloaded = 0
-        self._active_phase = 1
+        self._v_downloaded, self._a_downloaded, self._active_phase = 0, 0, 1
 
     def log(self, msg: str):
         if self.on_log:
@@ -79,6 +74,16 @@ class StreamDownloadCoordinator:
                 return list(self._clip_chunks)
             res: List[DownloadChunk] = []
             targets = list(self._active_engines) if self._active_engines else ([self.current_engine] if self.current_engine else [])
+            if len(self._active_engines) > 1:
+                v_eng = self._active_engines[0]
+                try:
+                    v_chunks = getattr(v_eng, "chunks", [])
+                    if v_chunks and any(getattr(c, "status", "") != "completed" for c in v_chunks):
+                        targets = [v_eng]
+                    elif v_chunks and len(self._active_engines) > 1:
+                        targets = [self._active_engines[1]]
+                except Exception:
+                    pass
             offset = 0
             for eng in targets:
                 try:
@@ -106,13 +111,11 @@ class StreamDownloadCoordinator:
 
     @property
     def is_running(self) -> bool:
-        with self._lock:
-            return self._is_running
+        with self._lock: return self._is_running
 
     @property
     def is_paused(self) -> bool:
-        with self._lock:
-            return self._is_paused
+        with self._lock: return self._is_paused
 
     def set_speed_limit(self, bytes_per_sec: float):
         with self._lock:
@@ -123,10 +126,8 @@ class StreamDownloadCoordinator:
                 except Exception: pass
 
     def start(self):
-        self._is_running = True
-        self._is_paused = False
-        self._cancel_event.clear()
-        self._pause_event.clear()
+        self._is_running, self._is_paused = True, False
+        self._cancel_event.clear(); self._pause_event.clear()
         self.start_time = time.time()
         self._supervisor_thread = threading.Thread(target=self._run_coordinator, daemon=True)
         self._supervisor_thread.start()

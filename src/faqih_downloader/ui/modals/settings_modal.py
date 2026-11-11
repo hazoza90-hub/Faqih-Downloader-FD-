@@ -424,6 +424,12 @@ class SettingsModal(SettingsModalTabsMixin, _BaseToplevel):
             self._update_threads_warning(str(n))
             if self.parent_app and hasattr(self.parent_app, "conn_var"):
                 self.parent_app.conn_var.set(self.cb_threads.get())
+            if self.parent_app and hasattr(self.parent_app, "cb_main_sub_pos") and self.parent_app.cb_main_sub_pos:
+                try:
+                    self.parent_app.cb_main_sub_pos.set(str(n))
+                    if hasattr(self.parent_app, "_sync_media_bar_state"):
+                        self.parent_app._sync_media_bar_state()
+                except Exception: pass
             if self.parent_app and hasattr(self.parent_app, "log") and callable(self.parent_app.log):
                 self.parent_app.log(f"[SETTINGS] Default connections set to: {n}")
         except Exception:

@@ -11,7 +11,7 @@ except Exception:
     tk = None  # type: ignore
 
 from faqih_downloader.i18n import tr
-from faqih_downloader.config import get_base_downloads_dir, get_setting
+from faqih_downloader.config import get_base_downloads_dir, get_setting, parse_safe_int
 from faqih_downloader.utils.file_ops import (
     resolve_categorized_path,
     generate_unique_destination_path,
@@ -41,11 +41,11 @@ class YouTubeDownloadControllerMixin:
         bytes_limit: float = 0.0,
         modal: Optional[Any] = None
     ):
-        if max_conn is None:
-            try:
-                max_conn = int(self.conn_var.get()) if hasattr(self, "conn_var") else int(get_setting("max_connections", 8))
-            except Exception:
-                max_conn = int(get_setting("max_connections", 8))
+        conn_arg = parse_safe_int(max_conn)
+        if conn_arg is None:
+            max_conn = (parse_safe_int(self.conn_var.get()) if hasattr(self, "conn_var") else None) or parse_safe_int(get_setting("max_connections", 8)) or 8
+        else:
+            max_conn = conn_arg
         # Instant 0ms cached reopen if metadata context is already available
         cached_ctx = self._get_cached_media_context(url) if hasattr(self, "_get_cached_media_context") else None
         if cached_ctx and cached_ctx.get("options") and hasattr(self, "_show_cached_quality_modal"):
@@ -181,7 +181,7 @@ class YouTubeDownloadControllerMixin:
                                         parent_app=self,
                                         show_progress_immediately=True
                                     )
-                                live_conn = int(getattr(selected_opt, "max_connections", 0) or (self.conn_var.get() if hasattr(self, "conn_var") else 0) or get_setting("max_connections", 8))
+                                live_conn = parse_safe_int(getattr(selected_opt, "max_connections", None)) or (parse_safe_int(self.conn_var.get()) if hasattr(self, "conn_var") else None) or parse_safe_int(get_setting("max_connections", 8)) or 8
                                 self._launch_stream_coordinator(stream_info, final_dest, live_conn, bytes_limit, yt_modal=yt_prog_modal)
                             except Exception as e:
                                 self._quality_modal = None

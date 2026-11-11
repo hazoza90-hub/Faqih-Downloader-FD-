@@ -15,7 +15,7 @@ except Exception:
     ttk = None  # type: ignore
 
 from faqih_downloader.i18n import tr
-from faqih_downloader.config import get_setting, set_setting, get_base_downloads_dir
+from faqih_downloader.config import get_setting, set_setting, get_base_downloads_dir, parse_safe_int
 from faqih_downloader.utils.file_ops import apply_media_filename_tags, generate_unique_destination_path
 from faqih_downloader.services.youtube_service import VideoFormatOption, YouTubeResolver, format_filesize, sanitize_filename, is_media_url
 from faqih_downloader.services.youtube_tracks import extract_audio_tracks, extract_subtitle_tracks
@@ -220,8 +220,9 @@ class MediaOptionsBarMixin(MediaOptionsActionsMixin):
         self.cb_main_sub_mode.current(self._main_sub_mode_codes.index(mode) if mode in self._main_sub_mode_codes else 0)
 
         # 5. Connections / Threads Selection
-        cur_conn = str(get_setting("max_connections", 8))
-        if hasattr(self, "conn_var") and self.conn_var.get(): cur_conn = str(self.conn_var.get())
+        cur_conn = str(parse_safe_int(getattr(sel_opt, "max_connections", None))
+                       or (parse_safe_int(self.conn_var.get()) if hasattr(self, "conn_var") else None)
+                       or parse_safe_int(get_setting("max_connections", 8)) or 8)
         if hasattr(self, "cb_main_sub_pos") and self.cb_main_sub_pos:
             self.cb_main_sub_pos.set(cur_conn if cur_conn in getattr(self, "_main_conn_values", ["1", "2", "4", "8", "16", "32"]) else "8")
             self.cb_main_sub_pos.configure(state="readonly")

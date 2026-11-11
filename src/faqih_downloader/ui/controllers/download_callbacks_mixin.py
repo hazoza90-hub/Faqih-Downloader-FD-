@@ -85,6 +85,18 @@ class DownloadCallbacksMixin:
         def _do_chunk():
             self._chunk_ui_update_pending = self._chunk_update_pending = False
             self._refresh_chunk_displays()
+            if hasattr(self, "matrix_a1") and hasattr(self, "engine") and self.engine:
+                try:
+                    raw_mc = getattr(self.engine, "max_connections", 0)
+                    safe_lanes = 0
+                    if isinstance(raw_mc, (int, str)) and not isinstance(raw_mc, bool):
+                        s = str(raw_mc).strip()
+                        if s.isdigit(): safe_lanes = int(s)
+                    snap = self.engine.get_chunks_snapshot() if hasattr(self.engine, "get_chunks_snapshot") else getattr(self.engine, "chunks", [])
+                    ac = sum(1 for c in snap if getattr(c, "status", "") in ("active", "downloading"))
+                    self.matrix_a1.update_from_chunks(snap, active_count=ac, is_active=True, max_lanes=safe_lanes)
+                except Exception:
+                    pass
 
         try:
             if self.root.winfo_exists():

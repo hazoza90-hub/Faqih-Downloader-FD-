@@ -306,3 +306,16 @@ def get_base_downloads_dir() -> str:
         return saved_dir
     return os.path.join(os.path.expanduser("~"), "Downloads")
 
+
+def parse_safe_int(v: Any, default: Optional[int] = None) -> Optional[int]:
+    """Safely extracts a positive integer from int or str, while rejecting booleans and Mocks."""
+    if isinstance(v, (int, str)) and not isinstance(v, bool):
+        try:
+            s = str(v).strip()
+            if s.isdigit() and int(s) > 0:
+                return int(s)
+        except Exception:
+            pass
+    return default
+
+

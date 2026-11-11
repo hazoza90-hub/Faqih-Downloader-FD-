@@ -15,7 +15,7 @@ except Exception:
     ttk = None  # type: ignore
 
 from faqih_downloader.i18n import tr
-from faqih_downloader.config import get_base_downloads_dir, get_setting
+from faqih_downloader.config import get_base_downloads_dir, get_setting, parse_safe_int
 from faqih_downloader.utils.file_ops import apply_media_filename_tags, generate_unique_destination_path
 from faqih_downloader.services.youtube_service import VideoFormatOption, YouTubeResolver, sanitize_filename, format_filesize
 from ..modals.quality_modal import QualitySelectionModal
@@ -88,7 +88,7 @@ class MediaOptionsActionsMixin:
             return
 
         if hasattr(self, "_start_youtube_download"):
-            max_conn = int((self.conn_var.get() if hasattr(self, "conn_var") else 0) or get_setting("max_connections", 8))
+            max_conn = (parse_safe_int(self.conn_var.get()) if hasattr(self, "conn_var") else None) or parse_safe_int(get_setting("max_connections", 8)) or 8
             self._start_youtube_download(url, dest, max_conn=max_conn)
 
     def _resolve_final_dest(self, preferred_dest: str = "", title: str = "", opt: Any = None) -> str:
@@ -134,7 +134,7 @@ class MediaOptionsActionsMixin:
             if hasattr(self, "clear_last_clipboard_url"):
                 self.clear_last_clipboard_url()
             stream_info = resolver.build_stream_info(info, selected_opt) if (resolver and selected_opt) else None
-            max_conn = int(getattr(selected_opt, "max_connections", 0) or (self.conn_var.get() if hasattr(self, "conn_var") else 0) or get_setting("max_connections", 8))
+            max_conn = parse_safe_int(getattr(selected_opt, "max_connections", None)) or (parse_safe_int(self.conn_var.get()) if hasattr(self, "conn_var") else None) or parse_safe_int(get_setting("max_connections", 8)) or 8
             try:
                 kb_lim = float(self.entry_custom_speed.get().strip())
             except Exception:
@@ -285,7 +285,7 @@ class MediaOptionsActionsMixin:
 
         def _on_preview_confirm(selected_opt, final_dest):
             _sync_ui(selected_opt, final_dest, stage_col1=False)
-            max_conn = int(getattr(selected_opt, "max_connections", 0) or (self.conn_var.get() if hasattr(self, "conn_var") else 0) or get_setting("max_connections", 8))
+            max_conn = parse_safe_int(getattr(selected_opt, "max_connections", None)) or (parse_safe_int(self.conn_var.get()) if hasattr(self, "conn_var") else None) or parse_safe_int(get_setting("max_connections", 8)) or 8
             try:
                 bytes_limit = max(0.0, float(self.entry_custom_speed.get().strip())) * 1024.0
             except Exception:
@@ -365,7 +365,7 @@ class MediaOptionsActionsMixin:
         reserved = self.history_manager.get_active_or_queued_paths() if (hasattr(self, "history_manager") and self.history_manager) else None
         final_dest = generate_unique_destination_path(final_dest, reserved_paths=reserved)
 
-        max_conn = int(getattr(selected_opt, "max_connections", 0) or (self.conn_var.get() if hasattr(self, "conn_var") else 0) or get_setting("max_connections", 8))
+        max_conn = parse_safe_int(getattr(selected_opt, "max_connections", None)) or (parse_safe_int(self.conn_var.get()) if hasattr(self, "conn_var") else None) or parse_safe_int(get_setting("max_connections", 8)) or 8
         try:
             bytes_limit = max(0.0, float(self.entry_custom_speed.get().strip())) * 1024.0
         except Exception:

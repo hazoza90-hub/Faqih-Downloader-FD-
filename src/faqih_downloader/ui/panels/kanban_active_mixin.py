@@ -249,7 +249,13 @@ class KanbanActiveColumnMixin:
             self._draw_neon_bar(self.canvas_a1_prog, pct / 100.0)
 
         if hasattr(self, "matrix_a1"):
-            self.matrix_a1.update_from_chunks(chunks, active_count=active_chunks, is_active=True)
+            safe_lanes = 0
+            if hasattr(self, "engine") and self.engine:
+                raw_mc = getattr(self.engine, "max_connections", 0)
+                if isinstance(raw_mc, (int, str)) and not isinstance(raw_mc, bool):
+                    s = str(raw_mc).strip()
+                    if s.isdigit(): safe_lanes = int(s)
+            self.matrix_a1.update_from_chunks(chunks, active_count=active_chunks, is_active=True, max_lanes=safe_lanes)
 
     def refresh_kanban_col2(self):
         """Re-translates Column 2 texts."""

@@ -827,6 +827,141 @@ class TestWindowedRangeAndWarnings(unittest.TestCase):
 
         col_frame.destroy()
 
+    def test_dynamic_turbo_stream_lanes_fixed_max_lanes(self):
+        """Verifies LedEqualizerMatrix preserves max_lanes count when chunks split or dual-stream snapshot returns extra chunks."""
+        if not self.root:
+            self.skipTest("Tkinter GUI not available")
+        from faqih_downloader.ui.components.led_matrix import LedEqualizerMatrix
+        matrix = LedEqualizerMatrix(self.root)
+
+        # 1. 8 chunks with max_lanes=4 aggregates into exactly 4 lanes
+        chunks = [
+            MagicMock(chunk_id=i, start_byte=i*100, end_byte=(i+1)*100 - 1, downloaded_bytes=50, status="active")
+            for i in range(8)
+        ]
+        matrix.update_from_chunks(chunks, active_count=4, is_active=True, max_lanes=4)
+        self.assertEqual(len(matrix._levels), 4)
+        self.assertEqual(matrix._lane_count, 4)
+        self.assertEqual(len(matrix._lane_statuses), 4)
+        self.assertTrue(all(st == "active" for st in matrix._lane_statuses))
+
+        # 2. 6 chunks with max_lanes=4 aggregates into exactly 4 lanes
+        chunks_6 = [
+            MagicMock(chunk_id=i, start_byte=i*100, end_byte=(i+1)*100 - 1, downloaded_bytes=100, status="completed")
+            for i in range(6)
+        ]
+        matrix.update_from_chunks(chunks_6, active_count=0, is_active=True, max_lanes=4)
+        self.assertEqual(len(matrix._levels), 4)
+        self.assertEqual(matrix._lane_count, 4)
+        self.assertTrue(all(st == "completed" for st in matrix._lane_statuses))
+
+        # 3. StreamDownloadCoordinator dual-stream video + audio snapshots primary video engine
+        from faqih_downloader.core.stream_coordinator import StreamDownloadCoordinator
+        from faqih_downloader.services.youtube_models import YouTubeStreamInfo
+        v_eng = MagicMock()
+        v_chunk_active = MagicMock(chunk_id=0, status="active")
+        v_eng.chunks = [v_chunk_active, MagicMock(chunk_id=1, status="pending")]
+        v_eng._lock = MagicMock()
+        v_eng._lock.__enter__ = MagicMock(return_value=None)
+        v_eng._lock.__exit__ = MagicMock(return_value=None)
+
+        a_eng = MagicMock()
+        a_eng.chunks = [MagicMock(chunk_id=0, status="active"), MagicMock(chunk_id=1, status="active")]
+        a_eng._lock = MagicMock()
+        a_eng._lock.__enter__ = MagicMock(return_value=None)
+        a_eng._lock.__exit__ = MagicMock(return_value=None)
+
+        coord = StreamDownloadCoordinator(
+            stream_info=YouTubeStreamInfo(
+                video_id="vid1", title="test", clean_filename="test.mp4",
+                is_progressive=False, video_url="http://v", audio_url="http://a"
+            ),
+            destination_path="dummy.mp4",
+            max_connections=4
+        )
+        coord._active_engines = [v_eng, a_eng]
+        snap = coord.get_chunks_snapshot()
+        self.assertEqual(len(snap), 2)  # Only 2 chunks from primary video engine, not 4 (2v + 2a)
+
+    def test_preview_bridge_sync_state_max_connections(self):
+        """Verifies /api/sync_state sets cb_conn to session.max_connections and never resets to 1."""
+        if not self.root:
+            self.skipTest("Tkinter GUI not available")
+        from faqih_downloader.services.preview_stream_bridge import PreviewSession, PreviewBridgeRequestHandler
+
+        modal = MagicMock()
+        cb_conn = ttk.Combobox(self.root, values=["1", "2", "4", "8", "16", "32"])
+        cb_conn.set("8")
+        cb_sub = MagicMock()
+        cb_sub._conn_combobox = cb_conn
+        cb_sub._pos_combobox = cb_conn
+        cb_sub._selected_connections = 8
+        modal.cb_sub = cb_sub
+        modal.options = [MagicMock(max_connections=8)]
+        modal.winfo_exists.return_value = True
+
+        parent_app = MagicMock()
+        parent_app.conn_var = tk.StringVar(value="8")
+        cb_main = ttk.Combobox(self.root, values=["1", "2", "4", "8", "16", "32"])
+        cb_main.set("8")
+        parent_app.cb_main_sub_pos = cb_main
+
+        session = PreviewSession(
+            sid="test_sess_conn",
+            url="http://example.com/video",
+            video_title="Test Video",
+            modal_ref=modal,
+            parent_app=parent_app,
+            max_connections=4,
+            subtitle_position="bottom"
+        )
+
+        handler = PreviewBridgeRequestHandler.__new__(PreviewBridgeRequestHandler)
+        handler._send_json = MagicMock()
+
+        # Simulate sync_state payload with max_connections: 4 and sub_pos: "bottom"
+        body = {
+            "selected_q_idx": 0,
+            "sub_pos": "bottom",
+            "max_connections": 4
+        }
+        with patch("faqih_downloader.services.preview_stream_bridge._schedule_on_tk") as mock_sched:
+            handler._handle_api_sync_state(session, body)
+            # Invoke the scheduled callback immediately
+            cb = mock_sched.call_args[0][1]
+            cb()
+
+        self.assertEqual(cb_conn.get(), "4")
+        self.assertNotEqual(cb_conn.get(), "1")
+        self.assertEqual(cb_sub._selected_connections, 4)
+        self.assertEqual(parent_app.conn_var.get(), "4")
+        self.assertEqual(cb_main.get(), "4")
+
+    def test_settings_modal_threads_syncs_media_bar(self):
+        """Verifies changing threads in SettingsModal updates parent_app.cb_main_sub_pos immediately."""
+        if not self.root:
+            self.skipTest("Tkinter GUI not available")
+
+        parent_app = MagicMock()
+        parent_app.conn_var = tk.StringVar(value="8")
+        cb_main_pos = ttk.Combobox(self.root, values=["1", "2", "4", "8", "16", "32"])
+        cb_main_pos.set("8")
+        parent_app.cb_main_sub_pos = cb_main_pos
+        sync_called = []
+        parent_app._sync_media_bar_state = lambda: sync_called.append(True)
+
+        modal = MagicMock(spec=SettingsModal)
+        modal.parent_app = parent_app
+        modal.cb_threads = MagicMock()
+        modal.cb_threads.get.return_value = "16"
+        modal._update_threads_warning = MagicMock()
+
+        SettingsModal._on_threads_changed(modal)
+
+        self.assertEqual(cb_main_pos.get(), "16")
+        self.assertEqual(parent_app.conn_var.get(), "16")
+        self.assertTrue(len(sync_called) > 0)
+
 
 if __name__ == "__main__":
     unittest.main()

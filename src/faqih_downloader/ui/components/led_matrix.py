@@ -66,41 +66,89 @@ class LedEqualizerMatrix:
         self._lane_statuses = ["active" if v > 0 else "idle" for v in self._levels]
         self.redraw()
 
-    def update_from_chunks(self, chunks: List[Any], active_count: int = 0, is_active: bool = True):
+    def update_from_chunks(self, chunks: List[Any], active_count: int = 0, is_active: bool = True, max_lanes: int = 0):
         """Derives dynamic rectangular Turbo Stream Lanes from chunks snapshot."""
+        safe_ml = 0
+        if isinstance(max_lanes, (int, str)) and not isinstance(max_lanes, bool):
+            s = str(max_lanes).strip()
+            if s.isdigit(): safe_ml = int(s)
+
         if not is_active or (not chunks and active_count <= 0):
-            self._lane_count = max(1, min(32, len(chunks) if chunks else (active_count if active_count > 0 else self._lane_count)))
+            if safe_ml > 0:
+                self._lane_count = max(1, min(32, safe_ml))
+            else:
+                self._lane_count = max(1, min(32, len(chunks) if chunks else (active_count if active_count > 0 else self._lane_count)))
             self._levels = [0.0] * self._lane_count
             self._target_levels = [0.0] * self._lane_count
             self._lane_statuses = ["idle"] * self._lane_count
             self.redraw()
             return
 
-        n_lanes = max(1, min(32, len(chunks) if chunks else active_count))
+        if safe_ml > 0:
+            n_lanes = max(1, min(32, safe_ml))
+        elif chunks:
+            n_lanes = max(1, min(32, len(chunks)))
+        else:
+            n_lanes = max(1, min(32, active_count if active_count > 0 else self._lane_count))
+
+        if chunks:
+            if len(chunks) <= n_lanes:
+                if len(chunks) < n_lanes:
+                    n_lanes = len(chunks)
+                levels = [0.0] * n_lanes
+                statuses = ["pending"] * n_lanes
+                for i in range(n_lanes):
+                    chunk = chunks[i]
+                    span = max(1, getattr(chunk, "end_byte", 1) - getattr(chunk, "start_byte", 0) + 1)
+                    dl = max(0, getattr(chunk, "downloaded_bytes", 0))
+                    pct = max(0.0, min(1.0, dl / span))
+                    st = str(getattr(chunk, "status", "")).lower()
+                    if st == "completed" or pct >= 0.999:
+                        levels[i] = 1.0
+                        statuses[i] = "completed"
+                    elif st in ("active", "downloading"):
+                        levels[i] = max(0.08, min(1.0, pct))
+                        statuses[i] = "active"
+                    else:
+                        levels[i] = pct
+                        statuses[i] = st or "pending"
+            else:
+                # len(chunks) > n_lanes: aggregate into n_lanes buckets
+                levels = [0.0] * n_lanes
+                statuses = ["pending"] * n_lanes
+                b_dl = [0.0] * n_lanes
+                b_span = [0.0] * n_lanes
+                b_has_active = [False] * n_lanes
+                b_all_completed = [True] * n_lanes
+                for i, chunk in enumerate(chunks):
+                    b_idx = min(n_lanes - 1, (i * n_lanes) // len(chunks))
+                    span = max(1, getattr(chunk, "end_byte", 1) - getattr(chunk, "start_byte", 0) + 1)
+                    dl = max(0, getattr(chunk, "downloaded_bytes", 0))
+                    b_dl[b_idx] += dl
+                    b_span[b_idx] += span
+                    st = str(getattr(chunk, "status", "")).lower()
+                    if st in ("active", "downloading"):
+                        b_has_active[b_idx] = True
+                    if st != "completed" and dl < span:
+                        b_all_completed[b_idx] = False
+
+                for b in range(n_lanes):
+                    span_val = max(1.0, b_span[b])
+                    pct = max(0.0, min(1.0, b_dl[b] / span_val))
+                    if b_all_completed[b] or pct >= 0.999:
+                        levels[b] = 1.0
+                        statuses[b] = "completed"
+                    elif b_has_active[b]:
+                        levels[b] = max(0.08, min(1.0, pct))
+                        statuses[b] = "active"
+                    else:
+                        levels[b] = pct
+                        statuses[b] = "pending"
+        else:
+            levels = [0.5 if i < active_count else 0.0 for i in range(n_lanes)]
+            statuses = ["active" if i < active_count else "pending" for i in range(n_lanes)]
+
         self._lane_count = n_lanes
-        levels = [0.0] * n_lanes
-        statuses = ["pending"] * n_lanes
-
-        for i in range(n_lanes):
-            if i < len(chunks):
-                chunk = chunks[i]
-                span = max(1, getattr(chunk, "end_byte", 1) - getattr(chunk, "start_byte", 0) + 1)
-                dl = max(0, getattr(chunk, "downloaded_bytes", 0))
-                pct = max(0.0, min(1.0, dl / span))
-                st = str(getattr(chunk, "status", "")).lower()
-                if st == "completed" or pct >= 0.999:
-                    levels[i] = 1.0
-                    statuses[i] = "completed"
-                elif st in ("active", "downloading"):
-                    levels[i] = max(0.08, min(1.0, pct))
-                    statuses[i] = "active"
-                else:
-                    levels[i] = pct
-                    statuses[i] = st or "pending"
-            elif i < active_count:
-                levels[i] = 0.5
-                statuses[i] = "active"
-
         self._levels = levels
         self._target_levels = list(levels)
         self._lane_statuses = statuses
