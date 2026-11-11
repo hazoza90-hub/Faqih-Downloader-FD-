@@ -221,7 +221,7 @@ class MediaOptionsActionsMixin:
         theme_d = (self._theme_dict() if hasattr(self, "_theme_dict") else None) or ({"c_bg": self.c_bg, "c_panel": self.c_panel, "c_panel_light": self.c_panel_light, "c_border": self.c_border, "c_accent": self.c_accent, "c_accent_dark": self.c_accent_dark, "c_success": self.c_success, "c_text_bright": self.c_text_bright, "c_text_muted": self.c_text_muted, "c_input_bg": self.c_input_bg} if hasattr(self, "c_bg") else {})
         dest_p = (self.entry_dest.get().strip() if hasattr(self, "entry_dest") else "") or (self.dest_input.get().strip() if hasattr(self, "dest_input") else "")
         sel_mode = self._main_sub_mode_codes[self.cb_main_sub_mode.current()] if (hasattr(self, "cb_main_sub_mode") and hasattr(self, "_main_sub_mode_codes") and 0 <= self.cb_main_sub_mode.current() < len(self._main_sub_mode_codes)) else "hard_burn"
-        sel_pos = self._main_sub_pos_codes[self.cb_main_sub_pos.current()] if (hasattr(self, "cb_main_sub_pos") and hasattr(self, "_main_sub_pos_codes") and 0 <= self.cb_main_sub_pos.current() < len(self._main_sub_pos_codes)) else "bottom"
+        sel_pos = getattr(sel_opt, "subtitle_position", "bottom") or "bottom"
 
         def _sync_ui(opt, dst, stage_col1: bool = True):
             if opt and opts:
@@ -259,14 +259,15 @@ class MediaOptionsActionsMixin:
                         if hasattr(self, "cb_main_sub_mode"):
                             self.cb_main_sub_mode.configure(state="readonly" if len(subs) > 1 else "disabled")
                         if hasattr(self, "cb_main_sub_pos"):
-                            self.cb_main_sub_pos.configure(state="readonly" if i > 0 else "disabled")
+                            self.cb_main_sub_pos.configure(state="readonly")
                         break
             sm = getattr(opt, "subtitle_embed_mode", None)
             if sm and hasattr(self, "cb_main_sub_mode") and hasattr(self, "_main_sub_mode_codes") and sm in self._main_sub_mode_codes:
                 self.cb_main_sub_mode.current(self._main_sub_mode_codes.index(sm))
-            sp = getattr(opt, "subtitle_position", None)
-            if sp and hasattr(self, "cb_main_sub_pos") and hasattr(self, "_main_sub_pos_codes") and sp in self._main_sub_pos_codes:
-                self.cb_main_sub_pos.current(self._main_sub_pos_codes.index(sp))
+            if hasattr(self, "cb_main_sub_pos"):
+                mc = parse_safe_int(getattr(opt, "max_connections", None)) or (parse_safe_int(self.conn_var.get()) if hasattr(self, "conn_var") else None) or parse_safe_int(get_setting("max_connections", 8)) or 8
+                self.cb_main_sub_pos.set(str(mc))
+                self.cb_main_sub_pos.configure(state="readonly")
             if dst and hasattr(self, "entry_dest") and self.entry_dest and tk:
                 self.entry_dest.delete(0, tk.END)
                 self.entry_dest.insert(0, dst)
@@ -349,8 +350,10 @@ class MediaOptionsActionsMixin:
                 sub_mode = self._main_sub_mode_codes[self.cb_main_sub_mode.current()] if (hasattr(self, "cb_main_sub_mode") and 0 <= self.cb_main_sub_mode.current() < len(self._main_sub_mode_codes)) else "soft_embed"
                 selected_opt.subtitle_embed_mode = sub_mode
             if not getattr(selected_opt, "subtitle_position", None):
-                sub_pos = self._main_sub_pos_codes[self.cb_main_sub_pos.current()] if (hasattr(self, "cb_main_sub_pos") and hasattr(self, "_main_sub_pos_codes") and 0 <= self.cb_main_sub_pos.current() < len(self._main_sub_pos_codes)) else "bottom"
-                selected_opt.subtitle_position = sub_pos
+                selected_opt.subtitle_position = "bottom"
+            if not getattr(selected_opt, "max_connections", None) and hasattr(self, "cb_main_sub_pos"):
+                mc = parse_safe_int(self.cb_main_sub_pos.get()) or (parse_safe_int(self.conn_var.get()) if hasattr(self, "conn_var") else None) or parse_safe_int(get_setting("max_connections", 8)) or 8
+                selected_opt.max_connections = mc
 
             if not hasattr(selected_opt, "selected_subtitle_track") or selected_opt.selected_subtitle_track is None:
                 if hasattr(self, "cb_main_sub") and subtitle_tracks:

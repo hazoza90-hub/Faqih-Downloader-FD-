@@ -248,6 +248,8 @@
   "lbl_main_audio": "♪ Audio:",
   "lbl_main_sub": "≡ Subtitles:",
   "lbl_main_sub_mode": "⚙️ Mode:",
+  "lbl_main_threads": "⚡ Threads:",
+  "lbl_modal_threads": "⚡ Threads:",
   "btn_media_quality_options": "⚙ Options...",
   "opt_sub_soft": "Soft-embed",
   "opt_sub_srt": "SRT file only",

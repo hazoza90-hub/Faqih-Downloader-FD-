@@ -2,6 +2,7 @@
 Locale and UI dynamic language translation controller mixin for Smart Download (SD).
 """
 from faqih_downloader.i18n import LocalizationManager, tr
+from faqih_downloader.config import get_setting
 from faqih_downloader.utils import format_speed
 
 
@@ -214,6 +215,9 @@ class LocaleControllerMixin:
             self.lbl_main_sub.configure(text=tr("lbl_main_sub", "≡ Subtitles:"))
         if hasattr(self, "lbl_main_sub_mode") and self.lbl_main_sub_mode.winfo_exists():
             self.lbl_main_sub_mode.configure(text=tr("lbl_main_sub_mode", "⚙️ Mode:"))
+        if hasattr(self, "lbl_main_sub_pos") and self.lbl_main_sub_pos.winfo_exists():
+            is_ar = (cur_lang == "ar") or (getattr(self, "current_language", "en") == "ar") or (get_setting("language", "ar") == "ar")
+            self.lbl_main_sub_pos.configure(text=tr("lbl_main_threads", "⚡ المسارات:" if is_ar else "⚡ Threads:"))
         if hasattr(self, "btn_reopen_quality") and self.btn_reopen_quality.winfo_exists():
             self.btn_reopen_quality.configure(text=tr("btn_media_quality_options", "⚙ Options..."))
 

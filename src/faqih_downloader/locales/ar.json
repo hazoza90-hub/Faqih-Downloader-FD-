@@ -248,6 +248,8 @@
   "lbl_main_audio": "♪ الصوت:",
   "lbl_main_sub": "≡ الترجمة:",
   "lbl_main_sub_mode": "⚙️ النمط:",
+  "lbl_main_threads": "⚡ المسارات:",
+  "lbl_modal_threads": "⚡ المسارات:",
   "btn_media_quality_options": "⚙ خيارات الجودة والترجمة",
   "opt_sub_soft": "دمج برمجي",
   "opt_sub_srt": "ملف SRT فقط",
