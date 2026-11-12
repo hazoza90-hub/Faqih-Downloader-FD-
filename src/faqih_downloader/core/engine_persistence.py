@@ -202,6 +202,25 @@ class EnginePersistenceMixin:
         self.log("Download state saved safely in .sd_parts. Resume ready.")
 
     def save_state(self) -> bool:
+        if getattr(self, "_user_cancelled", False):
+            return False
+        lock = getattr(self, "_state_save_lock", None)
+        if lock is None:
+            import threading
+            outer = getattr(self, "_lock", None)
+            if outer is not None:
+                with outer:
+                    lock = getattr(self, "_state_save_lock", None)
+                    if lock is None:
+                        lock = self._state_save_lock = threading.Lock()
+            else:
+                lock = self._state_save_lock = threading.Lock()
+        with lock:
+            if getattr(self, "_user_cancelled", False):
+                return False
+            return self._save_state_impl()
+
+    def _save_state_impl(self) -> bool:
         """Serializes current download chunk state and progress into state.json within temp_dir."""
         try:
             if not getattr(self, "temp_dir", None):
@@ -239,9 +258,16 @@ class EnginePersistenceMixin:
                     "accumulated_active_sec": getattr(self, "_accumulated_active_sec", 0.0),
                     "chunks": chunks_data
                 }
-            tmp_state = state_file + ".tmp"
+            import threading
+            tmp_state = f"{state_file}.{os.getpid()}.{threading.get_ident()}.tmp"
             with open(tmp_state, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2)
+            if getattr(self, "_user_cancelled", False):
+                try:
+                    os.remove(tmp_state)
+                except OSError:
+                    pass
+                return False
             atomic_replace_with_retry(tmp_state, state_file)
             return True
         except Exception as e:

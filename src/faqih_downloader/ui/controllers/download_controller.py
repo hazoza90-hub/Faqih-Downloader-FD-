@@ -273,10 +273,29 @@ class DownloadControllerMixin(MediaDownloadControllerMixin, DownloadCallbacksMix
         eng = getattr(self, "engine", None)
         if not eng:
             return
-        should_resume = bool(getattr(eng, "is_paused", False))
+        pending = getattr(self, "_pause_desired_state", None) if getattr(self, "_pause_desired_engine", None) is eng else None
+        cur_paused = pending if pending is not None else bool(getattr(eng, "is_paused", False))
+        target_paused = not cur_paused
+        should_resume = not target_paused
+        self._pause_desired_engine = eng
+        self._pause_desired_state = target_paused
+
         snap = eng.get_chunks_snapshot() if hasattr(eng, "get_chunks_snapshot") else list(getattr(eng, "chunks", []) or [])
-        dl_bytes = sum(getattr(c, "downloaded_bytes", 0) for c in snap)
-        real_total = int(getattr(eng, "total_size", 0) or sum(getattr(c, "total_bytes", 0) for c in snap) or 0)
+        dl_bytes, real_total = 0, 0
+        if hasattr(eng, "_current_progress_pair") and callable(eng._current_progress_pair):
+            try:
+                pair = eng._current_progress_pair()
+                if isinstance(pair, (tuple, list)) and len(pair) == 2 and isinstance(pair[0], int) and isinstance(pair[1], int):
+                    dl_bytes, real_total = pair[0], pair[1]
+            except Exception:
+                pass
+        if dl_bytes <= 0 and real_total <= 0:
+            dl_bytes = sum(getattr(c, "downloaded_bytes", 0) for c in snap)
+            real_total = int(getattr(eng, "total_size", 0) or sum(getattr(c, "total_bytes", 0) for c in snap) or 0)
+        if real_total <= 0:
+            real_total = int(getattr(self, "_last_active_total", 0) or 0)
+        if dl_bytes <= 0 and int(getattr(self, "_last_active_downloaded", 0) or 0) > 0:
+            dl_bytes = int(getattr(self, "_last_active_downloaded", 0) or 0)
         pct_val = (dl_bytes / real_total * 100.0) if real_total > 0 else float(getattr(self, "_last_active_pct", 0.0) or 0.0)
         fn = getattr(eng, "destination_path", None) or getattr(eng, "dest_path", None) or ""
 
@@ -317,17 +336,33 @@ class DownloadControllerMixin(MediaDownloadControllerMixin, DownloadCallbacksMix
         dl_dest = (fn or (self.entry_dest.get() if hasattr(self, "entry_dest") else "")).strip()
 
         def _bg_toggle():
+            lk = getattr(self, "_pause_toggle_lock", None)
+            if lk is None:
+                lk = self._pause_toggle_lock = threading.Lock()
+            with lk:
+                while True:
+                    desired = getattr(self, "_pause_desired_state", None) if getattr(self, "_pause_desired_engine", None) is eng else None
+                    if desired is None:
+                        desired = target_paused
+                    if bool(getattr(eng, "is_paused", False)) == bool(desired):
+                        break
+                    try:
+                        eng.pause() if desired else eng.resume()
+                    except Exception:
+                        break
+                    latest = getattr(self, "_pause_desired_state", None) if getattr(self, "_pause_desired_engine", None) is eng else None
+                    if latest is None or latest == desired:
+                        break
+                if getattr(self, "_pause_desired_engine", None) is eng and getattr(self, "_pause_desired_state", None) == bool(getattr(eng, "is_paused", False)):
+                    self._pause_desired_state = None
             try:
-                eng.resume() if should_resume else eng.pause()
-            except Exception:
-                pass
-            try:
+                final_paused = bool(getattr(eng, "is_paused", False))
                 if dl_url and dl_dest and hasattr(self, "history_manager") and self.history_manager:
                     self.history_manager.add_or_update_entry(
                         url=dl_url,
                         file_path=dl_dest,
                         size_bytes=real_total,
-                        status="In Progress" if should_resume else "Paused",
+                        status="Paused" if final_paused else "In Progress",
                         elapsed_sec=0.0,
                     )
             except Exception:
@@ -356,6 +391,8 @@ class DownloadControllerMixin(MediaDownloadControllerMixin, DownloadCallbacksMix
                         m.destroy()
                 except Exception: pass
                 setattr(self, m_name, None)
+        self._pause_desired_state = None
+        self._pause_desired_engine = None
         if self.engine:
             self.engine.cancel()
             if hasattr(self.engine, "_active_subproc") and self.engine._active_subproc:

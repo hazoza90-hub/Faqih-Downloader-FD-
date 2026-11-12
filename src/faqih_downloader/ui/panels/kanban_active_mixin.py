@@ -191,9 +191,12 @@ class KanbanActiveColumnMixin:
         is_processing = any(k in eta_lower for k in ("merging", "burning", "embedding", "clipping", "boost", "transcoding"))
         raw_p = getattr(eng, "is_paused", False) if eng else False
         eng_paused = (raw_p() if callable(raw_p) else raw_p) is True
-        is_paused_state = ("paused" in eta_lower) or (eng_paused and not is_processing)
+        desired_p = getattr(self, "_pause_desired_state", None) if (eng and getattr(self, "_pause_desired_engine", None) is eng) else None
+        if desired_p is not None:
+            eng_paused = bool(desired_p)
+        is_paused_state = ("paused" in eta_lower and desired_p is not False) or (eng_paused and not is_processing)
 
-        if not is_running and not is_processing and not is_paused_state and pct <= 0 and (not speed_str or speed_str in ("0 B/s", "0.0 MB/s")):
+        if not is_running and not is_processing and not is_paused_state and eta_lower != "downloading" and pct <= 0 and (not speed_str or speed_str in ("0 B/s", "0.0 MB/s")):
             self.reset_kanban_active_stream()
             return
 
@@ -324,7 +327,9 @@ class KanbanActiveColumnMixin:
     def _show_active_card_menu(self, anchor_widget: Any):
         """Displays options menu for Pause, Cancel, Refresh, Copy."""
         menu = tk.Menu(anchor_widget, tearoff=0, bg="#151a24", fg="#f8fafc", activebackground="#0284c7", activeforeground="#ffffff")
-        is_paused = getattr(self.engine, "is_paused", False) if getattr(self, "engine", None) else False
+        eng = getattr(self, "engine", None)
+        desired_p = getattr(self, "_pause_desired_state", None) if (eng and getattr(self, "_pause_desired_engine", None) is eng) else None
+        is_paused = bool(desired_p) if desired_p is not None else (getattr(eng, "is_paused", False) if eng else False)
         menu.add_command(label=tr("menu_resume", "▶ Resume") if is_paused else tr("menu_pause", "|| Pause"), command=self._on_pause_resume)
         menu.add_command(label=tr("menu_cancel", "✕ Cancel Download"), command=self._on_cancel_download)
         menu.add_separator()

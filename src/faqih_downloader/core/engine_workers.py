@@ -222,7 +222,7 @@ class EngineWorkersMixin(EngineResumerMixin):
                                 try: conn.close()
                                 except Exception: pass
                                 conn = None
-                                if send_attempt == 1 or self._is_stopped(): raise
+                                if send_attempt == 1 or self._is_stopped() or self._pause_event.is_set(): raise
 
                         redir_count = 0
                         while raw_resp and raw_resp.status in (301, 302, 303, 307, 308) and redir_count < 5:
@@ -284,9 +284,10 @@ class EngineWorkersMixin(EngineResumerMixin):
                         self._active_connections.append(resp)
 
                     BUF_SIZE = 65536
+                    paused_break = False
                     while not self._is_stopped():
                         if self._pause_event.is_set():
-                            break
+                            paused_break = True; break
 
                         chunk_done = False
                         with chunk.lock:
@@ -308,7 +309,7 @@ class EngineWorkersMixin(EngineResumerMixin):
                         data = resp.read(to_read)
                         if not data:
                             if self._pause_event.is_set() or self.is_paused:
-                                break
+                                paused_break = True; break
                             if expected_seg_bytes is not None and seg_bytes_read < expected_seg_bytes:
                                 raise RuntimeError(f"Premature EOF from server: received {seg_bytes_read:,} of {expected_seg_bytes:,} bytes")
                             break
@@ -345,7 +346,7 @@ class EngineWorkersMixin(EngineResumerMixin):
                         try: out_file.flush()
                         except Exception: pass
 
-                    if self._pause_event.is_set():
+                    if paused_break or self._pause_event.is_set() or self.is_paused:
                         with self._lock:
                             if resp in self._active_connections: self._active_connections.remove(resp)
                             if conn in self._active_connections: self._active_connections.remove(conn)
@@ -483,10 +484,16 @@ class EngineWorkersMixin(EngineResumerMixin):
 
     def _update_progress_metrics(self):
         """Computes EMA-smoothed transfer speed over a >=1.5s window, ETA, and progress metrics."""
+        emit_lock = getattr(self, "_progress_emit_lock", None)
+        if emit_lock is None:
+            with self._lock: emit_lock = self._progress_emit_lock = getattr(self, "_progress_emit_lock", None) or threading.RLock()
+        with emit_lock: return self._update_progress_metrics_impl()
+
+    def _update_progress_metrics_impl(self):
         with self._lock:
             total_downloaded = sum(c.downloaded_bytes for c in self.chunks)
             active_count = sum(1 for c in self.chunks if c.status == "active")
-        if self.is_paused:
+        if self.is_paused or self._pause_event.is_set():
             self.current_speed = 0.0
             return
 
@@ -524,6 +531,7 @@ class EngineWorkersMixin(EngineResumerMixin):
         else:
             eta_str = "--:--:--"
 
+        if self.is_paused or self._pause_event.is_set(): self.current_speed = 0.0; return
         if self.on_progress:
             self.on_progress(total_downloaded, self.total_size, self.current_speed, eta_str, active_count)
 

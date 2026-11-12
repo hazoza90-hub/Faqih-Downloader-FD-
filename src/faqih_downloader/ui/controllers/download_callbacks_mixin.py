@@ -32,6 +32,12 @@ class DownloadCallbacksMixin:
             if not args:
                 return
             d, t, sp, et, ac = args
+            eng = getattr(self, "engine", None)
+            desired_p = getattr(self, "_pause_desired_state", None) if (eng and getattr(self, "_pause_desired_engine", None) is eng) else None
+            if desired_p is True:
+                sp, et, ac = 0.0, "Paused", 0
+            elif desired_p is False and str(et or "").strip().lower() == "paused":
+                et = "Downloading"
             stage_part = et.split("|", 1)[0] if "|" in et else et
             if "@" in stage_part:
                 try:
@@ -105,8 +111,10 @@ class DownloadCallbacksMixin:
                         s = str(raw_mc).strip()
                         if s.isdigit(): safe_lanes = int(s)
                     snap = self.engine.get_chunks_snapshot() if hasattr(self.engine, "get_chunks_snapshot") else getattr(self.engine, "chunks", [])
-                    ac = sum(1 for c in snap if getattr(c, "status", "") in ("active", "downloading"))
-                    self.matrix_a1.update_from_chunks(snap, active_count=ac, is_active=True, max_lanes=safe_lanes)
+                    desired_p = getattr(self, "_pause_desired_state", None) if getattr(self, "_pause_desired_engine", None) is self.engine else None
+                    eng_paused = bool(desired_p) if desired_p is not None else bool(getattr(self.engine, "is_paused", False))
+                    ac = 0 if eng_paused else sum(1 for c in snap if getattr(c, "status", "") in ("active", "downloading"))
+                    self.matrix_a1.update_from_chunks(snap, active_count=ac, is_active=(not eng_paused), max_lanes=safe_lanes)
                 except Exception:
                     pass
 

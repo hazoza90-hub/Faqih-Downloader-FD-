@@ -330,33 +330,41 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
     def pause(self):
         """Pauses all active chunk downloads and aborts active sockets immediately."""
         if not self.is_running or self.is_paused: return
-        self.is_paused = True
-        if self._last_active_start_mono is not None:
-            self._accumulated_active_sec += max(0.0, time.monotonic() - self._last_active_start_mono)
-            self._last_active_start_mono = None
-        self._pause_event.set(); self._abort_active_conns(force=True)
-        self.current_speed = 0.0
-        if hasattr(self, "_speed_samples"): self._speed_samples.clear()
-        dl_bytes = sum(c.downloaded_bytes for c in self.chunks)
-        self.last_downloaded_bytes = self._last_speed_bytes = dl_bytes
+        with self._lock:
+            self.is_paused = True
+            self._pause_event.set()
+            if getattr(self, "_progress_emit_lock", None) is None:
+                self._progress_emit_lock = threading.RLock()
+            if self._last_active_start_mono is not None:
+                self._accumulated_active_sec += max(0.0, time.monotonic() - self._last_active_start_mono)
+                self._last_active_start_mono = None
+            self.current_speed = 0.0
+            if hasattr(self, "_speed_samples"): self._speed_samples.clear()
+        self._abort_active_conns(force=True)
+        with self._lock:
+            dl_bytes = sum(c.downloaded_bytes for c in self.chunks)
+            self.last_downloaded_bytes = self._last_speed_bytes = dl_bytes
         threading.Thread(target=self.save_state, daemon=True).start()
-        if self.on_progress:
-            try: self.on_progress(dl_bytes, self.total_size, 0.0, "Paused", 0)
-            except Exception: pass
+        with self._progress_emit_lock:
+            self.current_speed = 0.0
+            if self.on_progress:
+                try: self.on_progress(dl_bytes, self.total_size, 0.0, "Paused", 0)
+                except Exception: pass
         self.log("Download paused by user.")
 
     def resume(self):
         """Resumes all active chunk downloads and spawns workers for dead/incomplete chunks."""
         if not self.is_paused or self.is_cancelled: return
-        self.is_paused = False
-        now = time.monotonic()
-        self._last_active_start_mono = self.last_speed_check_time = self._last_speed_time = now
-        dl_bytes = sum(c.downloaded_bytes for c in self.chunks)
-        self.last_downloaded_bytes = self._last_speed_bytes = self._session_start_bytes = dl_bytes
-        self._speed_samples = deque([(now, dl_bytes)])
-        self._pause_event.clear()
-        active_cnt = 0
         with self._lock:
+            if getattr(self, "_progress_emit_lock", None) is None:
+                self._progress_emit_lock = threading.RLock()
+            self.is_paused = False
+            now = time.monotonic()
+            self._last_active_start_mono = self.last_speed_check_time = self._last_speed_time = now
+            dl_bytes = sum(c.downloaded_bytes for c in self.chunks)
+            self.last_downloaded_bytes = self._last_speed_bytes = self._session_start_bytes = dl_bytes
+            self._speed_samples = deque([(now, dl_bytes)])
+            self._pause_event.clear()
             incomplete = [c for c in self.chunks if not c.is_completed and c.status != "failed"]
             wt = getattr(self, "_worker_threads", {})
             active_cnt = sum(1 for c in incomplete if wt.get(c.chunk_id) is not None and wt[c.chunk_id].is_alive())
@@ -367,14 +375,16 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
                         continue
                     c.status = "active"
                     self._spawn_worker(c); active_cnt += 1
-        if self.on_progress:
-            try: self.on_progress(dl_bytes, self.total_size, 0.0, "Downloading", active_cnt)
-            except Exception: pass
+        with self._progress_emit_lock:
+            if self.on_progress and not self.is_paused:
+                try: self.on_progress(dl_bytes, self.total_size, 0.0, "Downloading", active_cnt)
+                except Exception: pass
         self.log("Download resumed.")
 
     def cancel(self):
         """Cancels download and stops all worker threads immediately."""
         self.is_running, self.is_paused, self._last_active_start_mono = False, False, None
+        self._user_cancelled = True
         self._cancel_event.set(); self._pause_event.clear()
         self._abort_active_conns(force=True)
         with self._lock: workers = list(self.active_workers)
@@ -387,7 +397,12 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
     def cleanup_temp_files(self):
         """Safely cleans up temporary chunk directory and files."""
         try:
-            if hasattr(self, "temp_dir") and self.temp_dir and os.path.exists(self.temp_dir):
+            lk = getattr(self, "_state_save_lock", None)
+            if lk is not None:
+                with lk:
+                    if hasattr(self, "temp_dir") and self.temp_dir and os.path.exists(self.temp_dir):
+                        shutil.rmtree(self.temp_dir, ignore_errors=True)
+            elif hasattr(self, "temp_dir") and self.temp_dir and os.path.exists(self.temp_dir):
                 shutil.rmtree(self.temp_dir, ignore_errors=True)
         except Exception:
             pass

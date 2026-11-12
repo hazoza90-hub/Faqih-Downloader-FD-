@@ -24,6 +24,7 @@ from faqih_downloader.core.engine import TurboDownloadEngine
 from faqih_downloader.core.stream_coordinator import StreamDownloadCoordinator
 from faqih_downloader.services.youtube_models import YouTubeStreamInfo
 from faqih_downloader.ui.controllers.download_controller import DownloadControllerMixin
+from faqih_downloader.ui.controllers.download_callbacks_mixin import DownloadCallbacksMixin
 from faqih_downloader.ui.panels.kanban_active_mixin import KanbanActiveColumnMixin
 from faqih_downloader.utils.window_effects import RoundedGlassCard
 
@@ -358,6 +359,281 @@ class TestLivePauseResumeAndPerf(unittest.TestCase):
                 root.destroy()
             except Exception:
                 pass
+
+    def test_ui_resume_does_not_revert_while_engine_lags_and_double_click_serializes(self):
+        """Verifies Resume keeps UI active while bg eng.resume() lags, LED matrix respects pause, and rapid clicks serialize."""
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            class DummyApp(KanbanActiveColumnMixin, DownloadControllerMixin, DownloadCallbacksMixin):
+                def __init__(self, r):
+                    self.root = r
+                    self._active_stream_live = False
+                    self.c_panel_light = "#1e293b"
+                    self.c_warning = "#f59e0b"
+                    self.c_accent = "#38bdf8"
+                    self.btn_pause = tk.Button(r, text="|| Pause")
+                    self.card_speed = tk.Label(r, text="4.2 MB/s")
+                    self.entry_dest = MagicMock()
+                    self.entry_dest.get.return_value = "C:/Downloads/vid.mp4"
+                    self._active_download_url = "https://example.com/vid.mp4"
+                    self.history_manager = MagicMock()
+                    self._refresh_history_table = MagicMock()
+                    self._draw_main_progress = MagicMock()
+                    self._refresh_chunk_displays = MagicMock()
+                    self._build_col2_active(r)
+                    self.matrix_a1 = MagicMock()
+
+            app = DummyApp(root)
+            total = 20 * 1024 * 1024
+            done = 10 * 1024 * 1024
+            resume_gate = threading.Event()
+            toggles = []
+
+            class LaggyEngine:
+                def __init__(self):
+                    self.is_running = True
+                    self.is_paused = False
+                    self.total_size = total
+                    self.max_connections = 4
+                    self.destination_path = "C:/Downloads/vid.mp4"
+                    self.chunks = [DownloadChunk(0, 0, total - 1, downloaded_bytes=done, status="active")]
+                def get_chunks_snapshot(self):
+                    return self.chunks
+                def pause(self):
+                    time.sleep(0.03)
+                    self.is_paused = True
+                    toggles.append("pause")
+                def resume(self):
+                    resume_gate.wait(timeout=2.0)
+                    self.is_paused = False
+                    toggles.append("resume")
+
+            eng = LaggyEngine()
+            app.engine = eng
+            app.update_kanban_active_stream("vid.mp4", 50.0, "4.2 MB/s", eng.chunks, 1, downloaded=done, total=total, eta="00:05")
+
+            # Pause and wait for laggy pause()
+            app._on_pause_resume()
+            for _ in range(40):
+                if eng.is_paused and app._pause_desired_state is None:
+                    break
+                time.sleep(0.02)
+            self.assertTrue(eng.is_paused)
+
+            # Verify LED matrix gets is_active=False when _engine_chunk_update_cb runs while paused
+            app._chunk_ui_update_pending = app._chunk_update_pending = False
+            app._engine_chunk_update_cb()
+            root.update()
+            self.assertTrue(app.matrix_a1.update_from_chunks.called)
+            last_kw = app.matrix_a1.update_from_chunks.call_args.kwargs
+            self.assertFalse(last_kw["is_active"])
+            self.assertEqual(last_kw["active_count"], 0)
+
+            # Click Resume while eng.resume() is STILL blocked (eng.is_paused remains True)
+            app._on_pause_resume()
+            self.assertEqual(app.btn_a1_pause.cget("text"), "⏸")
+            self.assertNotEqual(app.lbl_a1_eta.cget("text"), "⏸ متوقف مؤقتاً")
+
+            # Release resume_gate and verify convergence
+            resume_gate.set()
+            for _ in range(50):
+                if not eng.is_paused and app._pause_desired_state is None:
+                    break
+                time.sleep(0.02)
+            self.assertFalse(eng.is_paused)
+
+            # Rapid double-click (Pause then Resume immediately) must converge back to running (False)
+            resume_gate.clear()
+            app._on_pause_resume()  # pause
+            app._on_pause_resume()  # resume immediately
+            resume_gate.set()
+            for _ in range(60):
+                if not eng.is_paused and app._pause_desired_state is None:
+                    break
+                time.sleep(0.02)
+            self.assertFalse(eng.is_paused)
+        finally:
+            try:
+                root.destroy()
+            except Exception:
+                pass
+
+    def test_live_http_keepalive_pool_reuses_sockets_across_windows(self):
+        """Verifies sequential /videoplayback range windows reuse TCP sockets from _conn_pool with SHA-256 match."""
+        import faqih_downloader.core.engine_workers as ew
+        payload = os.urandom(512 * 1024)
+        expected_sha = hashlib.sha256(payload).hexdigest()
+        counts = {"accepts": 0, "reqs": 0}
+        cnt_lock = threading.Lock()
+
+        class CountingSrv(socketserver.ThreadingMixIn, http.server.HTTPServer):
+            daemon_threads = True
+            def get_request(self):
+                sock, addr = super().get_request()
+                with cnt_lock:
+                    counts["accepts"] += 1
+                return sock, addr
+
+        class WinHandler(http.server.BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+            def log_message(self, *a):
+                pass
+            def do_HEAD(self):
+                with cnt_lock:
+                    counts["reqs"] += 1
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(payload)))
+                self.send_header("Accept-Ranges", "bytes")
+                self.end_headers()
+            def do_GET(self):
+                with cnt_lock:
+                    counts["reqs"] += 1
+                s, e = 0, len(payload) - 1
+                if "range=" in self.path:
+                    r = self.path.split("range=")[1].split("&")[0]
+                    s_s, e_s = r.split("-")
+                    s, e = int(s_s), int(e_s)
+                body = payload[s:e + 1]
+                self.send_response(206)
+                self.send_header("Content-Range", f"bytes {s}-{e}/{len(payload)}")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Connection", "keep-alive")
+                self.end_headers()
+                self.wfile.write(body)
+                self.wfile.flush()
+
+        srv = CountingSrv(("127.0.0.1", 0), WinHandler)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        try:
+            with tempfile.TemporaryDirectory() as td, patch.object(ew, "GOOGLEVIDEO_WINDOW_BYTES", 64 * 1024):
+                dest = os.path.join(td, "keepalive.bin")
+                done = threading.Event()
+                errs = []
+                eng = TurboDownloadEngine(
+                    f"http://127.0.0.1:{srv.server_address[1]}/videoplayback?id=ka",
+                    dest, max_connections=1,
+                    on_complete=lambda *a: done.set(),
+                    on_error=lambda e: (errs.append(e), done.set()),
+                )
+                eng.start()
+                self.assertTrue(done.wait(timeout=10.0))
+                self.assertEqual(errs, [])
+                self.assertEqual(counts["reqs"], 9)
+                self.assertEqual(counts["accepts"], 2)
+                with open(dest, "rb") as f:
+                    self.assertEqual(hashlib.sha256(f.read()).hexdigest(), expected_sha)
+        finally:
+            srv.shutdown()
+            srv.server_close()
+
+    def test_save_state_concurrent_and_post_cancel_safety(self):
+        """Verifies save_state serializes concurrent saves, preserves safe_shutdown, and blocks post-cancel recreation."""
+        with tempfile.TemporaryDirectory() as td:
+            dest = os.path.join(td, "file.bin")
+            eng = TurboDownloadEngine("http://127.0.0.1:1/x.bin", dest, max_connections=2)
+            eng.total_size = 2048
+            eng.chunks = [DownloadChunk(0, 0, 1023, downloaded_bytes=512), DownloadChunk(1, 1024, 2047, downloaded_bytes=256)]
+            results = []
+            threads = [threading.Thread(target=lambda: results.append(eng.save_state())) for _ in range(8)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(timeout=3.0)
+            self.assertEqual(len(results), 8)
+            self.assertTrue(all(results))
+            eng.safe_shutdown()
+            self.assertTrue(os.path.exists(os.path.join(eng.temp_dir, "state.json")))
+            eng.cancel()
+            self.assertFalse(os.path.exists(eng.temp_dir))
+            self.assertFalse(eng.save_state())
+            self.assertFalse(os.path.exists(eng.temp_dir))
+
+    def test_rounded_glass_card_real_mapped_resize_updates_inner_synchronously(self):
+        """Verifies mapped RoundedGlassCard inner frame matches card size immediately after real geometry resize."""
+        root = tk.Tk()
+        root.geometry("400x260")
+        try:
+            card = RoundedGlassCard(root, radius=10, inner_padx=8, inner_pady=6)
+            card.pack(fill=tk.BOTH, expand=True)
+            lbl = tk.Label(card.inner, text="Mapped Content")
+            lbl.pack(fill=tk.BOTH, expand=True)
+            root.update()
+            self.assertEqual((card.inner.winfo_width(), card.inner.winfo_height()), (card.winfo_width() - 16, card.winfo_height() - 12))
+            root.geometry("620x380")
+            root.update()
+            self.assertEqual(card.winfo_width(), 620)
+            self.assertEqual(card.winfo_height(), 380)
+            self.assertEqual((card.inner.winfo_width(), card.inner.winfo_height()), (604, 368))
+        finally:
+            try:
+                root.destroy()
+            except Exception:
+                pass
+
+    def test_stream_coordinator_prestart_pause_and_no_stale_progress_after_pause(self):
+        """Verifies pre-start pause holds engine.start() until resume and prevents stale non-zero speeds after pause()."""
+        payload = os.urandom(512 * 1024)
+        expected_sha = hashlib.sha256(payload).hexdigest()
+
+        class SlowRangeHandler(_ThrottledRangeHandler):
+            chunk_delay_sec = 0.015
+            chunk_write_size = 32768
+        SlowRangeHandler.payload = payload
+
+        class ThreadedSrv(socketserver.ThreadingMixIn, http.server.HTTPServer):
+            daemon_threads = True
+        server = ThreadedSrv(("127.0.0.1", 0), SlowRangeHandler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                dest = os.path.join(td, "coord.bin")
+                events = []
+                done = threading.Event()
+                errs = []
+                info = YouTubeStreamInfo(
+                    video_id="vc1",
+                    title="coord",
+                    clean_filename="coord.bin",
+                    is_progressive=True,
+                    video_url=f"http://127.0.0.1:{server.server_address[1]}/v.bin",
+                    video_size=len(payload),
+                )
+                coord = StreamDownloadCoordinator(
+                    stream_info=info,
+                    destination_path=dest,
+                    max_connections=2,
+                    on_progress=lambda d, t, sp, et, ac: events.append((d, t, sp, et, ac)),
+                    on_complete=lambda *a: done.set(),
+                    on_error=lambda e: (errs.append(e), done.set()),
+                )
+                coord.start()
+                coord.pause()
+                time.sleep(0.25)
+                # Coordinator must stay paused and must not complete while paused right after start()
+                self.assertFalse(done.is_set())
+                self.assertEqual(coord.is_paused, True)
+
+                coord.resume()
+                deadline = time.monotonic() + 5.0
+                while time.monotonic() < deadline and not any(e[0] > 65536 for e in events):
+                    time.sleep(0.02)
+                self.assertTrue(any(e[0] > 65536 for e in events))
+
+                coord.pause()
+                idx = len(events)
+                time.sleep(0.2)
+                trailing = events[idx:]
+                self.assertTrue(all(e[2] == 0.0 and e[3] == "Paused" for e in trailing), f"Stale speed after pause: {trailing}")
+
+                coord.resume()
+                self.assertTrue(done.wait(timeout=10.0))
+                self.assertEqual(errs, [])
+                with open(dest, "rb") as f:
+                    self.assertEqual(hashlib.sha256(f.read()).hexdigest(), expected_sha)
+        finally:
+            server.shutdown()
+            server.server_close()
 
 
 if __name__ == "__main__":

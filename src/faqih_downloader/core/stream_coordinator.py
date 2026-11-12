@@ -167,44 +167,49 @@ class StreamDownloadCoordinator:
                 return dl, tot
             return 0, self.total_size
 
+    def _toggle_subproc(self, suspend: bool):
+        if not self._active_subproc: return
+        try: from ..services.media_clipper_engine import _set_process_suspended; _set_process_suspended(self._active_subproc, suspend)
+        except Exception: pass
+
+    def _emit_progress(self, *args):
+        if args[3] != "Paused" and self._is_paused:
+            for e in (self._active_engines or ()):
+                if getattr(e, "is_running", False) and not getattr(e, "is_paused", False): threading.Thread(target=e.pause, daemon=True).start()
+            return
+        with self._lock:
+            if not hasattr(self, "_prog_emit_lock"): self._prog_emit_lock = threading.RLock()
+            lk = self._prog_emit_lock
+        with lk:
+            if self.on_progress and not (args[3] != "Paused" and self._is_paused):
+                try: self.on_progress(*args)
+                except Exception: pass
+
     def pause(self):
         with self._lock:
-            self._is_paused = True; self._pause_event.set()
-            if self._active_subproc:
-                try: from ..services.media_clipper_engine import _set_process_suspended; _set_process_suspended(self._active_subproc, True)
-                except Exception: pass
+            self._is_paused = True; self._pause_event.set(); self._toggle_subproc(True)
             for eng in (self._active_engines or ([self.current_engine] if self.current_engine else [])):
                 try: eng.pause()
                 except Exception: pass
             done, total = self._current_progress_pair()
-        if self.on_progress:
-            try: self.on_progress(done, total, 0.0, "Paused", 0)
-            except Exception: pass
+        self._emit_progress(done, total, 0.0, "Paused", 0)
 
     def resume(self):
         with self._lock:
-            self._is_paused = False; self._pause_event.clear()
-            if self._active_subproc:
-                try: from ..services.media_clipper_engine import _set_process_suspended; _set_process_suspended(self._active_subproc, False)
-                except Exception: pass
+            self._is_paused = False; self._pause_event.clear(); self._toggle_subproc(False)
             engines = self._active_engines or ([self.current_engine] if self.current_engine else [])
             for eng in engines:
                 try: eng.resume()
                 except Exception: pass
             done, total = self._current_progress_pair()
             active = sum(sum(1 for c in getattr(e, "chunks", []) if getattr(c, "status", "") == "active") for e in engines)
-        if self.on_progress:
-            try: self.on_progress(done, total, 0.0, "Downloading", active)
-            except Exception: pass
+        self._emit_progress(done, total, 0.0, "Downloading", active)
 
     def _make_engine(self, url, dest, max_conn, allow_split, headers, on_prog, on_comp, on_err, est_size):
         pre = {"total_size": int(est_size or 0), "supports_ranges": True} if int(est_size or 0) > 0 else None
-        return TurboDownloadEngine(
-            url=url, destination_path=dest, max_connections=max_conn, allow_dynamic_split=allow_split,
+        return TurboDownloadEngine(url=url, destination_path=dest, max_connections=max_conn, allow_dynamic_split=allow_split,
             rate_limit_bytes_per_sec=self.rate_limit, ssl_context=self.ssl_context, headers=headers,
-            on_progress=on_prog, on_chunk_update=self.on_chunk_update, on_log=self.on_log,
-            on_complete=on_comp, on_error=on_err, pre_probed_info=pre,
-        )
+            on_progress=on_prog, on_chunk_update=self.on_chunk_update, on_log=self.on_log, on_complete=on_comp, on_error=on_err, pre_probed_info=pre)
 
     def _stop_all(self, use_safe: bool = False):
         with self._lock:
@@ -322,15 +327,14 @@ class StreamDownloadCoordinator:
 
                 def _on_single_prog(downloaded, total, speed, eta, active):
                     if self._is_paused:
-                        if self.on_progress: self.on_progress(downloaded, total, 0.0, "Paused", 0)
-                        return
+                        if getattr(engine, "is_running", False) and not getattr(engine, "is_paused", False): threading.Thread(target=engine.pause, daemon=True).start()
+                        self._emit_progress(downloaded, total, 0.0, "Paused", 0); return
                     if speed > 0:
                         self._last_active_speed = speed
                     elif downloaded > 0 and self._last_active_speed <= 0.0:
                         st = self.start_time; el = (time.time() - st) if (isinstance(st, (int, float)) and st > 0) else 0.1
                         self._last_active_speed = downloaded / max(0.05, el)
-                    if self.on_progress:
-                        self.on_progress(downloaded, total, speed, eta, active)
+                    self._emit_progress(downloaded, total, speed, eta, active)
 
                 def _on_single_error(err):
                     with self._lock: self._is_running = False
@@ -342,11 +346,9 @@ class StreamDownloadCoordinator:
                     getattr(self.stream_info, "video_size", 0),
                 )
                 with self._lock:
-                    self.current_engine = engine
-                    self._active_engines = [engine]
-                    if self._is_paused:
-                        engine.pause()
-                engine.start()
+                    self.current_engine = engine; self._active_engines = [engine]
+                while self._is_paused and not self._cancel_event.is_set(): time.sleep(0.05)
+                if not self._cancel_event.is_set(): engine.start()
 
                 while engine.is_running and not self._cancel_event.is_set():
                     time.sleep(0.1)
@@ -394,8 +396,7 @@ class StreamDownloadCoordinator:
                     eta_str = f"{eta_sec // 3600:02d}:{(eta_sec % 3600) // 60:02d}:{eta_sec % 60:02d}"
                 else:
                     eta_str = "--:--:--"
-                if self.on_progress:
-                    self.on_progress(combined_dl, combined_total, combined_speed, eta_str, combined_active)
+                self._emit_progress(combined_dl, combined_total, combined_speed, eta_str, combined_active)
 
             def _on_v_complete(path, size, elapsed):
                 with self._lock:
@@ -459,13 +460,11 @@ class StreamDownloadCoordinator:
             )
 
             with self._lock:
-                self.current_engine = v_engine
-                self._active_engines = [v_engine, a_engine]
-                if self._is_paused:
-                    v_engine.pause()
-                    a_engine.pause()
-            v_engine.start()
-            a_engine.start()
+                self.current_engine = v_engine; self._active_engines = [v_engine, a_engine]
+            while self._is_paused and not self._cancel_event.is_set(): time.sleep(0.05)
+            if not self._cancel_event.is_set(): v_engine.start()
+            while self._is_paused and not self._cancel_event.is_set(): time.sleep(0.05)
+            if not self._cancel_event.is_set(): a_engine.start()
 
             while not (v_completed.is_set() and a_completed.is_set()) and not self._cancel_event.is_set():
                 if v_error:
