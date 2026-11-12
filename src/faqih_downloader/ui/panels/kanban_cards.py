@@ -67,10 +67,18 @@ def create_empty_state(
     """
     cv = tk.Canvas(parent, bg=bg, height=height, bd=0, highlightthickness=0)
     cv.pack(fill=tk.X, pady=(4, 6))
+    cv._last_size = None
+    cv._redraw_job = None
 
-    def _draw(event=None):
-        w = max(100, cv.winfo_width())
-        h = max(60, cv.winfo_height())
+    def _flush_draw():
+        cv._redraw_job = None
+        if not getattr(cv, "winfo_exists", lambda: False)():
+            return
+        _render()
+
+    def _render():
+        w = max(100, cv._last_size[0] if cv._last_size else cv.winfo_width())
+        h = max(60, cv._last_size[1] if cv._last_size else cv.winfo_height())
         cv.delete("all")
 
         # Rounded Glass Card background
@@ -87,6 +95,28 @@ def create_empty_state(
         # Subtitle text (increased vertical distance to 26px to prevent Arabic font collision)
         if subtitle:
             cv.create_text(w // 2, cy + 36, text=subtitle, font=("Segoe UI", 8), fill="#64748b")
+
+    def _draw(event=None):
+        if not getattr(cv, "winfo_exists", lambda: False)():
+            return
+        w = event.width if (event and getattr(event, "width", 0) > 10) else cv.winfo_width()
+        h = event.height if (event and getattr(event, "height", 0) > 10) else cv.winfo_height()
+        if (w, h) == getattr(cv, "_last_size", None):
+            return
+        cv._last_size = (w, h)
+
+        top = None
+        try: top = cv.winfo_toplevel()
+        except Exception: pass
+        if top and getattr(top, "_is_resizing_window", False):
+            if getattr(cv, "_redraw_job", None) is None:
+                cv._redraw_job = cv.after(16, _flush_draw)
+        else:
+            if getattr(cv, "_redraw_job", None) is not None:
+                try: cv.after_cancel(cv._redraw_job)
+                except Exception: pass
+                cv._redraw_job = None
+            _render()
 
     cv.bind("<Configure>", _draw)
     return cv

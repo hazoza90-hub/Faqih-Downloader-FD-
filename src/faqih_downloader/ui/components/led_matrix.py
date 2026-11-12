@@ -36,6 +36,8 @@ class LedEqualizerMatrix:
         self._lane_statuses: List[str] = ["idle"] * self.NUM_COLUMNS
         self._animating = False
         self._anim_job: Optional[Any] = None
+        self._last_canvas_size: Optional[Tuple[int, int]] = None
+        self._resize_redraw_job: Optional[Any] = None
 
         if tk is not None:
             self.canvas = tk.Canvas(
@@ -46,9 +48,36 @@ class LedEqualizerMatrix:
                 highlightthickness=0,
                 relief="flat"
             )
-            self.canvas.bind("<Configure>", lambda e: (e.width, e.height) != getattr(self, "_last_canvas_size", None) and self.redraw())
+            self.canvas.bind("<Configure>", self._on_canvas_configure)
         else:
             self.canvas = None  # type: ignore
+
+    def _flush_canvas_redraw(self):
+        self._resize_redraw_job = None
+        if not self.canvas or not getattr(self.canvas, "winfo_exists", lambda: False)():
+            return
+        self.redraw()
+
+    def _on_canvas_configure(self, event):
+        if not self.canvas or not getattr(self.canvas, "winfo_exists", lambda: False)():
+            return
+        w = getattr(event, "width", 0)
+        h = getattr(event, "height", 0)
+        if (w, h) == getattr(self, "_last_canvas_size", None):
+            return
+
+        top = None
+        try: top = self.canvas.winfo_toplevel()
+        except Exception: pass
+        if top and getattr(top, "_is_resizing_window", False):
+            if getattr(self, "_resize_redraw_job", None) is None:
+                self._resize_redraw_job = self.canvas.after(16, self._flush_canvas_redraw)
+        else:
+            if getattr(self, "_resize_redraw_job", None) is not None:
+                try: self.canvas.after_cancel(self._resize_redraw_job)
+                except Exception: pass
+                self._resize_redraw_job = None
+            self.redraw()
 
     def pack(self, **kwargs):
         if self.canvas:

@@ -16,7 +16,7 @@ from .engine_resumer import EngineResumerMixin
 from ..utils.url_utils import parse_filename_from_cd_header
 
 
-GOOGLEVIDEO_WINDOW_BYTES = 10 * 1024 * 1024  # 10 MB Fast Burst Window matching yt-dlp optimal chunk size
+GOOGLEVIDEO_WINDOW_BYTES = 2 * 1024 * 1024  # 2 MB Fast Burst Window; googlevideo sends first ~2MB unthrottled, keep-alive gives 0ms TLS overhead
 
 
 def _build_window_url(url: str, start_byte: int, end_byte: Optional[int], is_gv: bool) -> str:
@@ -139,7 +139,13 @@ class EngineWorkersMixin(EngineResumerMixin):
                         target_end = chunk.end_byte
                         if (self.total_size > 0 and cur_offset > target_end) or (self.total_size == 0 and chunk.downloaded_bytes > 0 and chunk.status == "completed"):
                             if self.total_size > 0: chunk.status = "completed"
-                            return
+                            chunk_done = True
+                        else:
+                            chunk_done = False
+                    if chunk_done:
+                        try: self._dynamic_split_check()
+                        except Exception: pass
+                        return
 
                     if self.supports_ranges and self.total_size > 0:
                         req_end = min(target_end, cur_offset + GOOGLEVIDEO_WINDOW_BYTES - 1) if (is_gv and (target_end - cur_offset + 1) > GOOGLEVIDEO_WINDOW_BYTES) else target_end
@@ -258,18 +264,24 @@ class EngineWorkersMixin(EngineResumerMixin):
                     with self._lock:
                         self._active_connections.append(resp)
 
-                    BUF_SIZE = 262144
+                    BUF_SIZE = 524288
                     while not self._is_stopped():
                         if self._pause_event.is_set():
                             break
 
+                        chunk_done = False
                         with chunk.lock:
                             pos = chunk.start_byte + chunk.downloaded_bytes
                             if self.total_size > 0 and pos > chunk.end_byte:
                                 chunk.status = "completed"
-                                return
-                            effective_end = min(chunk.end_byte, req_end) if req_end is not None else chunk.end_byte
-                            to_read = min(BUF_SIZE, effective_end - pos + 1) if self.total_size > 0 else BUF_SIZE
+                                chunk_done = True
+                            else:
+                                effective_end = min(chunk.end_byte, req_end) if req_end is not None else chunk.end_byte
+                                to_read = min(BUF_SIZE, effective_end - pos + 1) if self.total_size > 0 else BUF_SIZE
+                        if chunk_done:
+                            try: self._dynamic_split_check()
+                            except Exception: pass
+                            return
 
                         if to_read <= 0:
                             break
@@ -282,6 +294,7 @@ class EngineWorkersMixin(EngineResumerMixin):
 
                         self.rate_limiter.acquire(len(data), self._cancel_event)
 
+                        chunk_done = False
                         with chunk.lock:
                             pos = chunk.start_byte + chunk.downloaded_bytes
                             effective_end = min(chunk.end_byte, req_end) if req_end is not None else chunk.end_byte
@@ -296,7 +309,11 @@ class EngineWorkersMixin(EngineResumerMixin):
 
                             if self.total_size > 0 and (chunk.start_byte + chunk.downloaded_bytes > chunk.end_byte):
                                 chunk.status = "completed"
-                                return
+                                chunk_done = True
+                        if chunk_done:
+                            try: self._dynamic_split_check()
+                            except Exception: pass
+                            return
 
                     if out_file:
                         try: out_file.flush()
@@ -329,6 +346,9 @@ class EngineWorkersMixin(EngineResumerMixin):
                         except Exception: pass
                         resp = None
                     else:
+                        if expected_seg_bytes is not None and seg_bytes_read >= expected_seg_bytes:
+                            try: raw_resp.read(1024)
+                            except Exception: pass
                         if getattr(raw_resp, "will_close", False) or not getattr(raw_resp, "isclosed", lambda: True)() or (expected_seg_bytes is not None and seg_bytes_read < expected_seg_bytes):
                             if conn:
                                 with self._lock:
@@ -339,16 +359,23 @@ class EngineWorkersMixin(EngineResumerMixin):
                                 conn = None
                         resp = None
 
+                    chunk_done = False
                     with chunk.lock:
                         if (self.total_size > 0 and chunk.start_byte + chunk.downloaded_bytes > chunk.end_byte) or self.total_size == 0:
                             chunk.status = "completed"
-                            return
-                        if self.total_size > 0 and (chunk.start_byte + chunk.downloaded_bytes <= chunk.end_byte):
+                            chunk_done = True
+                        elif self.total_size > 0 and (chunk.start_byte + chunk.downloaded_bytes <= chunk.end_byte):
                             if expected_seg_bytes is not None and seg_bytes_read >= expected_seg_bytes:
                                 retry_count = 0
                                 continue
                             raise RuntimeError(f"Premature EOF from server before chunk completion ({chunk.downloaded_bytes:,}/{chunk.end_byte - chunk.start_byte + 1:,} bytes)")
-                        chunk.status = "completed"
+                        else:
+                            chunk.status = "completed"
+                            chunk_done = True
+
+                    if chunk_done:
+                        try: self._dynamic_split_check()
+                        except Exception: pass
                         return
 
             except Exception as e:

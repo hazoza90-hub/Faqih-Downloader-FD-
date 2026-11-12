@@ -301,6 +301,18 @@ class RoundedGlassCard(_BaseCanvas):
         self._pending_bg_state = None
         self.delete("card_bg")
         pad = 2
+
+        top = None
+        try: top = self.winfo_toplevel()
+        except Exception: pass
+        if top and getattr(top, "_is_resizing_window", False):
+            outline_col = self.glow_color or state_sig[2]
+            w_line = 2 if self.glow_color else 1
+            self.create_rectangle(pad, pad, w - pad, h - pad, fill=self.card_bg, outline=outline_col, width=w_line, tags="card_bg")
+            self.tag_lower("card_bg")
+            self._last_drawn_state = None
+            return
+
         if self.glow_color:
             draw_glow_border(
                 self, pad + 1, pad + 1, w - pad - 1, h - pad - 1,
@@ -327,8 +339,8 @@ class RoundedGlassCard(_BaseCanvas):
     def _on_resize(self, event=None):
         if not getattr(self, "winfo_exists", lambda: False)():
             return
-        w = self.winfo_width()
-        h = self.winfo_height()
+        w = event.width if (event is not None and getattr(event, "width", 0) > 1) else self.winfo_width()
+        h = event.height if (event is not None and getattr(event, "height", 0) > 1) else self.winfo_height()
         if w < 10 or h < 10:
             return
 
@@ -336,11 +348,9 @@ class RoundedGlassCard(_BaseCanvas):
             self._last_win_size = (w, h)
             if hasattr(self, "_win_id"):
                 self.coords(self._win_id, self.inner_padx, self.inner_pady)
-                self.itemconfigure(
-                    self._win_id,
-                    width=max(10, w - self.inner_padx * 2),
-                    height=max(10, h - self.inner_pady * 2)
-                )
+                inner_w = max(10, w - self.inner_padx * 2)
+                inner_h = max(10, h - self.inner_pady * 2)
+                self.itemconfigure(self._win_id, width=inner_w, height=inner_h)
 
         b_curr = "#38bdf8" if (self._is_hovered and not self._orig_glow_color) else self.border_color
         state_sig = (w, h, b_curr, self.glow_color, self.card_bg)

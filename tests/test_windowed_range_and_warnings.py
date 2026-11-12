@@ -1175,6 +1175,42 @@ class TestWindowedRangeAndWarnings(unittest.TestCase):
         res_op = apply_window_opacity(self.root, 0.95)
         self.assertTrue(res_op)
 
+    def test_googlevideo_window_bytes_constant(self):
+        """Verifies GOOGLEVIDEO_WINDOW_BYTES is 2 MB for fast burst window."""
+        from faqih_downloader.core.engine_workers import GOOGLEVIDEO_WINDOW_BYTES
+        self.assertEqual(GOOGLEVIDEO_WINDOW_BYTES, 2 * 1024 * 1024)
+
+    def test_rounded_glass_card_fast_rect_during_window_resize(self):
+        """Verifies _draw_card_bg uses the fast single create_rectangle path when _is_resizing_window is True."""
+        if not self.root:
+            self.skipTest("Tkinter GUI not available")
+        from faqih_downloader.utils.window_effects import RoundedGlassCard
+
+        card = RoundedGlassCard(self.root, width=200, height=100)
+        self.root._is_resizing_window = True
+        try:
+            with patch.object(card, "create_rectangle") as mock_rect, \
+                 patch("faqih_downloader.utils.window_effects.draw_rounded_rect") as mock_round:
+                card._draw_card_bg(200, 100, (200, 100, "#252b3b", None, "#151a24"))
+                mock_rect.assert_called_once()
+                mock_round.assert_not_called()
+                self.assertIsNone(card._last_drawn_state)
+        finally:
+            self.root._is_resizing_window = False
+
+    def test_window_resize_mixin_release_resets_is_resizing_flag(self):
+        """Verifies _on_resize_release resets _is_resizing_window to False and refreshes cards."""
+        from faqih_downloader.ui.controllers.window_resize_mixin import WindowResizeMixin
+
+        class DummyResizeWindow(WindowResizeMixin):
+            def __init__(self, root):
+                self.root = root
+
+        dummy = DummyResizeWindow(self.root if self.root else MagicMock())
+        dummy.root._is_resizing_window = True
+        dummy._on_resize_release()
+        self.assertFalse(getattr(dummy.root, "_is_resizing_window", True))
+
 
 if __name__ == "__main__":
     unittest.main()

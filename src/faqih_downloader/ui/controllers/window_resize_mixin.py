@@ -71,6 +71,11 @@ class WindowResizeMixin:
         if getattr(self, "_is_maximized", False):
             return "break"
         try:
+            if hasattr(self, "root") and self.root:
+                self.root._is_resizing_window = True
+        except Exception:
+            pass
+        try:
             win_w, win_h = self.root.winfo_width(), self.root.winfo_height()
             win_x, win_y = self.root.winfo_x(), self.root.winfo_y()
             if win_w <= 1 or win_h <= 1:
@@ -138,13 +143,44 @@ class WindowResizeMixin:
 
             geo = self._format_geometry(w, h, x, y)
             self.root.geometry(geo)
+            try:
+                self.root.update_idletasks()
+            except Exception:
+                pass
             self._normal_geometry = geo
             self.width, self.height = w, h
         except Exception:
             pass
         return "break"
 
-    def _on_resize_release(self, event):
+    def _on_resize_release(self, event=None):
+        try:
+            if hasattr(self, "root") and self.root:
+                self.root._is_resizing_window = False
+        except Exception:
+            pass
+
+        try:
+            if hasattr(self, "root") and self.root:
+                from faqih_downloader.utils.window_effects import RoundedGlassCard
+                stack = [self.root]
+                while stack:
+                    curr = stack.pop()
+                    if isinstance(curr, RoundedGlassCard):
+                        curr._last_drawn_state = None
+                        try:
+                            curr._on_resize(None)
+                        except Exception:
+                            pass
+                    try:
+                        children = curr.winfo_children()
+                        if children:
+                            stack.extend(children)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
         if hasattr(self, "_resize_state"):
             self._resize_state.clear()
         self._last_resize_geo = None
