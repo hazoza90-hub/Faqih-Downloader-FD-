@@ -41,7 +41,7 @@ class WaveformVisualizerCanvas:
                 highlightthickness=0,
                 relief="flat"
             )
-            self.canvas.bind("<Configure>", lambda e: self.redraw())
+            self.canvas.bind("<Configure>", lambda e: (e.width, e.height) != getattr(self, "_last_canvas_size", None) and self.redraw())
         else:
             self.canvas = None  # type: ignore
 
@@ -74,6 +74,7 @@ class WaveformVisualizerCanvas:
         h = self.canvas.winfo_height()
         if h <= 6:
             h = self.height
+        self._last_canvas_size = (w, h)
 
         self.canvas.delete("all")
 

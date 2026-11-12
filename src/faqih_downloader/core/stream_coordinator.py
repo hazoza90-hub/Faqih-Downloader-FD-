@@ -16,7 +16,7 @@ from .chunk import DownloadChunk
 from ..config import IS_WINDOWS
 from ..services.subtitle_processor import run_cancellable_ffmpeg
 from ..services.youtube_models import YouTubeStreamInfo, MediaStreamInfo, is_youtube_url
-from ..services.media_env_helpers import has_ffmpeg, find_ffmpeg_bin
+from ..services.media_env_helpers import has_ffmpeg, find_ffmpeg_bin, run_ffmpeg_with_progress
 from ..services.media_clipper_engine import estimate_clip_total_bytes, download_clipped_stream_direct
 
 class StreamDownloadCoordinator:
@@ -98,6 +98,27 @@ class StreamDownloadCoordinator:
                     pass
             return res
 
+    def _emit_stage_progress(self, stage_name: str, pct: float, eta_str: str = ""):
+        tot = max(100, self.total_size)
+        clamped_pct = max(0.0, min(100.0, float(pct)))
+        done = int(tot * clamped_pct / 100.0)
+        n_lanes = max(1, self.max_connections)
+        if not getattr(self, "_clip_chunks", None) or len(self._clip_chunks) != n_lanes:
+            span = max(1, tot // n_lanes)
+            self._clip_chunks = [
+                DownloadChunk(chunk_id=i, start_byte=i * span, end_byte=((i + 1) * span - 1 if i < n_lanes - 1 else tot - 1), downloaded_bytes=0, status="active")
+                for i in range(n_lanes)
+            ]
+        for c in self._clip_chunks:
+            c_span = max(1, c.end_byte - c.start_byte + 1)
+            c.downloaded_bytes = int(c_span * (clamped_pct / 100.0))
+            c.status = "completed" if clamped_pct >= 99.9 else "active"
+        prog_lbl = f"{stage_name}|{eta_str}" if eta_str else f"{stage_name}..."
+        if self.on_progress: self.on_progress(done, tot, self._last_active_speed, prog_lbl, self.max_connections)
+        if self.on_chunk_update:
+            try: self.on_chunk_update()
+            except Exception: pass
+
     @property
     def total_size(self) -> int:
         with self._lock:
@@ -134,12 +155,9 @@ class StreamDownloadCoordinator:
 
     def pause(self):
         with self._lock:
-            self._is_paused = True
-            self._pause_event.set()
+            self._is_paused = True; self._pause_event.set()
             if self._active_subproc:
-                try:
-                    from ..services.media_clipper_engine import _set_process_suspended
-                    _set_process_suspended(self._active_subproc, True)
+                try: from ..services.media_clipper_engine import _set_process_suspended; _set_process_suspended(self._active_subproc, True)
                 except Exception: pass
             for eng in (self._active_engines or ([self.current_engine] if self.current_engine else [])):
                 try: eng.pause()
@@ -147,12 +165,9 @@ class StreamDownloadCoordinator:
 
     def resume(self):
         with self._lock:
-            self._is_paused = False
-            self._pause_event.clear()
+            self._is_paused = False; self._pause_event.clear()
             if self._active_subproc:
-                try:
-                    from ..services.media_clipper_engine import _set_process_suspended
-                    _set_process_suspended(self._active_subproc, False)
+                try: from ..services.media_clipper_engine import _set_process_suspended; _set_process_suspended(self._active_subproc, False)
                 except Exception: pass
             for eng in (self._active_engines or ([self.current_engine] if self.current_engine else [])):
                 try: eng.resume()
@@ -246,47 +261,34 @@ class StreamDownloadCoordinator:
                 def _on_single_complete(path, size, elapsed):
                     if is_mp3_request:
                         self.log("[FFMPEG] Transcoding downloaded audio stream to universal MP3...")
-                        if self.on_progress:
-                            rep_spd = self._last_active_speed if self._last_active_speed > 0 else (size / max(0.05, elapsed))
-                            self.on_progress(size, size, rep_spd, "Transcoding...", 0)
                         try:
                             ffmpeg_bin = find_ffmpeg_bin()
-                            if not ffmpeg_bin:
-                                raise RuntimeError("FFmpeg executable not found.")
+                            if not ffmpeg_bin: raise RuntimeError("FFmpeg executable not found.")
                             cmd = [ffmpeg_bin, "-y", "-i", actual_dest, "-vn", "-c:a", "libmp3lame", "-q:a", "2", self.destination_path]
                             cflags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if IS_WINDOWS else 0
-                            res = run_cancellable_ffmpeg(cmd, self._cancel_event, creationflags=cflags, subprocess_mod=subprocess)
-                            if res.returncode != 0:
-                                raise RuntimeError(f"FFmpeg MP3 transcoding failed: {res.stderr.strip()}")
-                            if os.path.exists(actual_dest):
-                                try:
-                                    os.remove(actual_dest)
-                                except Exception:
-                                    pass
-                            final_sz = os.path.getsize(self.destination_path)
-                            self.log(f"[SUCCESS] Audio converted to MP3 successfully ({final_sz:,} bytes)!")
-                            with self._lock:
-                                self._is_running = False
-                            if self.on_complete:
-                                self.on_complete(self.destination_path, final_sz, elapsed)
-                        except Exception as ex:
+                            def _mp3_prog(pct: float, eta_str: str): self._emit_stage_progress("Transcoding", pct, eta_str)
+                            v_dur = float(getattr(self.stream_info, "duration", 0.0) or 0.0)
+                            rc, err = run_ffmpeg_with_progress(cmd, cancel_event=self._cancel_event, creationflags=cflags, total_duration=v_dur, on_progress_pct=_mp3_prog, subprocess_mod=subprocess)
+                            if rc != 0: raise RuntimeError(f"FFmpeg MP3 transcoding failed: {err.strip()}")
                             if os.path.exists(actual_dest):
                                 try: os.remove(actual_dest)
                                 except Exception: pass
-                            if os.path.exists(self.destination_path):
-                                try: os.remove(self.destination_path)
-                                except Exception: pass
-                            with self._lock:
-                                self._is_running = False
-                            if self.on_error:
-                                self.on_error(f"MP3 transcoding error: {ex}")
+                            final_sz = os.path.getsize(self.destination_path)
+                            self.log(f"[SUCCESS] Audio converted to MP3 successfully ({final_sz:,} bytes)!")
+                            with self._lock: self._is_running = False
+                            if self.on_complete: self.on_complete(self.destination_path, final_sz, elapsed)
+                        except Exception as ex:
+                            for p in (actual_dest, self.destination_path):
+                                if os.path.exists(p):
+                                    try: os.remove(p)
+                                    except Exception: pass
+                            with self._lock: self._is_running = False
+                            if self.on_error: self.on_error(f"MP3 transcoding error: {ex}")
                     else:
                         self._process_subtitles(path)
                         final_sz = os.path.getsize(path) if os.path.isfile(path) else size
-                        with self._lock:
-                            self._is_running = False
-                        if self.on_complete:
-                            self.on_complete(path, final_sz, elapsed)
+                        with self._lock: self._is_running = False
+                        if self.on_complete: self.on_complete(path, final_sz, elapsed)
 
                 safe_conn = max(1, self.max_connections)
                 allow_split = (self.max_connections > 1)
@@ -490,14 +492,11 @@ class StreamDownloadCoordinator:
             self._active_phase = 3
             with self._lock: self._active_engines.clear()
             combined_total = max(1, self._v_total_size + self._a_total_size)
-            st = self.start_time; el = (time.time() - st) if (isinstance(st, (int, float)) and st > 0) else 0.1
-            rep_spd = self._last_active_speed if self._last_active_speed > 0 else (combined_total / max(0.05, el))
-            if self.on_progress:
-                self.on_progress(combined_total, combined_total, rep_spd, "Merging...", 0)
-
             self.log(f"[{tag}] Phase 2/2: Merging video and audio streams into final container...")
+            def _merge_prog(pct: float, eta_str: str): self._emit_stage_progress("Merging", pct, eta_str)
             from ..services.youtube_service import YouTubeResolver
-            YouTubeResolver.merge_video_audio(video_tmp, audio_tmp, self.destination_path, on_log=self.log, cancel_event=self._cancel_event)
+            v_dur = float(getattr(self.stream_info, "duration", 0.0) or 0.0)
+            YouTubeResolver.merge_video_audio(video_tmp, audio_tmp, self.destination_path, on_log=self.log, cancel_event=self._cancel_event, total_duration=v_dur, on_progress_pct=_merge_prog)
             self._process_subtitles(self.destination_path)
 
             elapsed = max(0.01, time.time() - self.start_time)
@@ -529,13 +528,13 @@ class StreamDownloadCoordinator:
 
     def _process_subtitles(self, target_path: str):
         try:
-            mode = getattr(self.stream_info, "subtitle_embed_mode", "hard_burn")
-            sub = getattr(self.stream_info, "subtitle_track", None)
-            if mode == "hard_burn" and sub and self.on_progress and os.path.isfile(target_path):
-                cur_sz = os.path.getsize(target_path)
-                self.on_progress(cur_sz, cur_sz, self._last_active_speed, "Burning Subtitles...", 0)
             from ..services.media_clipper_engine import process_post_download_clip_and_subtitles
-            f_path = process_post_download_clip_and_subtitles(self.stream_info, target_path, on_log=self.log, cancel_event=self._cancel_event)
+            def _stage_prog(stage_name: str, pct: float, eta_str: str):
+                self._emit_stage_progress(stage_name, pct, eta_str)
+            f_path = process_post_download_clip_and_subtitles(
+                self.stream_info, target_path, on_log=self.log,
+                cancel_event=self._cancel_event, on_stage_progress=_stage_prog
+            )
             if f_path and os.path.isfile(f_path): self.destination_path = f_path
         except Exception as e:
             self.log(f"[CLIP/SUBTITLES] Warning: {e}")

@@ -57,7 +57,8 @@ class DownloadCallbacksMixin:
             if hasattr(self, "card_size"):
                 self.card_size.configure(text=size_str)
             if hasattr(self, "card_eta"):
-                self.card_eta.configure(text=et)
+                display_et = et.split("|", 1)[1] if ("|" in et and et.split("|", 1)[1]) else (et.split("|", 1)[0] if "|" in et else et)
+                self.card_eta.configure(text=display_et)
             snap = self.engine.get_chunks_snapshot() if hasattr(self.engine, "get_chunks_snapshot") else (self.engine.chunks if self.engine else [])
             total_chunks = max(ac, len(snap))
             if hasattr(self, "card_threads"):

@@ -107,6 +107,11 @@ class WindowResizeMixin:
         if not mode:
             return "break"
 
+        import time
+        now = time.perf_counter()
+        if now - getattr(self, "_last_resize_ts", 0.0) < 0.014:
+            return "break"
+
         try:
             dx = event.x_root - self._resize_state["x_root"]
             dy = event.y_root - self._resize_state["y_root"]
@@ -126,6 +131,11 @@ class WindowResizeMixin:
                 new_h = max(min_h, h - dy)
                 y, h = y + (h - new_h), new_h
 
+            if (w, h, x, y) == getattr(self, "_last_resize_geo", None):
+                return "break"
+            self._last_resize_geo = (w, h, x, y)
+            self._last_resize_ts = now
+
             geo = self._format_geometry(w, h, x, y)
             self.root.geometry(geo)
             self._normal_geometry = geo
@@ -137,6 +147,8 @@ class WindowResizeMixin:
     def _on_resize_release(self, event):
         if hasattr(self, "_resize_state"):
             self._resize_state.clear()
+        self._last_resize_geo = None
+        self._last_resize_ts = 0.0
         return "break"
 
     def _detect_resize_edge(self, x: int, y: int, width: int, height: int, threshold: int = 6) -> str:

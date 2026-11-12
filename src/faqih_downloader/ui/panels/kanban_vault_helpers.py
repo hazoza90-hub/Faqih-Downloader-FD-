@@ -271,7 +271,12 @@ def setup_vault_scroll_view(col_frame: Any, body: Any, panel: Any = None) -> tup
 
     cv._schedule_vault_scrollregion = _schedule_vault_scrollregion
     container.bind("<Configure>", _schedule_vault_scrollregion)
-    cv.bind("<Configure>", lambda e: cv.winfo_exists() and cv.itemconfigure(win_id, width=e.width))
+    def _on_cv_configure(e):
+        if cv.winfo_exists() and e.width > 10 and e.width != getattr(cv, "_last_win_w", 0):
+            cv._last_win_w = e.width
+            cv.itemconfigure(win_id, width=e.width)
+
+    cv.bind("<Configure>", _on_cv_configure)
 
     def _is_vault_target(w):
         curr = w

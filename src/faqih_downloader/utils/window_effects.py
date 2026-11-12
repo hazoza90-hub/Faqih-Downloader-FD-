@@ -269,6 +269,9 @@ class RoundedGlassCard(_BaseCanvas):
             self._is_hovered = False
             self._orig_border_color = border_color
             self._orig_glow_color = glow_color
+            self._last_win_size = None
+            self._last_drawn_state = None
+            self._resize_redraw_job = None
 
             # Avoid default 378px canvas width when width is not explicitly specified
             init_w = width if width is not None else 10
@@ -319,17 +322,15 @@ class RoundedGlassCard(_BaseCanvas):
 
     def _on_inner_resize(self, event=None):
         if self._explicit_width is None and getattr(self, "winfo_exists", lambda: False)():
-            req_w = self.inner.winfo_reqwidth() + self.inner_padx * 2
-            if req_w > 10 and self.cget("width") != req_w:
-                self.configure(width=req_w)
+            if self.winfo_width() <= 20:
+                req_w = self.inner.winfo_reqwidth() + self.inner_padx * 2
+                if req_w > 10 and int(self.cget("width") or 0) != int(req_w):
+                    self.configure(width=req_w)
 
-    def _on_resize(self, event=None):
+    def _draw_card_bg(self, w: int, h: int, state_sig: Tuple):
         if not getattr(self, "winfo_exists", lambda: False)():
             return
-        w = self.winfo_width()
-        h = self.winfo_height()
-        if w <= 10 or h <= 10:
-            return
+        self._resize_redraw_job = None
         self.delete("card_bg")
         pad = 2
         if self.glow_color:
@@ -339,19 +340,49 @@ class RoundedGlassCard(_BaseCanvas):
                 inner_fill=self.card_bg, tags="card_bg"
             )
         else:
-            b_col = "#38bdf8" if (self._is_hovered and not self._orig_glow_color) else self.border_color
+            b_col = state_sig[2]
             draw_rounded_rect(
                 self, pad, pad, w - pad, h - pad,
                 radius=self.radius, fill=self.card_bg, outline=b_col, width=1, tags="card_bg"
             )
         self.tag_lower("card_bg")
-        if hasattr(self, "_win_id"):
-            self.coords(self._win_id, self.inner_padx, self.inner_pady)
-            self.itemconfigure(
-                self._win_id,
-                width=max(10, w - self.inner_padx * 2),
-                height=max(10, h - self.inner_pady * 2)
-            )
+        self._last_drawn_state = state_sig
+
+    def _on_resize(self, event=None):
+        if not getattr(self, "winfo_exists", lambda: False)():
+            return
+        w = self.winfo_width()
+        h = self.winfo_height()
+        if w < 10 or h < 10:
+            return
+
+        if (w, h) != getattr(self, "_last_win_size", None):
+            self._last_win_size = (w, h)
+            if hasattr(self, "_win_id"):
+                self.coords(self._win_id, self.inner_padx, self.inner_pady)
+                self.itemconfigure(
+                    self._win_id,
+                    width=max(10, w - self.inner_padx * 2),
+                    height=max(10, h - self.inner_pady * 2)
+                )
+
+        b_curr = "#38bdf8" if (self._is_hovered and not self._orig_glow_color) else self.border_color
+        state_sig = (w, h, b_curr, self.glow_color, self.card_bg)
+        if state_sig == getattr(self, "_last_drawn_state", None):
+            return
+
+        from faqih_downloader.config import is_test_environment
+        if event is not None and getattr(self, "_last_drawn_state", None) is not None and not is_test_environment():
+            if getattr(self, "_resize_redraw_job", None) is not None:
+                try: self.after_cancel(self._resize_redraw_job)
+                except Exception: pass
+            self._resize_redraw_job = self.after(16, lambda: self._draw_card_bg(w, h, state_sig))
+        else:
+            if getattr(self, "_resize_redraw_job", None) is not None:
+                try: self.after_cancel(self._resize_redraw_job)
+                except Exception: pass
+                self._resize_redraw_job = None
+            self._draw_card_bg(w, h, state_sig)
 
 
 __all__ = [

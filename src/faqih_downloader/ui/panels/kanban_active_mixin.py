@@ -172,7 +172,7 @@ class KanbanActiveColumnMixin:
 
         eta_raw = str(eta or "").strip()
         eta_lower = eta_raw.lower()
-        is_processing = any(k in eta_lower for k in ("merging", "burning", "transcoding"))
+        is_processing = any(k in eta_lower for k in ("merging", "burning", "embedding", "clipping", "boost", "transcoding"))
 
         if not is_running and not is_processing and pct <= 0 and (not speed_str or speed_str in ("0 B/s", "0.0 MB/s")):
             self.reset_kanban_active_stream()
@@ -228,12 +228,22 @@ class KanbanActiveColumnMixin:
             self.lbl_a1_size.configure(text=sz_txt)
 
         if hasattr(self, "lbl_a1_eta") and self.lbl_a1_eta and self.lbl_a1_eta.winfo_exists():
-            if "merging" in eta_lower:
-                eta_txt = "⚙️ جاري دمج الصوت والفيديو..."
-            elif "burning" in eta_lower:
-                eta_txt = "🔥 جاري حرق الترجمة..."
-            elif "transcoding" in eta_lower:
-                eta_txt = "🎵 جاري تحويل الصوت..."
+            stage_part, stage_timer = [x.strip() for x in eta_raw.split("|", 1)] if "|" in eta_raw else (eta_raw, "")
+            stage_lower = stage_part.lower()
+            timer_suffix = f" • ⏱ {stage_timer}" if (stage_timer and stage_timer not in ("--:--", "--:--:--")) else f" ({int(pct)}%)"
+
+            if "merging" in stage_lower:
+                eta_txt = f"⚙️ جاري دمج الصوت والفيديو{timer_suffix}"
+            elif "burning" in stage_lower:
+                eta_txt = f"🔥 جاري حرق الترجمة{timer_suffix}"
+            elif "embedding" in stage_lower:
+                eta_txt = f"📝 جاري دمج الترجمة{timer_suffix}"
+            elif "clipping" in stage_lower:
+                eta_txt = f"✂️ جاري قص المقطع{timer_suffix}"
+            elif "boost" in stage_lower:
+                eta_txt = f"🔊 جاري تحسين الصوت{timer_suffix}"
+            elif "transcoding" in stage_lower:
+                eta_txt = f"🎵 جاري تحويل الصوت{timer_suffix}"
             elif eta_raw and eta_raw not in ("--:--", ""):
                 eta_txt = f"⏱ {eta_raw} • ⚡ {active_chunks}" if active_chunks > 0 else f"⏱ {eta_raw}"
             elif active_chunks > 0:

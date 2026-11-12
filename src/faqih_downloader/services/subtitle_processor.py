@@ -27,6 +27,8 @@ except Exception:
     def find_ffmpeg_bin() -> Optional[str]: return shutil.which("ffmpeg")  # type: ignore
     def detect_installed_cookie_browsers() -> List[str]: return ["edge", "chrome", "firefox"]  # type: ignore
 
+from .media_env_helpers import run_ffmpeg_with_progress
+
 IS_WINDOWS = sys.platform.startswith("win")
 
 ISO_639_2: Dict[str, str] = {
@@ -147,7 +149,9 @@ def _get_ascii_safe_temp_dir(fallback_dir: str) -> str:
 def embed_subtitle_into_mp4(
     video_path: str, srt_path: str, lang_code: str, ffmpeg_path: str,
     on_log: Optional[Callable[[str], None]] = None,
-    cancel_event: Optional[Any] = None
+    cancel_event: Optional[Any] = None,
+    total_duration: float = 0.0,
+    on_progress_pct: Optional[Callable[[float, str], None]] = None,
 ) -> bool:
     """Muxes .srt into MP4 as soft subtitle stream via FFmpeg, atomically replacing video file."""
     if cancel_event and cancel_event.is_set():
@@ -183,30 +187,18 @@ def embed_subtitle_into_mp4(
         "-metadata:s:s:0", f"language={iso3}", "-disposition:s:0", "default", "-f", "mp4", temp_mp4
     ]
 
-    p: Optional[subprocess.Popen] = None
     cflags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if IS_WINDOWS else 0
 
     def _exec(current_cmd: List[str]) -> Tuple[int, str]:
-        nonlocal p
-        p = None
-        if cancel_event is None:
-            res = subprocess.run(current_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace", cwd=ascii_work_dir, creationflags=cflags)
-            return res.returncode, res.stderr
-        p = subprocess.Popen(current_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace", cwd=ascii_work_dir, creationflags=cflags)
-        while True:
-            try:
-                _, err = p.communicate(timeout=0.05)
-                return p.returncode, err
-            except subprocess.TimeoutExpired:
-                if cancel_event and cancel_event.is_set():
-                    try: p.kill()
-                    except Exception: pass
-                    try: p.communicate()
-                    except Exception: pass
-                    if os.path.exists(temp_mp4):
-                        try: os.remove(temp_mp4)
-                        except Exception: pass
-                    return -999, "Cancelled"
+        rc, err = run_ffmpeg_with_progress(
+            current_cmd, cancel_event=cancel_event, creationflags=cflags,
+            cwd=ascii_work_dir, total_duration=total_duration,
+            on_progress_pct=on_progress_pct, subprocess_mod=subprocess
+        )
+        if rc == -999 and os.path.exists(temp_mp4):
+            try: os.remove(temp_mp4)
+            except Exception: pass
+        return rc, err
 
     try:
         rc, err = _exec(cmd_copy)
@@ -229,18 +221,12 @@ def embed_subtitle_into_mp4(
             except Exception: pass
         return False
     except Exception as exc:
-        if p and p.poll() is None:
-            try: p.kill()
-            except Exception: pass
         if on_log: on_log(f"[SUBTITLES] FFmpeg soft-muxing skipped: {exc}")
         if os.path.exists(temp_mp4):
             try: os.remove(temp_mp4)
             except Exception: pass
         return False
     finally:
-        if p and p.poll() is None:
-            try: p.kill()
-            except Exception: pass
         if temp_srt != srt_path and os.path.exists(temp_srt):
             try: os.remove(temp_srt)
             except Exception: pass
@@ -251,6 +237,8 @@ def burn_subtitle_into_video(
     cancel_event: Optional[Any] = None,
     subtitle_position: str = "bottom",
     style_config: Optional[Dict[str, Any]] = None,
+    total_duration: float = 0.0,
+    on_progress_pct: Optional[Callable[[float, str], None]] = None,
 ) -> bool:
     """Burns subtitles directly onto video frames using ASS styling filter or robust fallback chain."""
     if cancel_event and cancel_event.is_set():
@@ -309,45 +297,18 @@ def burn_subtitle_into_video(
         f"subtitles='{escaped_srt}':force_style='{style_str}'",
     ])
 
-    p: Optional[subprocess.Popen] = None
     cflags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if IS_WINDOWS else 0
 
     def _run_burn_cmd(current_cmd: List[str]) -> Tuple[int, str]:
-        nonlocal p
-        p = None
-        if cancel_event is None:
-            res = subprocess.run(
-                current_cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                cwd=ascii_work_dir,
-                creationflags=cflags
-            )
-            return res.returncode, res.stderr
-        p = subprocess.Popen(
-            current_cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            cwd=ascii_work_dir,
-            creationflags=cflags
+        rc, err = run_ffmpeg_with_progress(
+            current_cmd, cancel_event=cancel_event, creationflags=cflags,
+            cwd=ascii_work_dir, total_duration=total_duration,
+            on_progress_pct=on_progress_pct, subprocess_mod=subprocess
         )
-        while True:
-            try:
-                _, err = p.communicate(timeout=0.05)
-                return p.returncode, err
-            except subprocess.TimeoutExpired:
-                if cancel_event and cancel_event.is_set():
-                    try: p.kill()
-                    except Exception: pass
-                    try: p.communicate()
-                    except Exception: pass
-                    return -999, "Cancelled"
+        if rc == -999 and os.path.exists(temp_burn_mp4):
+            try: os.remove(temp_burn_mp4)
+            except Exception: pass
+        return rc, err
 
     try:
         success = False
@@ -402,9 +363,6 @@ def burn_subtitle_into_video(
             except Exception: pass
         return False
     except Exception as exc:
-        if p and p.poll() is None:
-            try: p.kill()
-            except Exception: pass
         if on_log:
             on_log(f"[SUBTITLES] FFmpeg burn exception: {exc}")
         if os.path.exists(temp_burn_mp4):
@@ -412,9 +370,6 @@ def burn_subtitle_into_video(
             except Exception: pass
         return False
     finally:
-        if p and p.poll() is None:
-            try: p.kill()
-            except Exception: pass
         if os.path.exists(burn_srt_path):
             try: os.remove(burn_srt_path)
             except Exception: pass
@@ -425,7 +380,9 @@ def burn_subtitle_into_video(
 
 def handle_subtitles_post_download(
     stream_info: Any, output_path: str, on_log: Optional[Callable[[str], None]] = None,
-    cancel_event: Optional[Any] = None
+    cancel_event: Optional[Any] = None,
+    total_duration: float = 0.0,
+    on_progress_pct: Optional[Callable[[float, str], None]] = None,
 ) -> str:
     """Post-download pipeline: handles external SRT, soft-muxing, or hard burning based on selected mode. Returns final output path."""
     sub = getattr(stream_info, "subtitle_track", None) or getattr(stream_info, "selected_subtitle_track", None)
@@ -475,6 +432,14 @@ def handle_subtitles_post_download(
             return output_path
 
         sub_kwargs = {"cancel_event": cancel_event} if cancel_event is not None else {}
+        if on_progress_pct is not None:
+            sub_kwargs["on_progress_pct"] = on_progress_pct
+        eff_dur = float(total_duration or 0.0)
+        if eff_dur <= 0.0 and not hasattr(stream_info, "_mock_name"):
+            d = getattr(stream_info, "duration", 0.0) or getattr(stream_info, "duration_seconds", 0.0)
+            if isinstance(d, (int, float)) and d > 0: eff_dur = float(d)
+        if eff_dur > 0.0 and on_progress_pct is not None:
+            sub_kwargs["total_duration"] = eff_dur
         orig_stem = os.path.splitext(output_path)[0]
         default_srt = f"{orig_stem}.srt"
 

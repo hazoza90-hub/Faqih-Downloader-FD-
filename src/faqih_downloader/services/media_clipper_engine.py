@@ -115,7 +115,8 @@ def export_cues_to_srt(cues: list, output_srt_path: str) -> bool:
 def trim_media_file(
     file_path: str, clip_start: float, clip_end: float,
     ffmpeg_bin: Optional[str] = None, on_log: Optional[Callable[[str], None]] = None,
-    cancel_event: Optional[Any] = None, audio_boost: bool = False
+    cancel_event: Optional[Any] = None, audio_boost: bool = False,
+    total_duration: float = 0.0, on_progress_pct: Optional[Callable[[float, str], None]] = None,
 ) -> bool:
     """Trims video or audio file to [clip_start, clip_end] in-place with frame-accurate verification."""
     if clip_end <= clip_start or clip_start < 0 or not os.path.isfile(file_path): return False
@@ -129,24 +130,23 @@ def trim_media_file(
 
     base, ext = os.path.splitext(file_path)
     temp_clip = f"{base}.sd_clip_{os.getpid()}_{int(time.time()*1000)}{ext}"
-    from .subtitle_processor import run_cancellable_ffmpeg
+    from .media_env_helpers import run_ffmpeg_with_progress
     exp_dur = clip_end - clip_start
-    copy_ok = False
-    is_audio = ext.lower() in (".mp3", ".m4a", ".aac", ".wav", ".opus", ".flac")
+    copy_ok, is_audio, rc, err = False, ext.lower() in (".mp3", ".m4a", ".aac", ".wav", ".opus", ".flac"), -1, ""
+    from .audio_and_chapters_engine import get_studio_audio_boost_filter
+    af_filt = get_studio_audio_boost_filter() if audio_boost else ""
+    ac = "libmp3lame" if ext.lower() == ".mp3" else "aac"
 
     if not audio_boost:
         cmd_copy = [ffmpeg_bin, "-y", "-ss", f"{clip_start:.3f}", "-to", f"{clip_end:.3f}", "-i", os.path.abspath(file_path), "-c", "copy", "-avoid_negative_ts", "make_zero", temp_clip]
-        res = run_cancellable_ffmpeg(cmd_copy, cancel_event=cancel_event)
-        if res.returncode == 0 and os.path.isfile(temp_clip) and os.path.getsize(temp_clip) > 0:
+        rc, err = run_ffmpeg_with_progress(cmd_copy, cancel_event=cancel_event, total_duration=exp_dur, on_progress_pct=on_progress_pct)
+        if rc == 0 and os.path.isfile(temp_clip) and os.path.getsize(temp_clip) > 0:
             actual_dur = probe_media_duration(temp_clip, ffmpeg_bin)
             if actual_dur > 0 and abs(actual_dur - exp_dur) <= 0.6: copy_ok = True
     else:
-        from .audio_and_chapters_engine import get_studio_audio_boost_filter
-        af_filt = get_studio_audio_boost_filter()
-        ac = "libmp3lame" if ext.lower() == ".mp3" else "aac"
         cmd_boost = [ffmpeg_bin, "-y", "-ss", f"{clip_start:.3f}", "-to", f"{clip_end:.3f}", "-i", os.path.abspath(file_path)] + (["-af", af_filt, "-c:a", ac, "-b:a", "192k"] if is_audio else ["-c:v", "copy", "-af", af_filt, "-c:a", "aac", "-b:a", "192k", "-avoid_negative_ts", "make_zero"]) + [temp_clip]
-        res = run_cancellable_ffmpeg(cmd_boost, cancel_event=cancel_event)
-        if res.returncode == 0 and os.path.isfile(temp_clip) and os.path.getsize(temp_clip) > 0:
+        rc, err = run_ffmpeg_with_progress(cmd_boost, cancel_event=cancel_event, total_duration=exp_dur, on_progress_pct=on_progress_pct)
+        if rc == 0 and os.path.isfile(temp_clip) and os.path.getsize(temp_clip) > 0:
             actual_dur = probe_media_duration(temp_clip, ffmpeg_bin)
             if actual_dur > 0 and abs(actual_dur - exp_dur) <= 0.6: copy_ok = True
 
@@ -154,13 +154,11 @@ def trim_media_file(
         if os.path.exists(temp_clip):
             try: os.remove(temp_clip)
             except Exception: pass
-        from .audio_and_chapters_engine import get_studio_audio_boost_filter
-        af_args = ["-af", get_studio_audio_boost_filter()] if audio_boost else []
-        ac = "libmp3lame" if ext.lower() == ".mp3" else "aac"
+        af_args = ["-af", af_filt] if audio_boost else []
         cmd_rec = [ffmpeg_bin, "-y", "-ss", f"{clip_start:.3f}", "-to", f"{clip_end:.3f}", "-i", os.path.abspath(file_path)] + ([*af_args, "-c:a", ac, "-b:a", "192k"] if is_audio else ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "22", *af_args, "-c:a", "aac", "-b:a", "192k"]) + [temp_clip]
-        res = run_cancellable_ffmpeg(cmd_rec, cancel_event=cancel_event)
+        rc, err = run_ffmpeg_with_progress(cmd_rec, cancel_event=cancel_event, total_duration=exp_dur, on_progress_pct=on_progress_pct)
 
-    if res.returncode == 0 and os.path.isfile(temp_clip) and os.path.getsize(temp_clip) > 0:
+    if rc == 0 and os.path.isfile(temp_clip) and os.path.getsize(temp_clip) > 0:
         for _ in range(4):
             try: os.replace(temp_clip, file_path); break
             except Exception: time.sleep(0.08)
@@ -169,7 +167,7 @@ def trim_media_file(
     if os.path.exists(temp_clip):
         try: os.remove(temp_clip)
         except Exception: pass
-    if on_log and getattr(res, "stderr", None): on_log(f"[CLIPPER] Trimming failed: {res.stderr[-180:].strip()}")
+    if on_log and err: on_log(f"[CLIPPER] Trimming failed: {err[-180:].strip()}")
     return False
 
 def prepare_post_download_subtitles(stream_info: Any, srt_path: str, orig_stem: str) -> None:
@@ -202,7 +200,8 @@ def prepare_post_download_subtitles(stream_info: Any, srt_path: str, orig_stem: 
 def process_post_download_clip_and_subtitles(
     stream_info: Any, target_path: str,
     on_log: Optional[Callable[[str], None]] = None,
-    cancel_event: Optional[Any] = None
+    cancel_event: Optional[Any] = None,
+    on_stage_progress: Optional[Callable[[str, float, str], None]] = None,
 ) -> str:
     """Unified coordinator step handling subtitle embedding/burning, audio boost, and clip trimming."""
     sub = getattr(stream_info, "subtitle_track", None) or getattr(stream_info, "selected_subtitle_track", None)
@@ -219,7 +218,11 @@ def process_post_download_clip_and_subtitles(
             sub = clone_clean_subtitle_track(sub); sub["style_config"] = sc
             for attr in ("subtitle_track", "selected_subtitle_track"): setattr(stream_info, attr, sub)
         from .subtitle_processor import handle_subtitles_post_download
-        f_path = handle_subtitles_post_download(stream_info, target_path, on_log=on_log, cancel_event=cancel_event)
+        s_mode = getattr(stream_info, "subtitle_embed_mode", "hard_burn")
+        sub_stage = "Burning Subtitles" if s_mode == "hard_burn" else "Embedding Subtitles"
+        dur = float(getattr(stream_info, "duration", 0.0) or 0.0)
+        _sub_cb = (lambda p, eta: on_stage_progress(sub_stage, p, eta)) if on_stage_progress else None
+        f_path = handle_subtitles_post_download(stream_info, target_path, on_log=on_log, cancel_event=cancel_event, total_duration=dur, on_progress_pct=_sub_cb)
         if f_path and os.path.isfile(f_path):
             target_path = f_path
             if getattr(stream_info, "_audio_boost_applied", False): boost_applied = True
@@ -229,22 +232,22 @@ def process_post_download_clip_and_subtitles(
         ff = find_ffmpeg_bin(); exp_d = clip_end - clip_start
         cur_d = probe_media_duration(target_path, ff) if ff else -1.0
         apply_boost_here = (audio_boost and not boost_applied)
+        _clip_cb = (lambda p, eta: on_stage_progress("Clipping", p, eta)) if on_stage_progress else None
         if (cur_d <= 0 or cur_d > exp_d + 0.8) or apply_boost_here:
-            if trim_media_file(target_path, clip_start, clip_end, ffmpeg_bin=ff, on_log=on_log, cancel_event=cancel_event, audio_boost=apply_boost_here) and apply_boost_here:
+            if trim_media_file(target_path, clip_start, clip_end, ffmpeg_bin=ff, on_log=on_log, cancel_event=cancel_event, audio_boost=apply_boost_here, total_duration=exp_d, on_progress_pct=_clip_cb) and apply_boost_here:
                 boost_applied = True
 
     if audio_boost and not boost_applied and os.path.isfile(target_path):
         from .audio_and_chapters_engine import apply_audio_boost_to_file
         from .media_env_helpers import find_ffmpeg_bin
+        if on_stage_progress: on_stage_progress("Audio Boost", 10.0, "--:--")
         if apply_audio_boost_to_file(target_path, ffmpeg_bin=find_ffmpeg_bin(), on_log=on_log, cancel_event=cancel_event): boost_applied = True
+        if on_stage_progress: on_stage_progress("Audio Boost", 100.0, "00:00")
 
     if (has_clip or chapter_title) and os.path.isfile(target_path):
-        d_dir, f_name = os.path.split(target_path); stem, ext = os.path.splitext(f_name); clean_ch = ""
-        if chapter_title:
-            clean_ch = re.sub(r'[\[\(\]\)\s\-–—:|•~.]+$', '', re.sub(r'^[\[\(\]\)\s\-–—:|•~.]+', '', re.sub(r'[<>:"/\\|?*\x00-\x1f]', '', chapter_title).strip())).strip()
-        new_stem = stem
-        if clean_ch and f"[{clean_ch}]" not in new_stem: new_stem = f"{new_stem} [{clean_ch}]"
-        if has_clip and "[Clip]" not in new_stem: new_stem = f"{new_stem} [Clip]"
+        d_dir, f_name = os.path.split(target_path); stem, ext = os.path.splitext(f_name)
+        clean_ch = re.sub(r'[\[\(\]\)\s\-–—:|•~.]+$', '', re.sub(r'^[\[\(\]\)\s\-–—:|•~.]+', '', re.sub(r'[<>:"/\\|?*\x00-\x1f]', '', chapter_title).strip())).strip() if chapter_title else ""
+        new_stem = f"{stem}{f' [{clean_ch}]' if (clean_ch and f'[{clean_ch}]' not in stem) else ''}{' [Clip]' if (has_clip and '[Clip]' not in stem) else ''}"
         if new_stem != stem:
             new_path = os.path.join(d_dir, f"{new_stem}{ext}")
             for _ in range(4):
@@ -260,22 +263,15 @@ def process_post_download_clip_and_subtitles(
 
 def sync_clipper_state_from_body(session: Any, body: Dict[str, Any], opt: Any = None) -> None:
     """Helper for preview_stream_bridge to sync live clipper, text edits, dual subs, audio boost, and chapters."""
-    c_start = float(body.get("clip_start", getattr(session, "clip_start", 0.0) or 0.0))
-    c_end = float(body.get("clip_end", getattr(session, "clip_end", 0.0) or 0.0))
-    edits = dict(body.get("sub_custom_edits", getattr(session, "sub_custom_edits", {}) or {}))
-    dual = bool(body.get("dual_sub", getattr(session, "dual_sub", False)))
-    s_idx = int(body.get("sec_s_idx", getattr(session, "sec_s_idx", -1)))
-    boost = bool(body.get("audio_boost", getattr(session, "audio_boost", False)))
-    ch_title = str(body.get("chapter_title", getattr(session, "chapter_title", "")) or "").strip()
-    vid_dur = float(body.get("duration", 0.0) or 0.0)
-    if vid_dur <= 0 and isinstance(getattr(session, "info_dict", None), dict):
-        vid_dur = float(session.info_dict.get("duration", 0.0) or 0.0)
-    if vid_dur > 0 and isinstance(getattr(session, "info_dict", None), dict):
-        if float(session.info_dict.get("duration", 0.0) or 0.0) <= 0: session.info_dict["duration"] = vid_dur
+    c_start, c_end = float(body.get("clip_start", getattr(session, "clip_start", 0.0) or 0.0)), float(body.get("clip_end", getattr(session, "clip_end", 0.0) or 0.0))
+    edits, dual = dict(body.get("sub_custom_edits", getattr(session, "sub_custom_edits", {}) or {})), bool(body.get("dual_sub", getattr(session, "dual_sub", False)))
+    s_idx, boost = int(body.get("sec_s_idx", getattr(session, "sec_s_idx", -1))), bool(body.get("audio_boost", getattr(session, "audio_boost", False)))
+    ch_title, vid_dur = str(body.get("chapter_title", getattr(session, "chapter_title", "")) or "").strip(), float(body.get("duration", 0.0) or 0.0)
+    if vid_dur <= 0 and isinstance(getattr(session, "info_dict", None), dict): vid_dur = float(session.info_dict.get("duration", 0.0) or 0.0)
+    if vid_dur > 0 and isinstance(getattr(session, "info_dict", None), dict) and float(session.info_dict.get("duration", 0.0) or 0.0) <= 0: session.info_dict["duration"] = vid_dur
 
-    session.clip_start, session.clip_end = c_start, c_end
-    session.sub_custom_edits, session.dual_sub, session.sec_s_idx = edits, dual, s_idx
-    session.audio_boost, session.chapter_title = boost, ch_title
+    session.clip_start, session.clip_end, session.sub_custom_edits = c_start, c_end, edits
+    session.dual_sub, session.sec_s_idx, session.audio_boost, session.chapter_title = dual, s_idx, boost, ch_title
 
     sub_trks = getattr(session, "subtitle_tracks", None)
     if isinstance(sub_trks, list):
@@ -292,12 +288,8 @@ def sync_clipper_state_from_body(session: Any, body: Dict[str, Any], opt: Any = 
 
     target_opts = list(getattr(session, "options", []) or [])
     m = getattr(session, "modal_ref", None)
-    if m and hasattr(m, "options") and m.options:
-        for mo in m.options:
-            if mo not in target_opts: target_opts.append(mo)
-    if opt and opt not in target_opts: target_opts.append(opt)
-    if m and hasattr(m, "selected_option") and m.selected_option and m.selected_option not in target_opts:
-        target_opts.append(m.selected_option)
+    for cand in ([*(getattr(m, "options", []) or []), opt, getattr(m, "selected_option", None)] if m else [opt]):
+        if cand and cand not in target_opts: target_opts.append(cand)
 
     for target_opt in target_opts:
         target_opt.clip_start_sec, target_opt.clip_end_sec = c_start, c_end

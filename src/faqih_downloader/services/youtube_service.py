@@ -466,7 +466,13 @@ class YouTubeResolver(YouTubeFormatBuilderMixin):
         return stream_info
 
     @staticmethod
-    def merge_video_audio(video_path: str, audio_path: str, output_path: str, on_log: Optional[Callable[[str], None]] = None, cancel_event: Optional[Any] = None) -> bool:
+    def merge_video_audio(
+        video_path: str, audio_path: str, output_path: str,
+        on_log: Optional[Callable[[str], None]] = None,
+        cancel_event: Optional[Any] = None,
+        total_duration: float = 0.0,
+        on_progress_pct: Optional[Callable[[float, str], None]] = None
+    ) -> bool:
         """Lossless FFmpeg stream multiplexing (-c copy) or transcode fallback."""
         ffmpeg_bin = find_ffmpeg_bin()
         if not ffmpeg_bin:
@@ -481,28 +487,17 @@ class YouTubeResolver(YouTubeFormatBuilderMixin):
         if on_log: on_log(f"[FFMPEG] Merging streams into final file: {os.path.basename(output_path)}...")
 
         flags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if sys.platform.startswith("win") else 0
+        from .media_env_helpers import run_ffmpeg_with_progress
+
         def _run_proc(cmd_list):
-            if cancel_event is None:
-                res = subprocess.run(cmd_list, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace", creationflags=flags)
-                return res.returncode, res.stderr
-            p = subprocess.Popen(cmd_list, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace", creationflags=flags)
-            try:
-                while True:
-                    try:
-                        _, err = p.communicate(timeout=0.05)
-                        return p.returncode, err
-                    except subprocess.TimeoutExpired:
-                        if cancel_event and cancel_event.is_set():
-                            try: p.kill(); p.communicate()
-                            except Exception: pass
-                            if os.path.exists(output_path):
-                                try: os.remove(output_path)
-                                except Exception: pass
-                            return -999, "Cancelled"
-            finally:
-                if p and p.poll() is None:
-                    try: p.kill()
-                    except Exception: pass
+            rc, err = run_ffmpeg_with_progress(
+                cmd_list, cancel_event=cancel_event, creationflags=flags,
+                total_duration=total_duration, on_progress_pct=on_progress_pct, subprocess_mod=subprocess
+            )
+            if rc == -999 and os.path.exists(output_path):
+                try: os.remove(output_path)
+                except Exception: pass
+            return rc, err
 
         def _build_cmd(extra_args):
             c = [ffmpeg_bin, "-y", "-i", video_path, "-i", audio_path, "-map", "0:v:0", "-map", "1:a:0"] + extra_args

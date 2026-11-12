@@ -962,6 +962,139 @@ class TestWindowedRangeAndWarnings(unittest.TestCase):
         self.assertEqual(parent_app.conn_var.get(), "16")
         self.assertTrue(len(sync_called) > 0)
 
+    def test_run_ffmpeg_with_progress_mock_fallback(self):
+        """Verifies run_ffmpeg_with_progress handles mocked subprocess and reports completion."""
+        from faqih_downloader.services.media_env_helpers import run_ffmpeg_with_progress
+
+        mock_sp = MagicMock()
+        mock_proc = MagicMock()
+        mock_proc.poll.return_value = 0
+        mock_proc.returncode = 0
+        mock_proc.communicate.return_value = ("", "")
+        mock_sp.Popen.return_value = mock_proc
+
+        progresses = []
+        rc, err = run_ffmpeg_with_progress(
+            ["ffmpeg", "-i", "in.mp4", "out.mp4"],
+            total_duration=100.0,
+            on_progress_pct=lambda p, eta: progresses.append((p, eta)),
+            subprocess_mod=mock_sp
+        )
+        self.assertEqual(rc, 0)
+        self.assertTrue(any(p >= 99.0 for p, _ in progresses))
+
+    def test_run_ffmpeg_with_progress_cancel_event(self):
+        """Verifies run_ffmpeg_with_progress immediately terminates if cancel_event is set."""
+        from faqih_downloader.services.media_env_helpers import run_ffmpeg_with_progress
+        import threading
+
+        cancel_ev = threading.Event()
+        cancel_ev.set()
+        rc, err = run_ffmpeg_with_progress(["ffmpeg"], cancel_event=cancel_ev)
+        self.assertEqual(rc, -999)
+        self.assertEqual(err, "Cancelled")
+
+    def test_stream_coordinator_emit_stage_progress(self):
+        """Verifies StreamDownloadCoordinator._emit_stage_progress constructs virtual chunks and emits stage."""
+        from faqih_downloader.core.stream_coordinator import StreamDownloadCoordinator
+        from faqih_downloader.services.youtube_models import YouTubeStreamInfo
+
+        si = YouTubeStreamInfo(
+            video_url="https://example.com/video.mp4",
+            video_resolution="1080p",
+            video_size=10000000,
+            video_id="test_vid_stage",
+            title="Stage Test Video",
+            clean_filename="test.mp4",
+            is_progressive=True,
+            duration=120.0
+        )
+        prog_events = []
+        chunk_updates = []
+
+        coord = StreamDownloadCoordinator(
+            stream_info=si,
+            destination_path="test_stage.mp4",
+            max_connections=4,
+            on_progress=lambda d, t, sp, eta, ac: prog_events.append((d, t, sp, eta, ac)),
+            on_chunk_update=lambda: chunk_updates.append(True)
+        )
+        coord._last_active_speed = 500000.0
+
+        coord._emit_stage_progress("Merging", 50.0, "00:45")
+
+        self.assertTrue(len(prog_events) > 0)
+        d, t, sp, eta, ac = prog_events[-1]
+        self.assertEqual(eta, "Merging|00:45")
+        self.assertEqual(ac, 4)
+        self.assertEqual(d, t // 2)
+
+        chunks = coord.get_chunks_snapshot()
+        self.assertEqual(len(chunks), 4)
+        self.assertTrue(all(c.downloaded_bytes > 0 for c in chunks))
+
+    def test_kanban_active_column_stage_progress_parsing(self):
+        """Verifies KanbanActiveColumnMixin parses stage|eta and updates Arabic text."""
+        if not self.root:
+            self.skipTest("Tkinter GUI not available")
+
+        from faqih_downloader.ui.panels.kanban_active_mixin import KanbanActiveColumnMixin
+
+        class DummyKanban(KanbanActiveColumnMixin):
+            def __init__(self, root):
+                self.root = root
+                self._active_stream_live = False
+                self._build_col2_active(root)
+
+        kanban = DummyKanban(self.root)
+        chunks = []
+
+        # Test Merging with timer
+        kanban.update_kanban_active_stream(
+            filename="vid.mp4",
+            pct=60.0,
+            speed_str="1.2 MB/s",
+            chunks=chunks,
+            active_chunks=4,
+            downloaded=600,
+            total=1000,
+            eta="Merging|00:35"
+        )
+        eta_txt = kanban.lbl_a1_eta.cget("text")
+        self.assertIn("دمج", eta_txt)
+        self.assertIn("00:35", eta_txt)
+        self.assertEqual(kanban.lbl_a1_pct.cget("text"), "60%")
+
+        # Test Burning Subtitles with fallback timer
+        kanban.update_kanban_active_stream(
+            filename="vid.mp4",
+            pct=80.0,
+            speed_str="1.2 MB/s",
+            chunks=chunks,
+            active_chunks=4,
+            downloaded=800,
+            total=1000,
+            eta="Burning Subtitles|--:--"
+        )
+        eta_txt2 = kanban.lbl_a1_eta.cget("text")
+        self.assertIn("حرق", eta_txt2)
+        self.assertIn("80%", eta_txt2)
+
+    def test_rounded_glass_card_resize_deduplication(self):
+        """Verifies RoundedGlassCard eliminates recursive configure loop and dedupes redraws."""
+        if not self.root:
+            self.skipTest("Tkinter GUI not available")
+
+        from faqih_downloader.utils.window_effects import RoundedGlassCard
+
+        card = RoundedGlassCard(self.root, width=200, height=100, radius=12)
+        card.update_idletasks()
+
+        # Simulate _on_inner_resize when card width is already established (> 20)
+        with patch.object(card, "configure") as mock_conf:
+            card._on_inner_resize()
+            mock_conf.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
