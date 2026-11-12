@@ -254,6 +254,7 @@ def setup_vault_scroll_view(col_frame: Any, body: Any, panel: Any = None) -> tup
 
     container = tk.Frame(cv, bg="#0b0e14")
     win_id = cv.create_window(0, 0, window=container, anchor="nw")
+    cv._win_id = win_id
 
     cv._scrollregion_pending = False
 
@@ -287,11 +288,6 @@ def setup_vault_scroll_view(col_frame: Any, body: Any, panel: Any = None) -> tup
         if cv.winfo_exists() and e.width > 10 and e.width != getattr(cv, "_last_win_w", 0):
             cv._last_win_w = e.width
             cv.itemconfigure(win_id, width=e.width)
-            try:
-                if getattr(cv.winfo_toplevel(), "_is_resizing_window", False):
-                    container.update_idletasks()
-            except Exception:
-                pass
 
     cv.bind("<Configure>", _on_cv_configure)
 

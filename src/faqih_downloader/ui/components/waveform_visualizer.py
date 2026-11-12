@@ -41,9 +41,33 @@ class WaveformVisualizerCanvas:
                 highlightthickness=0,
                 relief="flat"
             )
-            self.canvas.bind("<Configure>", lambda e: (e.width, e.height) != getattr(self, "_last_canvas_size", None) and self.redraw())
+            self.canvas._visualizer_owner = self
+            self.canvas.bind("<Configure>", self._on_canvas_configure)
         else:
             self.canvas = None  # type: ignore
+
+    def _on_canvas_configure(self, event):
+        if not self.canvas or not getattr(self.canvas, "winfo_exists", lambda: False)():
+            return
+        w = getattr(event, "width", 0)
+        h = getattr(event, "height", 0)
+        last_sz = getattr(self, "_last_canvas_size", None)
+        if (w, h) == last_sz:
+            return
+        top = None
+        try: top = self.canvas.winfo_toplevel()
+        except Exception: pass
+        if top and getattr(top, "_is_resizing_window", False):
+            if last_sz and w > 10:
+                old_w, _old_h = last_sz
+                if old_w > 10:
+                    try:
+                        self.canvas.scale("all", 0, 0, float(w) / float(old_w), 1.0)
+                    except Exception:
+                        pass
+                    self._last_canvas_size = (w, h)
+            return
+        self.redraw()
 
     def pack(self, **kwargs):
         if self.canvas:

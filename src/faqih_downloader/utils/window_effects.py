@@ -308,19 +308,35 @@ class RoundedGlassCard(_BaseCanvas):
         if state_sig is None:
             b_curr = "#38bdf8" if (self._is_hovered and not self._orig_glow_color) else self.border_color
             state_sig = (w, h, b_curr, self.glow_color, self.card_bg)
-        self.delete("card_bg")
         pad = 2
-
         top = None
         try: top = self.winfo_toplevel()
         except Exception: pass
         if top and getattr(top, "_is_resizing_window", False):
             outline_col = self.glow_color or state_sig[2]
             w_line = 2 if self.glow_color else 1
-            self.create_rectangle(pad, pad, w - pad, h - pad, fill=self.card_bg, outline=outline_col, width=w_line, tags="card_bg")
-            self.tag_lower("card_bg")
+            fast_rect = getattr(self, "_fast_resize_rect", None)
+            if fast_rect is not None:
+                try:
+                    self.coords(fast_rect, pad, pad, w - pad, h - pad)
+                    self._last_drawn_state = None
+                    return
+                except Exception:
+                    self._fast_resize_rect = None
+            self.delete("card_bg")
+            self._fast_resize_rect = self.create_rectangle(
+                pad, pad, w - pad, h - pad,
+                fill=self.card_bg, outline=outline_col, width=w_line, tags="card_bg"
+            )
+            try:
+                self.tag_lower(self._fast_resize_rect)
+            except Exception:
+                pass
             self._last_drawn_state = None
             return
+
+        self._fast_resize_rect = None
+        self.delete("card_bg")
 
         if self.glow_color:
             draw_glow_border(

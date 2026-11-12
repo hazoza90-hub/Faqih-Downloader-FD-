@@ -27,6 +27,21 @@ from .window_resize_mixin import WindowResizeMixin
 class WindowChromeMixin(ThemeControllerMixin, DispatchControllerMixin, WindowLifecycleMixin, WindowResizeMixin):
     """Provides window setup, custom frameless title bar dragging, and window geometry."""
 
+    def _clear_layered_style_if_opaque(self, alpha: float):
+        """Removes Win32 WS_EX_LAYERED redirection when window is opaque (>= 0.99) for crisp 60fps resizing."""
+        if not IS_WINDOWS or float(alpha) < 0.99 or not getattr(self, "root", None):
+            return
+        try:
+            user32 = ctypes.windll.user32
+            hwnd = user32.GetParent(self.root.winfo_id()) or self.root.winfo_id()
+            if not hwnd:
+                return
+            cur_ex = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+            if cur_ex & 0x00080000:
+                user32.SetWindowLongW(hwnd, GWL_EXSTYLE, cur_ex & ~0x00080000)
+        except Exception:
+            pass
+
     @staticmethod
     def _format_geometry(w: Optional[int], h: Optional[int], x: int, y: int) -> str:
         px, py = (f"+{int(x)}" if int(x) >= 0 else f"{int(x)}"), (f"+{int(y)}" if int(y) >= 0 else f"{int(y)}")
@@ -104,14 +119,22 @@ class WindowChromeMixin(ThemeControllerMixin, DispatchControllerMixin, WindowLif
                 set_setting("window_opacity", 1.0)
                 set_setting("window_alpha_migrated_v203", True)
             self._window_alpha = alpha
-            apply_acrylic_or_mica_effect(self.root, alpha=alpha)
+            eff_alpha = 1.0 if alpha >= 0.99 else alpha
+            apply_acrylic_or_mica_effect(self.root, alpha=eff_alpha)
             if not is_test_environment() and not getattr(self, "_start_hidden", False):
                 self.root.attributes("-alpha", 0.2)
                 for _s in range(1, 9):
-                    _a = 0.2 + (alpha - 0.2) * (_s / 8.0)
-                    self.root.after(_s * 20, lambda a=_a: self.root.winfo_exists() and self.root.attributes("-alpha", a))
+                    _a = eff_alpha if _s == 8 else (0.2 + (eff_alpha - 0.2) * (_s / 8.0))
+                    def _step_alpha(a=_a, is_last=(_s == 8)):
+                        if not getattr(self, "root", None) or not self.root.winfo_exists():
+                            return
+                        self.root.attributes("-alpha", a)
+                        if is_last:
+                            self._clear_layered_style_if_opaque(a)
+                    self.root.after(_s * 20, _step_alpha)
             else:
-                self.root.attributes("-alpha", alpha)
+                self.root.attributes("-alpha", eff_alpha)
+                self._clear_layered_style_if_opaque(eff_alpha)
         except Exception: pass
         if getattr(self, "_start_hidden", False):
             try: self.root.withdraw()
@@ -135,7 +158,9 @@ class WindowChromeMixin(ThemeControllerMixin, DispatchControllerMixin, WindowLif
         if getattr(event, "widget", None) == self.root:
             try:
                 target_alpha = float(getattr(self, "_window_alpha", None) or get_setting("window_alpha", 1.0))
-                self.root.attributes("-alpha", target_alpha)
+                eff_alpha = 1.0 if target_alpha >= 0.99 else target_alpha
+                self.root.attributes("-alpha", eff_alpha)
+                self._clear_layered_style_if_opaque(eff_alpha)
             except Exception: pass
             if getattr(self, "_start_hidden", False):
                 self.restore_window()
@@ -147,7 +172,9 @@ class WindowChromeMixin(ThemeControllerMixin, DispatchControllerMixin, WindowLif
                 if float(self.root.attributes("-alpha") or 1.0) < 0.60:
                     self._cancel_min_anim_jobs()
                     target_alpha = float(getattr(self, "_window_alpha", None) or get_setting("window_alpha", 1.0))
-                    self.root.attributes("-alpha", target_alpha)
+                    eff_alpha = 1.0 if target_alpha >= 0.99 else target_alpha
+                    self.root.attributes("-alpha", eff_alpha)
+                    self._clear_layered_style_if_opaque(eff_alpha)
             except Exception: pass
 
     def restore_window(self):
@@ -155,8 +182,9 @@ class WindowChromeMixin(ThemeControllerMixin, DispatchControllerMixin, WindowLif
         self._cancel_min_anim_jobs()
         self._start_hidden = False
         target_alpha = float(getattr(self, "_window_alpha", None) or get_setting("window_alpha", 1.0))
+        eff_alpha = 1.0 if target_alpha >= 0.99 else target_alpha
         try:
-            self.root.attributes("-alpha", target_alpha)
+            self.root.attributes("-alpha", eff_alpha)
             self.root.deiconify()
             if getattr(self, "_normal_geometry", None) and self.root.winfo_width() <= 1:
                 self.root.geometry(self._normal_geometry)
@@ -166,13 +194,17 @@ class WindowChromeMixin(ThemeControllerMixin, DispatchControllerMixin, WindowLif
             try:
                 hwnd = ctypes.windll.user32.GetParent(self.root.winfo_id()) or self.root.winfo_id()
                 cur_ex = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-                ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, (cur_ex & ~WS_EX_TOOLWINDOW) | WS_EX_APPWINDOW)
+                new_ex = (cur_ex & ~WS_EX_TOOLWINDOW) | WS_EX_APPWINDOW
+                if eff_alpha >= 0.99:
+                    new_ex &= ~0x00080000
+                ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, new_ex)
                 ctypes.windll.user32.ShowWindow(hwnd, SW_RESTORE)
                 ctypes.windll.user32.ShowWindow(hwnd, SW_SHOW)
                 ctypes.windll.user32.SetWindowPos(hwnd, -1, 0, 0, 0, 0, 0x0043)
                 ctypes.windll.user32.SetWindowPos(hwnd, -2, 0, 0, 0, 0, 0x0043)
                 ctypes.windll.user32.SetForegroundWindow(hwnd)
             except Exception: pass
+        self._clear_layered_style_if_opaque(eff_alpha)
         try:
             self.root.lift()
             self.root.attributes("-topmost", True)
@@ -377,7 +409,12 @@ class WindowChromeMixin(ThemeControllerMixin, DispatchControllerMixin, WindowLif
                     self.root.overrideredirect(False)
                     self.root.iconify()
                 except Exception: pass
-            job = self.root.after(50, lambda: self.root.winfo_exists() and self.root.attributes("-alpha", target_alpha))
+            def _restore_min_alpha():
+                if self.root.winfo_exists():
+                    eff_t = 1.0 if target_alpha >= 0.99 else target_alpha
+                    self.root.attributes("-alpha", eff_t)
+                    self._clear_layered_style_if_opaque(eff_t)
+            job = self.root.after(50, _restore_min_alpha)
             self._min_anim_jobs.append(job)
 
         if is_test_environment() or not getattr(self, "root", None):

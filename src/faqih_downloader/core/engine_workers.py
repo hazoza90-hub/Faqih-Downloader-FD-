@@ -16,7 +16,7 @@ from .engine_resumer import EngineResumerMixin
 from ..utils.url_utils import parse_filename_from_cd_header
 
 
-GOOGLEVIDEO_WINDOW_BYTES = 2 * 1024 * 1024  # 2 MB Fast Burst Window; googlevideo sends first ~2MB unthrottled, keep-alive gives 0ms TLS overhead
+GOOGLEVIDEO_WINDOW_BYTES = 10 * 1024 * 1024  # 10 MB standard yt-dlp range window with keep-alive reuse
 
 
 def _build_window_url(url: str, start_byte: int, end_byte: Optional[int], is_gv: bool) -> str:
@@ -48,14 +48,6 @@ class _KeepAliveResponseWrapper:
         return self.status
 
     def read(self, amt: int = -1) -> bytes:
-        if amt > 0 and hasattr(type(self._resp), "read1") and not hasattr(self._resp, "_mock_name"):
-            data = self._resp.read1(amt)
-            if getattr(self._resp, "length", None) == 0 and not self._resp.isclosed() and hasattr(self._resp, "_close_conn"):
-                try:
-                    self._resp._close_conn()
-                except Exception:
-                    pass
-            return data
         return self._resp.read(amt)
 
     def close(self):
@@ -289,13 +281,13 @@ class EngineWorkersMixin(EngineResumerMixin):
                     with self._lock:
                         self._active_connections.append(resp)
 
-                    BUF_SIZE = 65536
+                    BUF_SIZE = 262144
                     paused_break = False
+                    chunk_done = False
                     while not self._is_stopped():
                         if self._pause_event.is_set():
                             paused_break = True; break
 
-                        chunk_done = False
                         with chunk.lock:
                             pos = chunk.start_byte + chunk.downloaded_bytes
                             if self.total_size > 0 and pos > chunk.end_byte:
@@ -304,12 +296,7 @@ class EngineWorkersMixin(EngineResumerMixin):
                             else:
                                 effective_end = min(chunk.end_byte, req_end) if req_end is not None else chunk.end_byte
                                 to_read = min(BUF_SIZE, effective_end - pos + 1) if self.total_size > 0 else BUF_SIZE
-                        if chunk_done:
-                            try: self._dynamic_split_check()
-                            except Exception: pass
-                            return
-
-                        if to_read <= 0:
+                        if chunk_done or to_read <= 0:
                             break
 
                         data = resp.read(to_read)
@@ -322,7 +309,6 @@ class EngineWorkersMixin(EngineResumerMixin):
 
                         self.rate_limiter.acquire(len(data), self._cancel_event)
 
-                        chunk_done = False
                         with chunk.lock:
                             pos = chunk.start_byte + chunk.downloaded_bytes
                             effective_end = min(chunk.end_byte, req_end) if req_end is not None else chunk.end_byte
@@ -336,17 +322,10 @@ class EngineWorkersMixin(EngineResumerMixin):
                             seg_bytes_read += len(data)
 
                             if self.total_size > 0 and (chunk.start_byte + chunk.downloaded_bytes > chunk.end_byte):
-                                try: out_file.flush()
-                                except Exception: pass
                                 chunk.status = "completed"
                                 chunk_done = True
                         if chunk_done:
-                            if not _is_urlopen_mocked():
-                                self._release_or_close_conn(conn, resp, raw_resp, conn_key, seg_bytes_read, expected_seg_bytes)
-                                conn = resp = None
-                            try: self._dynamic_split_check()
-                            except Exception: pass
-                            return
+                            break
 
                     if out_file:
                         try: out_file.flush()
@@ -358,31 +337,40 @@ class EngineWorkersMixin(EngineResumerMixin):
                         if not self._wait_if_paused(): return
                         continue
 
-                    if _is_urlopen_mocked():
-                        self._cleanup_worker_conns(resp, None)
-                        resp = None
-                    else:
-                        self._release_or_close_conn(conn, resp, raw_resp, conn_key, seg_bytes_read, expected_seg_bytes)
-                        resp = conn = None
-
-                    chunk_done = False
                     with chunk.lock:
-                        if (self.total_size > 0 and chunk.start_byte + chunk.downloaded_bytes > chunk.end_byte) or self.total_size == 0:
-                            chunk.status = "completed"
-                            chunk_done = True
-                        elif self.total_size > 0 and (chunk.start_byte + chunk.downloaded_bytes <= chunk.end_byte):
-                            if expected_seg_bytes is not None and seg_bytes_read >= expected_seg_bytes:
-                                retry_count = 0
-                                continue
-                            raise RuntimeError(f"Premature EOF from server before chunk completion ({chunk.downloaded_bytes:,}/{chunk.end_byte - chunk.start_byte + 1:,} bytes)")
-                        else:
+                        cur_chunk_end = chunk.end_byte
+                        if chunk_done or (self.total_size > 0 and chunk.start_byte + chunk.downloaded_bytes > cur_chunk_end) or self.total_size == 0:
                             chunk.status = "completed"
                             chunk_done = True
 
                     if chunk_done:
+                        if _is_urlopen_mocked():
+                            self._cleanup_worker_conns(resp, None); resp = None
+                        else:
+                            seg_bytes_read = self._drain_small_tail(resp, raw_resp, seg_bytes_read, expected_seg_bytes, req_end, cur_chunk_end)
+                            self._release_or_close_conn(conn, resp, raw_resp, conn_key, seg_bytes_read, expected_seg_bytes)
+                            conn = resp = None
                         try: self._dynamic_split_check()
                         except Exception: pass
                         return
+
+                    if expected_seg_bytes is not None and seg_bytes_read >= expected_seg_bytes:
+                        with self._lock:
+                            if resp in self._active_connections: self._active_connections.remove(resp)
+                        if hasattr(resp, "_mock_name"): self._close_conn_safely(resp)
+                        resp = None
+                        if _is_urlopen_mocked() or not self._is_conn_reusable(conn, raw_resp, seg_bytes_read, expected_seg_bytes):
+                            self._cleanup_worker_conns(None, conn)
+                            conn = None
+                        retry_count = 0
+                        continue
+
+                    if not _is_urlopen_mocked():
+                        self._release_or_close_conn(conn, resp, raw_resp, conn_key, seg_bytes_read, expected_seg_bytes)
+                    else:
+                        self._cleanup_worker_conns(resp, None)
+                    resp = conn = None
+                    raise RuntimeError(f"Premature EOF from server before chunk completion ({chunk.downloaded_bytes:,}/{cur_chunk_end - chunk.start_byte + 1:,} bytes)")
 
             except Exception as e:
                 if self._pause_event.is_set() or self.is_paused:
@@ -484,7 +472,7 @@ class EngineWorkersMixin(EngineResumerMixin):
             self.save_state()
 
     def _update_progress_metrics(self):
-        """Computes EMA-smoothed transfer speed over a >=1.5s window, ETA, and progress metrics."""
+        """Computes responsive EMA-smoothed transfer speed over a >=1.0s window, ETA, and progress metrics."""
         emit_lock = getattr(self, "_progress_emit_lock", None)
         if emit_lock is None:
             with self._lock: emit_lock = self._progress_emit_lock = getattr(self, "_progress_emit_lock", None) or threading.RLock()
@@ -508,14 +496,19 @@ class EngineWorkersMixin(EngineResumerMixin):
             samples.append((now, total_downloaded))
 
         dt = now - self.last_speed_check_time
-        if dt >= 0.25:
+        if dt >= 0.15:
             samples.append((now, total_downloaded))
-            while len(samples) > 2 and (now - samples[1][0]) >= 1.5:
+            while len(samples) > 2 and (now - samples[1][0]) >= 1.0:
                 samples.popleft()
             win_dt = now - samples[0][0]
             win_bytes = max(0, total_downloaded - samples[0][1])
             instant_speed = (win_bytes / win_dt) if win_dt > 0 else 0.0
-            self.current_speed = instant_speed if self.current_speed <= 0.0 else (0.25 * instant_speed + 0.75 * self.current_speed)
+            if self.current_speed <= 0.0:
+                self.current_speed = instant_speed
+            elif instant_speed > self.current_speed * 1.35:
+                self.current_speed = 0.70 * instant_speed + 0.30 * self.current_speed
+            else:
+                self.current_speed = 0.45 * instant_speed + 0.55 * self.current_speed
             self.last_downloaded_bytes = self._last_speed_bytes = total_downloaded
             self.last_speed_check_time = self._last_speed_time = now
 

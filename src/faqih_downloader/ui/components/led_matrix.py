@@ -48,6 +48,7 @@ class LedEqualizerMatrix:
                 highlightthickness=0,
                 relief="flat"
             )
+            self.canvas._visualizer_owner = self
             self.canvas.bind("<Configure>", self._on_canvas_configure)
         else:
             self.canvas = None  # type: ignore
@@ -63,21 +64,30 @@ class LedEqualizerMatrix:
             return
         w = getattr(event, "width", 0)
         h = getattr(event, "height", 0)
-        if (w, h) == getattr(self, "_last_canvas_size", None):
+        last_sz = getattr(self, "_last_canvas_size", None)
+        if (w, h) == last_sz:
             return
 
         top = None
         try: top = self.canvas.winfo_toplevel()
         except Exception: pass
         if top and getattr(top, "_is_resizing_window", False):
-            if getattr(self, "_resize_redraw_job", None) is None:
-                self._resize_redraw_job = self.canvas.after(16, self._flush_canvas_redraw)
-        else:
-            if getattr(self, "_resize_redraw_job", None) is not None:
-                try: self.canvas.after_cancel(self._resize_redraw_job)
-                except Exception: pass
-                self._resize_redraw_job = None
-            self.redraw()
+            if last_sz and w > 10:
+                old_w, old_h = last_sz
+                if old_w > 10:
+                    sx = float(w) / float(old_w)
+                    sy = (float(h) / float(old_h)) if (old_h > 6 and h > 6) else 1.0
+                    try:
+                        self.canvas.scale("all", 0, 0, sx, sy)
+                    except Exception:
+                        pass
+                    self._last_canvas_size = (w, h)
+            return
+        if getattr(self, "_resize_redraw_job", None) is not None:
+            try: self.canvas.after_cancel(self._resize_redraw_job)
+            except Exception: pass
+            self._resize_redraw_job = None
+        self.redraw()
 
     def pack(self, **kwargs):
         if self.canvas:

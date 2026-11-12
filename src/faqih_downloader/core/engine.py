@@ -55,9 +55,7 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
         self.min_split_threshold = max(64 * 1024, min_split_threshold)
         self.rate_limiter = TokenBucketRateLimiter(rate_limit_bytes_per_sec)
         self.ssl_context = ssl_context if ssl_context is not None else get_permissive_ssl_context()
-        self.opener = opener if opener is not None else urllib.request.build_opener(
-            urllib.request.HTTPSHandler(context=self.ssl_context)
-        )
+        self.opener = opener if opener is not None else urllib.request.build_opener(urllib.request.HTTPSHandler(context=self.ssl_context))
         self.headers: Dict[str, str] = dict(headers) if headers else {}
 
         # YouTube googlevideo CDN detection
@@ -85,9 +83,11 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
         if self.pre_probed_info:
             p_ts = self.pre_probed_info.get("timestamp")
             is_fresh = (p_ts is None) or ((time.monotonic() - float(p_ts)) < 30.0)
-            p_size = self.pre_probed_info.get("total_size") or self.pre_probed_info.get("size") or 0
+            p_url = self.pre_probed_info.get("url") or self.pre_probed_info.get("real_url")
+            cand_url = p_url or self.url
+            clen_sz = self._extract_googlevideo_clen(cand_url) if (self.is_googlevideo or "googlevideo.com" in str(cand_url).lower()) else 0
+            p_size = clen_sz if clen_sz > 0 else (self.pre_probed_info.get("total_size") or self.pre_probed_info.get("size") or 0)
             if is_fresh and p_size > 0:
-                p_url = self.pre_probed_info.get("url") or self.pre_probed_info.get("real_url")
                 if p_url:
                     self.url = p_url
                     if self.is_googlevideo_url(self.url):
@@ -129,12 +129,21 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
         self._last_active_start_mono: Optional[float] = None
         self._session_start_bytes: int = 0
 
+    @staticmethod
+    def _extract_googlevideo_clen(url: str) -> int:
+        """Extracts positive integer content length from a googlevideo URL's `clen` query parameter."""
+        try:
+            clen = urllib.parse.parse_qs(urllib.parse.urlsplit(str(url)).query).get("clen")
+            if clen and int(clen[0]) > 0:
+                return int(clen[0])
+        except Exception:
+            pass
+        return 0
+
     def log(self, message: str):
         if self.on_log:
-            try:
-                self.on_log(f"[{time.strftime('%H:%M:%S')}] {message}")
-            except Exception:
-                pass
+            try: self.on_log(f"[{time.strftime('%H:%M:%S')}] {message}")
+            except Exception: pass
 
     def set_speed_limit(self, bytes_per_sec: float):
         """Update speed limit on the fly."""
@@ -144,8 +153,7 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
 
     def get_chunks_snapshot(self) -> List[DownloadChunk]:
         """Returns a thread-safe snapshot copy of the current chunk list."""
-        with self._lock:
-            return list(self.chunks)
+        with self._lock: return list(self.chunks)
 
     def _handle_redirect(self, resp):
         redirected_url = resp.geturl()
@@ -154,8 +162,7 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
                 raise ValueError("Unsupported redirect scheme")
             if redirected_url != self.url:
                 self.url = redirected_url
-                if self.is_googlevideo_url(self.url):
-                    self.is_googlevideo = True
+                if self.is_googlevideo_url(self.url): self.is_googlevideo = True
 
     def probe(self):
         """
@@ -164,19 +171,17 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
         """
         self.log(f"Probing server capabilities: {self.url}")
         if self.is_googlevideo or "googlevideo.com" in self.url:
-            try:
-                clen = urllib.parse.parse_qs(urllib.parse.urlsplit(self.url).query).get("clen")
-                if clen and clen[0].isdigit():
-                    self.total_size, self.supports_ranges = int(clen[0]), True
-                    self.log(f"Fast clen probe: {self.total_size:,} bytes (Accept-Ranges verified)")
-                    if not self.filename or os.path.isdir(self.destination_path) or self.filename in (".", "..", "download.bin"):
-                        url_fn = os.path.basename(urllib.parse.unquote(urllib.parse.urlsplit(self.url).path.rstrip("/")))
-                        if url_fn: self.filename = url_fn
-                    if os.path.isdir(self.destination_path) or self.destination_path.endswith(("/", "\\")):
-                        self.destination_path = os.path.join(self.destination_path, self.filename or "download.bin")
-                        self.temp_dir = self.destination_path + ".sd_parts"
-                    return
-            except Exception: pass
+            clen_val = self._extract_googlevideo_clen(self.url)
+            if clen_val > 0:
+                self.total_size, self.supports_ranges = clen_val, True
+                self.log(f"Fast clen probe: {self.total_size:,} bytes (Accept-Ranges verified)")
+                if not self.filename or os.path.isdir(self.destination_path) or self.filename in (".", "..", "download.bin"):
+                    url_fn = os.path.basename(urllib.parse.unquote(urllib.parse.urlsplit(self.url).path.rstrip("/")))
+                    if url_fn: self.filename = url_fn
+                if os.path.isdir(self.destination_path) or self.destination_path.endswith(("/", "\\")):
+                    self.destination_path = os.path.join(self.destination_path, self.filename or "download.bin")
+                    self.temp_dir = self.destination_path + ".sd_parts"
+                return
 
         req = self._create_request(method="HEAD")
 
@@ -190,19 +195,12 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
                 self.content_type = raw_ct.split(";")[0].strip().lower()
                 self.total_size = int(cl) if cl and cl.isdigit() else 0
                 self.supports_ranges = (ar == "bytes") and (self.total_size > 0)
-
-                cd = resp.headers.get("Content-Disposition", "")
-                cd_fn = self._parse_filename_from_cd(cd)
-                if cd_fn:
-                    self.filename = cd_fn
+                cd_fn = self._parse_filename_from_cd(resp.headers.get("Content-Disposition", ""))
+                if cd_fn: self.filename = cd_fn
                 head_succeeded = True
-        except ValueError:
-            raise
-        except urllib.error.HTTPError as e:
-            e.close()
-            head_succeeded = False
-        except Exception:
-            head_succeeded = False
+        except ValueError: raise
+        except urllib.error.HTTPError as e: e.close(); head_succeeded = False
+        except Exception: head_succeeded = False
 
         # If HEAD failed or did not confirm range support, test with GET Range: bytes=0-0
         if not head_succeeded or not self.supports_ranges:
@@ -398,14 +396,14 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
         """Safely cleans up temporary chunk directory and files."""
         try:
             lk = getattr(self, "_state_save_lock", None)
+            def _rm():
+                if getattr(self, "temp_dir", None) and os.path.exists(self.temp_dir):
+                    shutil.rmtree(self.temp_dir, ignore_errors=True)
             if lk is not None:
-                with lk:
-                    if hasattr(self, "temp_dir") and self.temp_dir and os.path.exists(self.temp_dir):
-                        shutil.rmtree(self.temp_dir, ignore_errors=True)
-            elif hasattr(self, "temp_dir") and self.temp_dir and os.path.exists(self.temp_dir):
-                shutil.rmtree(self.temp_dir, ignore_errors=True)
-        except Exception:
-            pass
+                with lk: _rm()
+            else:
+                _rm()
+        except Exception: pass
 
     def _supervisor_loop(self):
         """Master supervisor: manages initial connection, dynamic splitting, and assembly."""

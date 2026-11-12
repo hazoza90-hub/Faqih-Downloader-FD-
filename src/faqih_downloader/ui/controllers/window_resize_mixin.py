@@ -67,6 +67,92 @@ class WindowResizeMixin:
             except Exception:
                 pass
 
+    def _hide_offscreen_vault_cards(self):
+        """Temporarily unpacks off-viewport vault cards (>6 visible) to cut Win32 TkChild HWND moves during drag."""
+        self._resize_hidden_vault_cards = []
+        self._resize_vault_pack_meta = []
+        cont = getattr(self, "vault_cards_container", None)
+        if not cont or not getattr(cont, "winfo_exists", lambda: False)():
+            return
+        try:
+            children = list(cont.winfo_children())
+            if len(children) <= 6:
+                return
+            cv = getattr(self, "vault_cards_canvas", None)
+            visible_indices = []
+            if cv and getattr(cv, "winfo_exists", lambda: False)() and cv.winfo_height() > 20:
+                top_y = float(cv.canvasy(0))
+                bot_y = float(cv.canvasy(cv.winfo_height()))
+                for idx, ch in enumerate(children):
+                    cy, ch_h = ch.winfo_y(), max(1, ch.winfo_height())
+                    if (cy + ch_h) >= top_y and cy <= bot_y:
+                        visible_indices.append(idx)
+                        if len(visible_indices) >= 6:
+                            break
+            keep_set = set(visible_indices) if visible_indices else set(range(min(6, len(children))))
+            for idx, ch in enumerate(children):
+                if idx not in keep_set:
+                    try:
+                        info = ch.pack_info()
+                        self._resize_vault_pack_meta.append((ch, {"fill": info.get("fill", tk.X), "pady": info.get("pady", (0, 8)), "padx": info.get("padx", 0)}, children[idx + 1] if idx + 1 < len(children) else None))
+                        ch.pack_forget()
+                        self._resize_hidden_vault_cards.append(ch)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+    def _restore_offscreen_vault_cards(self) -> bool:
+        """Restores temporarily hidden vault cards in exact original stacking order."""
+        meta = getattr(self, "_resize_vault_pack_meta", None) or []
+        hidden = getattr(self, "_resize_hidden_vault_cards", None) or []
+        if not meta and not hidden:
+            return False
+        if meta:
+            for ch, pk, nxt in reversed(meta):
+                try:
+                    if not ch.winfo_exists():
+                        continue
+                    if nxt is not None and nxt.winfo_exists() and nxt.winfo_manager() == "pack":
+                        ch.pack(before=nxt, **pk)
+                    else:
+                        ch.pack(**pk)
+                except Exception:
+                    pass
+        else:
+            for ch in hidden:
+                try:
+                    if ch.winfo_exists():
+                        ch.pack(fill=tk.X, pady=(0, 8))
+                except Exception:
+                    pass
+        self._resize_hidden_vault_cards = []
+        self._resize_vault_pack_meta = []
+        return True
+
+    def _apply_resize_geometry(self, w: int, h: int, x: int, y: int):
+        if (w, h, x, y) == getattr(self, "_last_resize_geo", None):
+            return
+        self._last_resize_geo = (w, h, x, y)
+        geo = self._format_geometry(w, h, x, y)
+        self.root.geometry(geo)
+        try:
+            self.root.update_idletasks()
+        except Exception:
+            pass
+        self._normal_geometry = geo
+        self.width, self.height = w, h
+
+    def _flush_pending_resize(self):
+        self._resize_flush_job = None
+        pending = getattr(self, "_pending_resize_geo", None)
+        self._pending_resize_geo = None
+        if not pending or getattr(self, "_is_maximized", False):
+            return
+        import time
+        self._last_resize_ts = time.perf_counter()
+        self._apply_resize_geometry(*pending)
+
     def _on_resize_press(self, event, mode: str):
         if getattr(self, "_is_maximized", False):
             return "break"
@@ -75,6 +161,7 @@ class WindowResizeMixin:
                 self.root._is_resizing_window = True
         except Exception:
             pass
+        self._hide_offscreen_vault_cards()
         try:
             win_w, win_h = self.root.winfo_width(), self.root.winfo_height()
             win_x, win_y = self.root.winfo_x(), self.root.winfo_y()
@@ -114,9 +201,6 @@ class WindowResizeMixin:
 
         import time
         now = time.perf_counter()
-        if now - getattr(self, "_last_resize_ts", 0.0) < 0.016:
-            return "break"
-
         try:
             dx = event.x_root - self._resize_state["x_root"]
             dy = event.y_root - self._resize_state["y_root"]
@@ -138,27 +222,44 @@ class WindowResizeMixin:
 
             if (w, h, x, y) == getattr(self, "_last_resize_geo", None):
                 return "break"
-            self._last_resize_geo = (w, h, x, y)
+            if now - getattr(self, "_last_resize_ts", 0.0) < 0.014:
+                self._pending_resize_geo = (w, h, x, y)
+                if getattr(self, "_resize_flush_job", None) is None and hasattr(self, "root") and self.root:
+                    self._resize_flush_job = self.root.after(14, self._flush_pending_resize)
+                return "break"
+            job = getattr(self, "_resize_flush_job", None)
+            if job is not None and hasattr(self, "root") and self.root:
+                try: self.root.after_cancel(job)
+                except Exception: pass
+                self._resize_flush_job = None
+            self._pending_resize_geo = None
             self._last_resize_ts = now
-
-            geo = self._format_geometry(w, h, x, y)
-            self.root.geometry(geo)
-            try:
-                self.root.update_idletasks()
-            except Exception:
-                pass
-            self._normal_geometry = geo
-            self.width, self.height = w, h
+            self._apply_resize_geometry(w, h, x, y)
         except Exception:
             pass
         return "break"
 
     def _on_resize_release(self, event=None):
+        job = getattr(self, "_resize_flush_job", None)
+        if job is not None and hasattr(self, "root") and self.root:
+            try: self.root.after_cancel(job)
+            except Exception: pass
+            self._resize_flush_job = None
+        pending = getattr(self, "_pending_resize_geo", None)
+        self._pending_resize_geo = None
+        if pending and not getattr(self, "_is_maximized", False):
+            try: self._apply_resize_geometry(*pending)
+            except Exception: pass
+
         try:
             if hasattr(self, "root") and self.root:
                 self.root._is_resizing_window = False
         except Exception:
             pass
+
+        if self._restore_offscreen_vault_cards() and hasattr(self, "root") and self.root:
+            try: self.root.update_idletasks()
+            except Exception: pass
 
         try:
             if hasattr(self, "root") and self.root:
@@ -167,9 +268,16 @@ class WindowResizeMixin:
                 while stack:
                     curr = stack.pop()
                     if isinstance(curr, RoundedGlassCard):
+                        curr._fast_resize_rect = None
                         curr._last_drawn_state = None
                         try:
                             curr._on_resize(None)
+                        except Exception:
+                            pass
+                    owner = getattr(curr, "_visualizer_owner", None)
+                    if owner is not None and hasattr(owner, "redraw"):
+                        try:
+                            owner.redraw()
                         except Exception:
                             pass
                     try:

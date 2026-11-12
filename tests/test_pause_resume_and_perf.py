@@ -221,20 +221,31 @@ class TestLivePauseResumeAndPerf(unittest.TestCase):
             mock_raw.read.assert_not_called()
             self.assertIs(eng._acquire_pooled_conn(("http", "example.com", 80)), mock_conn)
 
-            # Speed EMA calculation test over >= 1.5s sample window
+            # Speed EMA calculation test over 1.0s sliding window with responsive ramp-up & steady EMA
             eng.chunks = [DownloadChunk(0, 0, 9_999_999, downloaded_bytes=0, status="active")]
             now = 100.0
-            eng._speed_samples = deque([(98.0, 0), (99.0, 1_000_000)])
+            eng._speed_samples = deque([(98.5, 0), (99.4, 1_000_000)])
             eng.last_speed_check_time = 99.6
             eng.last_downloaded_bytes = 1_000_000
             eng.current_speed = 1_000_000.0
-            eng.chunks[0].downloaded_bytes = 3_000_000  # 3 MB over 2.0s => 1.5 MB/s window speed
+            eng.chunks[0].downloaded_bytes = 2_500_000  # ramp-up: 2.5 MB over 1.5s window => ~1.67 MB/s (> 1.35x)
 
             with patch("faqih_downloader.core.engine_workers.time.monotonic", return_value=now):
                 eng._update_progress_metrics()
 
-            expected = 0.25 * (3_000_000 / 2.0) + 0.75 * 1_000_000.0
-            self.assertAlmostEqual(eng.current_speed, expected, places=2)
+            ramp_instant = 2_500_000 / 1.5
+            expected_ramp = 0.70 * ramp_instant + 0.30 * 1_000_000.0
+            self.assertAlmostEqual(eng.current_speed, expected_ramp, places=2)
+
+            # Steady-state EMA check (<= 1.35x)
+            now2 = 100.25
+            eng.chunks[0].downloaded_bytes = 2_900_000
+            with patch("faqih_downloader.core.engine_workers.time.monotonic", return_value=now2):
+                eng._update_progress_metrics()
+            # (98.5, 0) stays since 100.25 - 99.4 = 0.85 < 1.0
+            steady_instant = 2_900_000 / (100.25 - 98.5)
+            expected_steady = 0.45 * steady_instant + 0.55 * expected_ramp
+            self.assertAlmostEqual(eng.current_speed, expected_steady, places=2)
 
     def test_stream_coordinator_pause_and_resume_emit_progress(self):
         """Verifies StreamDownloadCoordinator.pause()/resume() update state and emit Paused/Downloading callbacks."""
@@ -635,11 +646,11 @@ class TestLivePauseResumeAndPerf(unittest.TestCase):
             server.shutdown()
             server.server_close()
 
-    def test_keepalive_read1_zero_length_closes_resp_and_pools_conn(self):
-        """Verifies _KeepAliveResponseWrapper.read and _release_or_close_conn close HTTPResponse when read1 leaves length==0."""
+    def test_keepalive_wrapper_uses_blocking_read_and_release_closes_unclosed_zero_length(self):
+        """Verifies _KeepAliveResponseWrapper.read delegates to read() directly and _release_or_close_conn closes unclosed length==0 responses."""
         from faqih_downloader.core.engine_workers import _KeepAliveResponseWrapper
 
-        class FakeOldPyHTTPResponse:
+        class FakeStdlibResp:
             def __init__(self, payload: bytes):
                 self._buf = payload
                 self.length = len(payload)
@@ -647,13 +658,19 @@ class TestLivePauseResumeAndPerf(unittest.TestCase):
                 self._closed = False
                 self.status = 206
                 self.headers = {}
+                self.read_calls = 0
 
-            def read1(self, n=-1):
+            def read(self, n=-1):
+                self.read_calls += 1
                 chunk = self._buf[:n] if n >= 0 else self._buf
                 self._buf = self._buf[len(chunk):]
                 self.length -= len(chunk)
-                # Intentionally do NOT call _close_conn() (older Python read1 behavior)
+                if self.length == 0:
+                    self._closed = True
                 return chunk
+
+            def read1(self, n=-1):
+                raise AssertionError("read1() must NOT be called (GIL contention fix)")
 
             def isclosed(self):
                 return self._closed
@@ -661,23 +678,22 @@ class TestLivePauseResumeAndPerf(unittest.TestCase):
             def _close_conn(self):
                 self._closed = True
 
-        raw = FakeOldPyHTTPResponse(b"hello")
+        raw = FakeStdlibResp(b"hello")
         conn = MagicMock()
         conn.sock = MagicMock()
         wrapper = _KeepAliveResponseWrapper(raw, conn)
         self.assertEqual(wrapper.read(5), b"hello")
-        self.assertEqual(raw.length, 0)
+        self.assertEqual(raw.read_calls, 1)
         self.assertTrue(raw.isclosed())
 
-        # Also test _release_or_close_conn defense-in-depth if raw_resp.isclosed() is still False
         with tempfile.TemporaryDirectory() as td:
             eng = TurboDownloadEngine("http://example.com/v.bin", os.path.join(td, "v.bin"))
             eng.is_running = True
-            raw2 = FakeOldPyHTTPResponse(b"")
+            raw2 = FakeStdlibResp(b"")
             raw2.length = 0
+            raw2._closed = False
             conn2 = MagicMock()
             conn2.sock = MagicMock()
-            self.assertFalse(raw2.isclosed())
             eng._release_or_close_conn(conn2, None, raw2, ("http", "example.com", 80), 64, 64)
             self.assertTrue(raw2.isclosed())
             self.assertIs(eng._acquire_pooled_conn(("http", "example.com", 80)), conn2)
@@ -771,7 +787,7 @@ class TestLivePauseResumeAndPerf(unittest.TestCase):
             srv.server_close()
 
     def test_vault_column_resize_sync_and_glass_card_unbinds_configure(self):
-        """Verifies Column 3 scrollregion deferral, update_idletasks during resize, release refresh, and RoundedGlassCard unbind."""
+        """Verifies Column 3 scrollregion deferral, no update_idletasks inside <Configure>, cv._win_id, and release refresh."""
         from faqih_downloader.ui.panels.kanban_vault_helpers import setup_vault_scroll_view
         from faqih_downloader.ui.controllers.window_resize_mixin import WindowResizeMixin
 
@@ -781,17 +797,16 @@ class TestLivePauseResumeAndPerf(unittest.TestCase):
             body = tk.Frame(root)
             body.pack(fill=tk.BOTH, expand=True)
             cv, container = setup_vault_scroll_view(body, body)
+            self.assertTrue(hasattr(cv, "_win_id"))
             card = RoundedGlassCard(container, radius=8, inner_padx=6, inner_pady=4)
             card.pack(fill=tk.X)
             lbl = tk.Label(card.inner, text="Vault Item")
             lbl.pack()
             root.update()
 
-            # Once card width > 20, _on_inner_resize unbinds <Configure> on card.inner
             card._on_inner_resize()
             self.assertEqual(card.inner.bind("<Configure>"), "")
 
-            # During active resize, _schedule_vault_scrollregion defers bbox("all")
             root._is_resizing_window = True
             with patch.object(cv, "bbox", wraps=cv.bbox) as mock_bbox, \
                  patch.object(container, "update_idletasks", wraps=container.update_idletasks) as mock_uid:
@@ -801,9 +816,8 @@ class TestLivePauseResumeAndPerf(unittest.TestCase):
                 cv._last_win_w = 0
                 cv.event_generate("<Configure>", width=320, height=300)
                 root.update_idletasks()
-                self.assertTrue(mock_uid.called)
+                mock_uid.assert_not_called()
 
-            # On resize release, WindowResizeMixin._on_resize_release refreshes vault_cards_canvas scrollregion
             class DummyWin(WindowResizeMixin):
                 def __init__(self, r, c):
                     self.root = r
@@ -815,6 +829,143 @@ class TestLivePauseResumeAndPerf(unittest.TestCase):
                 dw._on_resize_release()
                 self.assertFalse(root._is_resizing_window)
                 self.assertTrue(mock_bbox_rel.called)
+        finally:
+            try:
+                root.destroy()
+            except Exception:
+                pass
+
+    def test_googlevideo_clen_overrides_preprobed_approx_size_and_tail_drain(self):
+        """Verifies clen overrides pre_probed_info approximate size and _drain_small_tail preserves keep-alive."""
+        with tempfile.TemporaryDirectory() as td:
+            eng = TurboDownloadEngine(
+                "https://rr1---sn.googlevideo.com/videoplayback?clen=9876543&id=1",
+                os.path.join(td, "gv.mp4"),
+                pre_probed_info={"total_size": 9500000, "supports_ranges": True},
+            )
+            self.assertEqual(eng.total_size, 9876543)
+
+            # _drain_small_tail reads <= 131072 excess bytes after dynamic split to allow keep-alive pooling
+            class TailResp:
+                def __init__(self):
+                    self._rem = b"x" * 1024
+                    self.length = 1024
+                    self.will_close = False
+                    self._closed = False
+                def read(self, n=-1):
+                    out = self._rem[:n]
+                    self._rem = self._rem[len(out):]
+                    self.length -= len(out)
+                    if self.length == 0:
+                        self._closed = True
+                    return out
+                def isclosed(self):
+                    return self._closed
+
+            eng.is_running = True
+            raw = TailResp()
+            conn = MagicMock()
+            conn.sock = MagicMock()
+            seg_read = eng._drain_small_tail(raw, raw, 4096, 5120, req_end=5119, chunk_end=4095)
+            self.assertEqual(seg_read, 5120)
+            self.assertTrue(raw.isclosed())
+            eng._release_or_close_conn(conn, raw, raw, ("https", "rr1.googlevideo.com", 443), seg_read, 5120)
+            self.assertIs(eng._acquire_pooled_conn(("https", "rr1.googlevideo.com", 443)), conn)
+
+    def test_window_60fps_resize_ws_ex_layered_fast_rect_visualizers_and_vault_hiding(self):
+        """Verifies WS_EX_LAYERED removal at alpha=1.0, fast rect coords reuse, C canvas scale, and vault card hide/restore."""
+        from faqih_downloader.ui.controllers.window_controller import WindowChromeMixin
+        from faqih_downloader.ui.controllers.window_resize_mixin import WindowResizeMixin
+        from faqih_downloader.ui.components.led_matrix import LedEqualizerMatrix
+        from faqih_downloader.ui.components.waveform_visualizer import WaveformVisualizerCanvas
+
+        root = tk.Tk()
+        root.geometry("900x650+50+50")
+        try:
+            # 1. WS_EX_LAYERED cleared when alpha >= 0.99
+            class DummyChrome(WindowChromeMixin):
+                def __init__(self, r):
+                    self.root = r
+            dc = DummyChrome(root)
+            with patch("faqih_downloader.ui.controllers.window_controller.IS_WINDOWS", True), \
+                 patch("ctypes.windll.user32.GetParent", return_value=999), \
+                 patch("ctypes.windll.user32.GetWindowLongW", return_value=0x000C0000), \
+                 patch("ctypes.windll.user32.SetWindowLongW") as mock_set_wl:
+                dc._clear_layered_style_if_opaque(1.0)
+                mock_set_wl.assert_called_once_with(999, -20, 0x00040000)
+
+            # 2. Fast resize rect reuses single item via coords() on drag frames 2+
+            card = RoundedGlassCard(root, width=220, height=110)
+            card.pack(fill=tk.X)
+            led = LedEqualizerMatrix(root, height=40)
+            led.pack(fill=tk.X)
+            wave = WaveformVisualizerCanvas(root, height=34)
+            wave.pack(fill=tk.X)
+            cont = tk.Frame(root)
+            cont.pack(fill=tk.BOTH, expand=True)
+            cards = []
+            for i in range(10):
+                lbl = tk.Label(cont, text=f"Card {i}")
+                lbl.pack(fill=tk.X, pady=(0, 8))
+                cards.append(lbl)
+            root.update()
+
+            # Simulate drag frames on RoundedGlassCard
+            root._is_resizing_window = True
+            with patch.object(card, "create_rectangle", wraps=card.create_rectangle) as mock_cre, \
+                 patch.object(card, "coords", wraps=card.coords) as mock_coords, \
+                 patch.object(card, "delete", wraps=card.delete) as mock_del:
+                card._draw_card_bg(240, 110)
+                card._draw_card_bg(280, 110)
+                card._draw_card_bg(320, 110)
+                self.assertEqual(mock_cre.call_count, 1)
+                self.assertEqual(mock_del.call_count, 1)
+                self.assertEqual(mock_coords.call_count, 2)
+
+            # Led & Wave scale without calling redraw() during drag
+            led._last_canvas_size = (240, 40)
+            wave._last_canvas_size = (240, 34)
+            with patch.object(led, "redraw") as mock_led_r, \
+                 patch.object(led.canvas, "scale", wraps=led.canvas.scale) as mock_led_s, \
+                 patch.object(wave, "redraw") as mock_wav_r, \
+                 patch.object(wave.canvas, "scale", wraps=wave.canvas.scale) as mock_wav_s:
+                led._on_canvas_configure(MagicMock(width=360, height=40))
+                wave._on_canvas_configure(MagicMock(width=360, height=34))
+                mock_led_r.assert_not_called()
+                mock_wav_r.assert_not_called()
+                mock_led_s.assert_called_once()
+                mock_wav_s.assert_called_once()
+
+            # 3. WindowResizeMixin hides >6 vault cards on press, coalesces drag, restores order + redraws on release
+            class DummyResizeApp(WindowChromeMixin, WindowResizeMixin):
+                def __init__(self, r, vc, vcv):
+                    self.root = r
+                    self.vault_cards_container = vc
+                    self.vault_cards_canvas = vcv
+                    self.width, self.height = 900, 650
+                    self._min_width, self._min_height = 820, 620
+                    self._is_maximized = False
+                    self._resize_state = {}
+
+            app = DummyResizeApp(root, cont, MagicMock(winfo_exists=lambda: False))
+            app._on_resize_press(MagicMock(x_root=900, y_root=650), "se")
+            self.assertTrue(root._is_resizing_window)
+            self.assertEqual(len(app._resize_hidden_vault_cards), 4)
+            app._on_resize_drag(MagicMock(x_root=940, y_root=670))
+            # Immediate second drag within <14ms schedules pending flush
+            app._on_resize_drag(MagicMock(x_root=980, y_root=690))
+            self.assertIsNotNone(app._pending_resize_geo)
+
+            with patch.object(led, "redraw", wraps=led.redraw) as mock_led_rel, \
+                 patch.object(wave, "redraw", wraps=wave.redraw) as mock_wav_rel:
+                app._on_resize_release()
+                self.assertFalse(root._is_resizing_window)
+                self.assertEqual(app._resize_hidden_vault_cards, [])
+                self.assertIsNone(card._fast_resize_rect)
+                self.assertGreaterEqual(mock_led_rel.call_count, 1)
+                self.assertGreaterEqual(mock_wav_rel.call_count, 1)
+                packed_order = [w.cget("text") for w in cont.winfo_children() if w.winfo_manager() == "pack"]
+                self.assertEqual(packed_order, [f"Card {i}" for i in range(10)])
         finally:
             try:
                 root.destroy()

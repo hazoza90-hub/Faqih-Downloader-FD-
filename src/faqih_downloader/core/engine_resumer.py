@@ -61,6 +61,47 @@ class EngineResumerMixin:
             if conn in self._active_connections: self._active_connections.remove(conn)
         self._close_conn_safely(resp); self._close_conn_safely(conn)
 
+    def _drain_small_tail(
+        self,
+        resp: Any,
+        raw_resp: Any,
+        seg_bytes_read: int,
+        expected_seg_bytes: Optional[int],
+        req_end: Optional[int],
+        chunk_end: int,
+    ) -> int:
+        """Drains a tiny leftover tail (<= 128 KB) after dynamic split to preserve keep-alive TLS sockets."""
+        if req_end is None or not (0 < (req_end - chunk_end) <= 131072):
+            return seg_bytes_read
+        reader = raw_resp if raw_resp is not None else resp
+        if reader is None or self._is_stopped() or self._pause_event.is_set():
+            return seg_bytes_read
+        rem = (expected_seg_bytes - seg_bytes_read) if expected_seg_bytes is not None else (req_end - chunk_end)
+        rem = min(131072, max(0, rem))
+        try:
+            while rem > 0 and not self._is_stopped() and not self._pause_event.is_set():
+                extra = reader.read(min(65536, rem))
+                if not extra:
+                    break
+                seg_bytes_read += len(extra)
+                rem -= len(extra)
+        except Exception:
+            pass
+        return seg_bytes_read
+
+    def _is_conn_reusable(self, conn: Any, raw_resp: Any, seg_bytes_read: int, expected_seg_bytes: Optional[int]) -> bool:
+        """Checks whether an active HTTP(S)Connection completed its segment cleanly and is healthy for reuse."""
+        return bool(
+            conn is not None
+            and raw_resp is not None
+            and not self._is_stopped()
+            and not self._pause_event.is_set()
+            and not getattr(raw_resp, "will_close", False)
+            and getattr(raw_resp, "isclosed", lambda: False)()
+            and (expected_seg_bytes is None or seg_bytes_read >= expected_seg_bytes)
+            and getattr(conn, "sock", None) is not None
+        )
+
     def _release_or_close_conn(
         self,
         conn: Any,
@@ -90,16 +131,9 @@ class EngineResumerMixin:
                 pass
 
         can_reuse = (
-            conn is not None
-            and conn_key is not None
-            and raw_resp is not None
-            and not self._is_stopped()
-            and not self._pause_event.is_set()
-            and not getattr(raw_resp, "will_close", False)
+            conn_key is not None
             and getattr(raw_resp, "length", None) == 0
-            and getattr(raw_resp, "isclosed", lambda: False)()
-            and (expected_seg_bytes is None or seg_bytes_read >= expected_seg_bytes)
-            and getattr(conn, "sock", None) is not None
+            and self._is_conn_reusable(conn, raw_resp, seg_bytes_read, expected_seg_bytes)
         )
         if can_reuse:
             pool_map = getattr(self, "_conn_pool", None)
