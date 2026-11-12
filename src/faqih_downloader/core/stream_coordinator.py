@@ -154,6 +154,19 @@ class StreamDownloadCoordinator:
         self._supervisor_thread = threading.Thread(target=self._run_coordinator, daemon=True)
         self._supervisor_thread.start()
 
+    def _current_progress_pair(self):
+        with self._lock:
+            if len(self._active_engines) > 1 or self._v_downloaded > 0 or self._a_downloaded > 0:
+                tot = max(0, self._v_total_size + self._a_total_size)
+                dl = self._v_downloaded + self._a_downloaded
+                return (min(tot, dl) if tot > 0 else dl), tot
+            eng = self.current_engine
+            if eng:
+                dl = sum(getattr(c, "downloaded_bytes", 0) for c in getattr(eng, "chunks", []))
+                tot = getattr(eng, "total_size", 0) or self._v_total_size
+                return dl, tot
+            return 0, self.total_size
+
     def pause(self):
         with self._lock:
             self._is_paused = True; self._pause_event.set()
@@ -163,6 +176,10 @@ class StreamDownloadCoordinator:
             for eng in (self._active_engines or ([self.current_engine] if self.current_engine else [])):
                 try: eng.pause()
                 except Exception: pass
+            done, total = self._current_progress_pair()
+        if self.on_progress:
+            try: self.on_progress(done, total, 0.0, "Paused", 0)
+            except Exception: pass
 
     def resume(self):
         with self._lock:
@@ -170,33 +187,42 @@ class StreamDownloadCoordinator:
             if self._active_subproc:
                 try: from ..services.media_clipper_engine import _set_process_suspended; _set_process_suspended(self._active_subproc, False)
                 except Exception: pass
-            for eng in (self._active_engines or ([self.current_engine] if self.current_engine else [])):
+            engines = self._active_engines or ([self.current_engine] if self.current_engine else [])
+            for eng in engines:
                 try: eng.resume()
+                except Exception: pass
+            done, total = self._current_progress_pair()
+            active = sum(sum(1 for c in getattr(e, "chunks", []) if getattr(c, "status", "") == "active") for e in engines)
+        if self.on_progress:
+            try: self.on_progress(done, total, 0.0, "Downloading", active)
+            except Exception: pass
+
+    def _make_engine(self, url, dest, max_conn, allow_split, headers, on_prog, on_comp, on_err, est_size):
+        pre = {"total_size": int(est_size or 0), "supports_ranges": True} if int(est_size or 0) > 0 else None
+        return TurboDownloadEngine(
+            url=url, destination_path=dest, max_connections=max_conn, allow_dynamic_split=allow_split,
+            rate_limit_bytes_per_sec=self.rate_limit, ssl_context=self.ssl_context, headers=headers,
+            on_progress=on_prog, on_chunk_update=self.on_chunk_update, on_log=self.on_log,
+            on_complete=on_comp, on_error=on_err, pre_probed_info=pre,
+        )
+
+    def _stop_all(self, use_safe: bool = False):
+        with self._lock:
+            self._is_running = False
+            self._cancel_event.set()
+            if self._active_subproc:
+                try: self._active_subproc.kill()
+                except Exception: pass
+                self._active_subproc = None
+            for eng in (self._active_engines or ([self.current_engine] if self.current_engine else [])):
+                try: (eng.safe_shutdown() if (use_safe and hasattr(eng, "safe_shutdown")) else eng.cancel())
                 except Exception: pass
 
     def cancel(self):
-        with self._lock:
-            self._is_running = False
-            self._cancel_event.set()
-            if self._active_subproc:
-                try: self._active_subproc.kill()
-                except Exception: pass
-                self._active_subproc = None
-            for eng in (self._active_engines or ([self.current_engine] if self.current_engine else [])):
-                try: eng.cancel()
-                except Exception: pass
+        self._stop_all(use_safe=False)
 
     def safe_shutdown(self):
-        with self._lock:
-            self._is_running = False
-            self._cancel_event.set()
-            if self._active_subproc:
-                try: self._active_subproc.kill()
-                except Exception: pass
-                self._active_subproc = None
-            for eng in (self._active_engines or ([self.current_engine] if self.current_engine else [])):
-                try: (eng.safe_shutdown() if hasattr(eng, "safe_shutdown") else eng.cancel())
-                except Exception: pass
+        self._stop_all(use_safe=True)
 
     def update_url(self, new_url: str, headers: Optional[Dict[str, str]] = None):
         with self._lock:
@@ -295,6 +321,9 @@ class StreamDownloadCoordinator:
                 allow_split = (self.max_connections > 1)
 
                 def _on_single_prog(downloaded, total, speed, eta, active):
+                    if self._is_paused:
+                        if self.on_progress: self.on_progress(downloaded, total, 0.0, "Paused", 0)
+                        return
                     if speed > 0:
                         self._last_active_speed = speed
                     elif downloaded > 0 and self._last_active_speed <= 0.0:
@@ -307,20 +336,10 @@ class StreamDownloadCoordinator:
                     with self._lock: self._is_running = False
                     if self.on_error: self.on_error(err)
 
-                engine = TurboDownloadEngine(
-                    url=self.stream_info.video_url,
-                    destination_path=actual_dest,
-                    max_connections=safe_conn,
-                    allow_dynamic_split=allow_split,
-                    rate_limit_bytes_per_sec=self.rate_limit,
-                    ssl_context=self.ssl_context,
-                    headers=self.stream_info.video_headers,
-                    on_progress=_on_single_prog,
-                    on_chunk_update=self.on_chunk_update,
-                    on_log=self.on_log,
-                    on_complete=_on_single_complete,
-                    on_error=_on_single_error,
-                    pre_probed_info={"total_size": int(getattr(self.stream_info, "video_size", 0) or 0), "supports_ranges": True} if int(getattr(self.stream_info, "video_size", 0) or 0) > 0 else None
+                engine = self._make_engine(
+                    self.stream_info.video_url, actual_dest, safe_conn, allow_split,
+                    self.stream_info.video_headers, _on_single_prog, _on_single_complete, _on_single_error,
+                    getattr(self.stream_info, "video_size", 0),
                 )
                 with self._lock:
                     self.current_engine = engine
@@ -356,18 +375,22 @@ class StreamDownloadCoordinator:
                 with self._lock:
                     combined_total = max(1, self._v_total_size + self._a_total_size)
                     combined_dl = min(combined_total, self._v_downloaded + self._a_downloaded)
-                    combined_speed = self._v_speed + self._a_speed
-                    combined_active = self._v_active if not v_completed.is_set() else self._a_active
-                    if combined_speed > 0:
-                        self._last_active_speed = combined_speed
-                    elif combined_dl > 0 and self._last_active_speed <= 0.0:
-                        st = self.start_time; el = (time.time() - st) if (isinstance(st, (int, float)) and st > 0) else 0.1
-                        self._last_active_speed = combined_dl / max(0.05, el)
-                    if combined_speed <= 0.0 and self._last_active_speed > 0 and (v_completed.is_set() or a_completed.is_set()):
-                        combined_speed = self._last_active_speed
-                rem_bytes = max(0, combined_total - combined_dl)
-                if combined_speed > 1024 and rem_bytes > 0:
-                    eta_sec = int(rem_bytes / combined_speed)
+                    if self._is_paused:
+                        combined_speed, combined_active = 0.0, 0
+                    else:
+                        combined_speed = self._v_speed + self._a_speed
+                        combined_active = self._v_active if not v_completed.is_set() else self._a_active
+                        if combined_speed > 0:
+                            self._last_active_speed = combined_speed
+                        elif combined_dl > 0 and self._last_active_speed <= 0.0:
+                            st = self.start_time; el = (time.time() - st) if (isinstance(st, (int, float)) and st > 0) else 0.1
+                            self._last_active_speed = combined_dl / max(0.05, el)
+                        if combined_speed <= 0.0 and self._last_active_speed > 0 and (v_completed.is_set() or a_completed.is_set()):
+                            combined_speed = self._last_active_speed
+                if self._is_paused:
+                    eta_str = "Paused"
+                elif combined_speed > 1024 and combined_total > combined_dl:
+                    eta_sec = int((combined_total - combined_dl) / combined_speed)
                     eta_str = f"{eta_sec // 3600:02d}:{(eta_sec % 3600) // 60:02d}:{eta_sec % 60:02d}"
                 else:
                     eta_str = "--:--:--"
@@ -423,37 +446,16 @@ class StreamDownloadCoordinator:
                 _report_combined()
 
             v_conn = max(1, self.max_connections)
-            v_engine = TurboDownloadEngine(
-                url=self.stream_info.video_url,
-                destination_path=video_tmp,
-                max_connections=v_conn,
-                allow_dynamic_split=(self.max_connections > 1),
-                rate_limit_bytes_per_sec=self.rate_limit,
-                ssl_context=self.ssl_context,
-                headers=self.stream_info.video_headers,
-                on_progress=_on_v_progress,
-                on_chunk_update=self.on_chunk_update,
-                on_log=self.on_log,
-                on_complete=_on_v_complete,
-                on_error=_on_v_error,
-                pre_probed_info={"total_size": int(getattr(self.stream_info, "video_size", 0) or 0), "supports_ranges": True} if int(getattr(self.stream_info, "video_size", 0) or 0) > 0 else None
+            v_engine = self._make_engine(
+                self.stream_info.video_url, video_tmp, v_conn, (self.max_connections > 1),
+                self.stream_info.video_headers, _on_v_progress, _on_v_complete, _on_v_error,
+                getattr(self.stream_info, "video_size", 0),
             )
-
             a_conn = min(4, max(2, self.max_connections // 2)) if self.max_connections >= 4 else 1  # Wi-Fi safe: a_conn = 1 on single-stream
-            a_engine = TurboDownloadEngine(
-                url=self.stream_info.audio_url,
-                destination_path=audio_tmp,
-                max_connections=a_conn,
-                allow_dynamic_split=(a_conn > 1),  # Wi-Fi safe: allow_dynamic_split=False when a_conn <= 1
-                rate_limit_bytes_per_sec=self.rate_limit,
-                ssl_context=self.ssl_context,
-                headers=self.stream_info.audio_headers,
-                on_progress=_on_a_progress,
-                on_chunk_update=self.on_chunk_update,
-                on_log=self.on_log,
-                on_complete=_on_a_complete,
-                on_error=_on_a_error,
-                pre_probed_info={"total_size": int(getattr(self.stream_info, "audio_size", 0) or 0), "supports_ranges": True} if int(getattr(self.stream_info, "audio_size", 0) or 0) > 0 else None
+            a_engine = self._make_engine(
+                self.stream_info.audio_url, audio_tmp, a_conn, (a_conn > 1),  # Wi-Fi safe: allow_dynamic_split=False when a_conn <= 1
+                self.stream_info.audio_headers, _on_a_progress, _on_a_complete, _on_a_error,
+                getattr(self.stream_info, "audio_size", 0),
             )
 
             with self._lock:

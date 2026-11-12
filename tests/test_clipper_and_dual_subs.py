@@ -1386,8 +1386,8 @@ Non-mp4 clip cue
             except Exception:
                 pass
 
-    def test_pause_does_not_close_live_httpresponse_but_closes_mock(self):
-        """Verifies engine.pause() avoids closing live HTTPResponse from another thread but closes mocks."""
+    def test_pause_closes_live_and_mock_connections(self):
+        """Verifies engine.pause() closes all active connections immediately (unblocking workers)."""
         engine = TurboDownloadEngine(
             url="http://example.com/test.mp4",
             destination_path=os.path.join(tempfile.gettempdir(), "test_pause_live.mp4")
@@ -1409,9 +1409,7 @@ Non-mp4 clip cue
 
         self.assertTrue(engine.is_paused)
         self.assertTrue(engine._pause_event.is_set())
-        # Live connection must NOT be closed from this thread
-        self.assertFalse(live_conn.closed)
-        # Mock connection MUST be closed (preserving compatibility with test_stage7)
+        self.assertTrue(live_conn.closed)
         mock_conn.close.assert_called_once()
         self.assertEqual(len(engine._active_connections), 0)
 

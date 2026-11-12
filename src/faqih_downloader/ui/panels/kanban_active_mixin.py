@@ -104,6 +104,7 @@ class KanbanActiveColumnMixin:
     def _build_active_card_shell(self, card: Any):
         w = build_active_card_shell(card, self)
         self.lbl_a1_filename = w["lbl_filename"]
+        self.btn_a1_pause = w.get("btn_pause")
         self.btn_a1_menu = w["btn_menu"]
         self.lbl_a1_pct = w["lbl_pct"]
         self.canvas_a1_prog = w["canvas_prog"]
@@ -115,6 +116,11 @@ class KanbanActiveColumnMixin:
     def reset_kanban_active_stream(self):
         """Puts Column 2 in quiet 'Engine Ready' idle state with 0.0 MB/s and LEDs off."""
         self._active_stream_live = False
+        self._last_active_pct = 0.0
+        self._last_active_downloaded = 0
+        self._last_active_total = 0
+        if hasattr(self, "btn_a1_pause") and self.btn_a1_pause and self.btn_a1_pause.winfo_exists():
+            self.btn_a1_pause.configure(text="⏸")
         if hasattr(self, "lbl_col2_title") and self.lbl_col2_title.winfo_exists():
             self.lbl_col2_title.configure(text=f"{tr('pipeline_col_active', 'Active Turbo Streams')} (0)")
         if hasattr(self, "lbl_col2_total_speed") and self.lbl_col2_total_speed.winfo_exists():
@@ -183,10 +189,24 @@ class KanbanActiveColumnMixin:
                 pass
         eta_lower = stage_part.lower()
         is_processing = any(k in eta_lower for k in ("merging", "burning", "embedding", "clipping", "boost", "transcoding"))
+        raw_p = getattr(eng, "is_paused", False) if eng else False
+        eng_paused = (raw_p() if callable(raw_p) else raw_p) is True
+        is_paused_state = ("paused" in eta_lower) or (eng_paused and not is_processing)
 
-        if not is_running and not is_processing and pct <= 0 and (not speed_str or speed_str in ("0 B/s", "0.0 MB/s")):
+        if not is_running and not is_processing and not is_paused_state and pct <= 0 and (not speed_str or speed_str in ("0 B/s", "0.0 MB/s")):
             self.reset_kanban_active_stream()
             return
+
+        if is_paused_state:
+            speed_str = "0.0 MB/s"
+            if pct <= 0 and downloaded <= 0 and getattr(self, "_last_active_pct", 0.0) > 0:
+                pct = float(self._last_active_pct)
+                downloaded = int(getattr(self, "_last_active_downloaded", 0) or 0)
+                total = total or int(getattr(self, "_last_active_total", 0) or 0)
+        elif downloaded > 0 or total > 0 or pct > 0:
+            self._last_active_pct = pct
+            self._last_active_downloaded = downloaded
+            self._last_active_total = total
 
         def _fmt_sz(b: float) -> str:
             b = max(0.0, float(b or 0))
@@ -250,7 +270,9 @@ class KanbanActiveColumnMixin:
             else:
                 timer_suffix = f" ({int(pct)}%)" if pct > 0 else ""
 
-            if "merging" in stage_lower:
+            if is_paused_state:
+                eta_txt = "⏸ متوقف مؤقتاً"
+            elif "merging" in stage_lower:
                 eta_txt = f"⚙️ جاري دمج الصوت والفيديو{timer_suffix}"
             elif "burning" in stage_lower:
                 eta_txt = f"🔥 جاري حرق الترجمة{timer_suffix}"
@@ -270,6 +292,9 @@ class KanbanActiveColumnMixin:
                 eta_txt = ""
             self.lbl_a1_eta.configure(text=eta_txt)
 
+        if hasattr(self, "btn_a1_pause") and self.btn_a1_pause and self.btn_a1_pause.winfo_exists():
+            self.btn_a1_pause.configure(text="▶" if is_paused_state else "⏸")
+
         if hasattr(self, "lbl_col2_total_speed") and self.lbl_col2_total_speed.winfo_exists():
             self.lbl_col2_total_speed.configure(text=speed_str)
 
@@ -283,7 +308,7 @@ class KanbanActiveColumnMixin:
                 if isinstance(raw_mc, (int, str)) and not isinstance(raw_mc, bool):
                     s = str(raw_mc).strip()
                     if s.isdigit(): safe_lanes = int(s)
-            self.matrix_a1.update_from_chunks(chunks, active_count=active_chunks, is_active=True, max_lanes=safe_lanes)
+            self.matrix_a1.update_from_chunks(chunks, active_count=(0 if is_paused_state else active_chunks), is_active=(not is_paused_state), max_lanes=safe_lanes)
 
     def refresh_kanban_col2(self):
         """Re-translates Column 2 texts."""

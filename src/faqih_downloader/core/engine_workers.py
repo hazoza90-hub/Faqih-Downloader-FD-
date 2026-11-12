@@ -48,6 +48,8 @@ class _KeepAliveResponseWrapper:
         return self.status
 
     def read(self, amt: int = -1) -> bytes:
+        if amt > 0 and hasattr(type(self._resp), "read1") and not hasattr(self._resp, "_mock_name"):
+            return self._resp.read1(amt)
         return self._resp.read(amt)
 
     def close(self):
@@ -101,10 +103,20 @@ class EngineWorkersMixin(EngineResumerMixin):
         return req
 
     def _spawn_worker(self, chunk: DownloadChunk):
-        """Spawns an asynchronous worker thread for a specific chunk."""
-        t = threading.Thread(target=self._chunk_worker, args=(chunk,), daemon=True)
+        """Spawns an asynchronous worker thread for a chunk (single-worker guarded)."""
         with self._lock:
-            self.active_workers.append(t)
+            wt = getattr(self, "_worker_threads", None)
+            if wt is None:
+                wt = {}; self._worker_threads = wt
+            existing = wt.get(chunk.chunk_id)
+            if existing is not None and existing.is_alive():
+                return
+            with chunk.lock:
+                if chunk.status == "completed":
+                    return
+                chunk.status = "active"
+            t = threading.Thread(target=self._chunk_worker, args=(chunk,), daemon=True)
+            self.active_workers.append(t); wt[chunk.chunk_id] = t
         t.start()
 
     def _is_stopped(self) -> bool:
@@ -114,7 +126,7 @@ class EngineWorkersMixin(EngineResumerMixin):
     def _wait_if_paused(self) -> bool:
         """Blocks while download is paused; returns True if resumed, False if stopped/cancelled."""
         while self._pause_event.is_set() and not self._is_stopped():
-            time.sleep(0.1)
+            time.sleep(0.05)
         return not self._is_stopped()
 
     def _chunk_worker(self, chunk: DownloadChunk):
@@ -135,7 +147,7 @@ class EngineWorkersMixin(EngineResumerMixin):
                 while not self._is_stopped():
                     with chunk.lock:
                         chunk.status = "active"
-                        cur_offset = chunk.start_byte + chunk.downloaded_bytes
+                        cur_offset = chunk.current_byte
                         target_end = chunk.end_byte
                         if (self.total_size > 0 and cur_offset > target_end) or (self.total_size == 0 and chunk.downloaded_bytes > 0 and chunk.status == "completed"):
                             if self.total_size > 0: chunk.status = "completed"
@@ -183,12 +195,15 @@ class EngineWorkersMixin(EngineResumerMixin):
                         path_q = (p.path or "/") + (f"?{p.query}" if p.query else "")
 
                         if conn is not None and conn_key != (scheme, host, port):
-                            try: conn.close()
-                            except Exception: pass
+                            self._close_conn_safely(conn)
                             conn = None
 
                         raw_resp = None
                         for send_attempt in range(2):
+                            if conn is None:
+                                conn = self._acquire_pooled_conn((scheme, host, port))
+                                if conn is not None:
+                                    conn_key = (scheme, host, port)
                             if conn is None:
                                 conn = http.client.HTTPSConnection(host, port, timeout=15, context=self.ssl_context) if scheme == "https" else http.client.HTTPConnection(host, port, timeout=15)
                                 conn_key = (scheme, host, port)
@@ -256,6 +271,10 @@ class EngineWorkersMixin(EngineResumerMixin):
                         break
 
                     if out_file is None:
+                        with chunk.lock:
+                            if self.total_size > 0 and chunk.start_byte + chunk.downloaded_bytes > chunk.end_byte:
+                                chunk.status = "completed"
+                                return
                         f_mode = "r+b" if (chunk.downloaded_bytes > 0 and os.path.exists(chunk.part_filepath)) else "w+b"
                         out_file = open(chunk.part_filepath, f_mode, buffering=1024 * 1024)
                         out_file.seek(chunk.downloaded_bytes if f_mode == "r+b" else 0)
@@ -264,7 +283,7 @@ class EngineWorkersMixin(EngineResumerMixin):
                     with self._lock:
                         self._active_connections.append(resp)
 
-                    BUF_SIZE = 524288
+                    BUF_SIZE = 65536
                     while not self._is_stopped():
                         if self._pause_event.is_set():
                             break
@@ -288,6 +307,8 @@ class EngineWorkersMixin(EngineResumerMixin):
 
                         data = resp.read(to_read)
                         if not data:
+                            if self._pause_event.is_set() or self.is_paused:
+                                break
                             if expected_seg_bytes is not None and seg_bytes_read < expected_seg_bytes:
                                 raise RuntimeError(f"Premature EOF from server: received {seg_bytes_read:,} of {expected_seg_bytes:,} bytes")
                             break
@@ -308,9 +329,14 @@ class EngineWorkersMixin(EngineResumerMixin):
                             seg_bytes_read += len(data)
 
                             if self.total_size > 0 and (chunk.start_byte + chunk.downloaded_bytes > chunk.end_byte):
+                                try: out_file.flush()
+                                except Exception: pass
                                 chunk.status = "completed"
                                 chunk_done = True
                         if chunk_done:
+                            if not _is_urlopen_mocked():
+                                self._release_or_close_conn(conn, resp, raw_resp, conn_key, seg_bytes_read, expected_seg_bytes)
+                                conn = resp = None
                             try: self._dynamic_split_check()
                             except Exception: pass
                             return
@@ -321,43 +347,21 @@ class EngineWorkersMixin(EngineResumerMixin):
 
                     if self._pause_event.is_set():
                         with self._lock:
-                            if resp in self._active_connections:
-                                self._active_connections.remove(resp)
-                            if conn in self._active_connections:
-                                self._active_connections.remove(conn)
-                        if resp:
-                            try: resp.close()
-                            except Exception: pass
-                            resp = None
-                        if conn:
-                            try: conn.close()
-                            except Exception: pass
-                            conn = None
-                        if not self._wait_if_paused():
-                            return
+                            if resp in self._active_connections: self._active_connections.remove(resp)
+                            if conn in self._active_connections: self._active_connections.remove(conn)
+                        self._close_conn_safely(resp); self._close_conn_safely(conn)
+                        resp = conn = None
+                        if not self._wait_if_paused(): return
                         continue
 
-                    with self._lock:
-                        if resp in self._active_connections:
-                            self._active_connections.remove(resp)
-
                     if _is_urlopen_mocked():
-                        try: resp.close()
-                        except Exception: pass
+                        with self._lock:
+                            if resp in self._active_connections: self._active_connections.remove(resp)
+                        self._close_conn_safely(resp)
                         resp = None
                     else:
-                        if expected_seg_bytes is not None and seg_bytes_read >= expected_seg_bytes:
-                            try: raw_resp.read(1024)
-                            except Exception: pass
-                        if getattr(raw_resp, "will_close", False) or not getattr(raw_resp, "isclosed", lambda: True)() or (expected_seg_bytes is not None and seg_bytes_read < expected_seg_bytes):
-                            if conn:
-                                with self._lock:
-                                    if conn in self._active_connections:
-                                        self._active_connections.remove(conn)
-                                try: conn.close()
-                                except Exception: pass
-                                conn = None
-                        resp = None
+                        self._release_or_close_conn(conn, resp, raw_resp, conn_key, seg_bytes_read, expected_seg_bytes)
+                        resp = conn = None
 
                     chunk_done = False
                     with chunk.lock:
@@ -379,59 +383,46 @@ class EngineWorkersMixin(EngineResumerMixin):
                         return
 
             except Exception as e:
+                if self._pause_event.is_set() or self.is_paused:
+                    if out_file:
+                        try: out_file.flush()
+                        except Exception: pass
+                    self._cleanup_worker_conns(resp, conn); resp = conn = None
+                    while self._pause_event.is_set() and not self.is_cancelled and self.is_running:
+                        time.sleep(0.05)
+                    if self._is_stopped(): return
+                    continue
                 if isinstance(e, urllib.error.HTTPError):
-                    e.close()
-                    self.last_http_status = e.code
+                    e.close(); self.last_http_status = e.code
                     if e.code in (401, 403, 410):
                         self.has_expired_link = True
                         chunk.error_msg = f"HTTP {e.code}: {e.reason} (Expired or Forbidden Link)"
-                        with chunk.lock:
-                            chunk.status = "failed"
-                        self._stop_workers_for_error()
-                        break
+                        with chunk.lock: chunk.status = "failed"
+                        self._stop_workers_for_error(); break
                 if self.has_expired_link:
-                    with chunk.lock:
-                        chunk.status = "failed"
+                    with chunk.lock: chunk.status = "failed"
                     break
-                if self._cancel_event.is_set() or not self.is_running:
-                    return
-                if self._error_abort_event.is_set():
-                    break
-                if self._pause_event.is_set():
-                    if not self._wait_if_paused(): return
-                    continue
+                if self._cancel_event.is_set() or not self.is_running: return
+                if self._error_abort_event.is_set(): break
                 retry_count = 0 if seg_bytes_read >= 65536 else (max(0, retry_count - 1) if seg_bytes_read > 0 else retry_count)
-                retry_count += 1
+                retry_count += 1; chunk.retry_count = retry_count
                 backoff = min(4.0, 0.8 * (1.4 ** min(retry_count, 5)))
                 self.log(f"Connection #{chunk.chunk_id} error: {e}. Retry {retry_count}/{max_retries} in {backoff:.1f}s...")
                 t_end = time.time() + backoff
                 while time.time() < t_end and not self._is_stopped() and not self._pause_event.is_set():
-                    time.sleep(0.1)
-                if self._cancel_event.is_set() or not self.is_running:
-                    return
-                if self._error_abort_event.is_set():
-                    break
+                    time.sleep(0.05)
+                if self._pause_event.is_set():
+                    if not self._wait_if_paused(): return
+                    continue
+                if self._cancel_event.is_set() or not self.is_running: return
+                if self._error_abort_event.is_set(): break
             finally:
                 if out_file:
                     try: out_file.close()
                     except Exception: pass
                     out_file = None
-                if conn:
-                    with self._lock:
-                        if conn in self._active_connections:
-                            self._active_connections.remove(conn)
-                    try: conn.close()
-                    except Exception: pass
-                    conn = None
-                if resp:
-                    with self._lock:
-                        if resp in self._active_connections:
-                            self._active_connections.remove(resp)
-                    try: resp.close()
-                    except Exception: pass
-                    resp = None
-                if self.on_chunk_update:
-                    self.on_chunk_update()
+                self._cleanup_worker_conns(resp, conn); resp = conn = None
+                if self.on_chunk_update: self.on_chunk_update()
 
         if self._cancel_event.is_set() or not self.is_running:
             return
@@ -491,32 +482,44 @@ class EngineWorkersMixin(EngineResumerMixin):
             self.save_state()
 
     def _update_progress_metrics(self):
-        """Computes smoothed transfer speed, ETA, and progress metrics."""
-        now = time.monotonic()
-        dt = now - self.last_speed_check_time
-
+        """Computes EMA-smoothed transfer speed over a >=1.5s window, ETA, and progress metrics."""
         with self._lock:
             total_downloaded = sum(c.downloaded_bytes for c in self.chunks)
             active_count = sum(1 for c in self.chunks if c.status == "active")
+        if self.is_paused:
+            self.current_speed = 0.0
+            return
 
-        if dt >= 0.12:
-            delta_bytes = total_downloaded - self.last_downloaded_bytes
-            instant_speed = max(0.0, delta_bytes / dt)
-            if self.current_speed == 0.0:
-                self.current_speed = instant_speed
-            else:
-                self.current_speed = (0.45 * instant_speed) + (0.55 * self.current_speed)
-            self.last_downloaded_bytes = total_downloaded
-            self.last_speed_check_time = now
+        now = time.monotonic()
+        samples = getattr(self, "_speed_samples", None)
+        if samples is None:
+            from collections import deque
+            samples = deque([(self.last_speed_check_time or now, self.last_downloaded_bytes)])
+            self._speed_samples = samples
+        elif not samples:
+            samples.append((now, total_downloaded))
+
+        dt = now - self.last_speed_check_time
+        if dt >= 0.25:
+            samples.append((now, total_downloaded))
+            while len(samples) > 2 and (now - samples[1][0]) >= 1.5:
+                samples.popleft()
+            win_dt = now - samples[0][0]
+            win_bytes = max(0, total_downloaded - samples[0][1])
+            instant_speed = (win_bytes / win_dt) if win_dt > 0 else 0.0
+            self.current_speed = instant_speed if self.current_speed <= 0.0 else (0.25 * instant_speed + 0.75 * self.current_speed)
+            self.last_downloaded_bytes = self._last_speed_bytes = total_downloaded
+            self.last_speed_check_time = self._last_speed_time = now
 
         if self.current_speed <= 0.0 and total_downloaded > 0:
-            st = getattr(self, "start_time", 0.0)
-            elapsed = (time.time() - st) if (isinstance(st, (int, float)) and st > 0) else 0.1
-            self.current_speed = total_downloaded / max(0.05, elapsed)
+            st = getattr(self, "_last_active_start_mono", None)
+            elapsed = (now - st) if (isinstance(st, (int, float)) and st > 0) else 0.1
+            session_dl = max(0, total_downloaded - getattr(self, "_session_start_bytes", 0))
+            if session_dl > 0:
+                self.current_speed = session_dl / max(0.05, elapsed)
 
         if self.current_speed > 1024 and self.total_size > total_downloaded:
-            rem_bytes = self.total_size - total_downloaded
-            eta_sec = int(rem_bytes / self.current_speed)
+            eta_sec = int((self.total_size - total_downloaded) / self.current_speed)
             eta_str = f"{eta_sec // 3600:02d}:{(eta_sec % 3600) // 60:02d}:{eta_sec % 60:02d}"
         else:
             eta_str = "--:--:--"
@@ -529,9 +532,9 @@ class EngineWorkersMixin(EngineResumerMixin):
         self._error_abort_event.set()
         with self._lock:
             for conn in list(self._active_connections):
-                try: conn.close()
-                except Exception: pass
+                self._close_conn_safely(conn)
             self._active_connections.clear()
+        self._drain_conn_pool()
 
 
 __all__ = ["EngineWorkersMixin", "EngineResumerMixin"]

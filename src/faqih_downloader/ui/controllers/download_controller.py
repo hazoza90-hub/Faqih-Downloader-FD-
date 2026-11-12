@@ -270,24 +270,70 @@ class DownloadControllerMixin(MediaDownloadControllerMixin, DownloadCallbacksMix
         return u
 
     def _on_pause_resume(self):
-        if not self.engine:
+        eng = getattr(self, "engine", None)
+        if not eng:
             return
-        if self.engine.is_paused:
-            self.engine.resume()
-            self.btn_pause.configure(text=tr("btn_pause", "|| Pause"), bg=self.c_panel_light)
+        should_resume = bool(getattr(eng, "is_paused", False))
+        snap = eng.get_chunks_snapshot() if hasattr(eng, "get_chunks_snapshot") else list(getattr(eng, "chunks", []) or [])
+        dl_bytes = sum(getattr(c, "downloaded_bytes", 0) for c in snap)
+        real_total = int(getattr(eng, "total_size", 0) or sum(getattr(c, "total_bytes", 0) for c in snap) or 0)
+        pct_val = (dl_bytes / real_total * 100.0) if real_total > 0 else float(getattr(self, "_last_active_pct", 0.0) or 0.0)
+        fn = getattr(eng, "destination_path", None) or getattr(eng, "dest_path", None) or ""
+
+        if should_resume:
+            if hasattr(self, "btn_pause"):
+                try: self.btn_pause.configure(text=tr("btn_pause", "|| Pause"), bg=self.c_panel_light)
+                except Exception: pass
+            if hasattr(self, "btn_a1_pause") and self.btn_a1_pause and self.btn_a1_pause.winfo_exists():
+                try: self.btn_a1_pause.configure(text="⏸")
+                except Exception: pass
+            if hasattr(self, "update_kanban_active_stream"):
+                try:
+                    self.update_kanban_active_stream(fn, pct_val, "0.0 MB/s", snap, 0, downloaded=dl_bytes, total=real_total, eta="Downloading")
+                except TypeError:
+                    self.update_kanban_active_stream(fn, pct_val, "0.0 MB/s", snap, 0)
         else:
-            self.engine.pause()
-            self.btn_pause.configure(text=tr("btn_resume", "▶ Resume"), bg=self.c_warning)
+            if hasattr(self, "btn_pause"):
+                try: self.btn_pause.configure(text=tr("btn_resume", "▶ Resume"), bg=self.c_warning)
+                except Exception: pass
             if hasattr(self, "btn_refresh_link"):
-                self.btn_refresh_link.configure(state="normal", bg=self.c_panel_light, fg=self.c_accent)
+                try: self.btn_refresh_link.configure(state="normal", bg=self.c_panel_light, fg=self.c_accent)
+                except Exception: pass
+            if hasattr(self, "btn_a1_pause") and self.btn_a1_pause and self.btn_a1_pause.winfo_exists():
+                try: self.btn_a1_pause.configure(text="▶")
+                except Exception: pass
+            if hasattr(self, "card_speed"):
+                try: self.card_speed.configure(text="0.0 MB/s")
+                except Exception: pass
+            if hasattr(self, "update_kanban_active_stream"):
+                try:
+                    self.update_kanban_active_stream(fn, pct_val, "0.0 MB/s", snap, 0, downloaded=dl_bytes, total=real_total, eta="Paused")
+                except TypeError:
+                    self.update_kanban_active_stream(fn, pct_val, "0.0 MB/s", snap, 0)
+
+        dl_url = ""
+        try: dl_url = self._resolve_history_url()
+        except Exception: pass
+        dl_dest = (fn or (self.entry_dest.get() if hasattr(self, "entry_dest") else "")).strip()
+
+        def _bg_toggle():
             try:
-                dl_url = self._resolve_history_url()
-                dl_dest = (self.engine.dest_path if self.engine and getattr(self.engine, "dest_path", None) else self.entry_dest.get()).strip()
-                if dl_url and dl_dest and hasattr(self, "history_manager") and self.history_manager:
-                    self.history_manager.add_or_update_entry(url=dl_url, file_path=dl_dest, size_bytes=0, status="Paused", elapsed_sec=0.0)
-                    self._refresh_history_table()
+                eng.resume() if should_resume else eng.pause()
             except Exception:
                 pass
+            try:
+                if dl_url and dl_dest and hasattr(self, "history_manager") and self.history_manager:
+                    self.history_manager.add_or_update_entry(
+                        url=dl_url,
+                        file_path=dl_dest,
+                        size_bytes=real_total,
+                        status="In Progress" if should_resume else "Paused",
+                        elapsed_sec=0.0,
+                    )
+            except Exception:
+                pass
+
+        threading.Thread(target=_bg_toggle, daemon=True).start()
 
     def _on_cancel_download(self):
         for ev_name in ("_yt_cancel_event", "_fetch_cancel_event"):

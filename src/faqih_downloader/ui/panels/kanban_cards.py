@@ -350,6 +350,21 @@ def build_active_card_shell(card: Any, parent_app: Any) -> Dict[str, Any]:
     btn_menu.pack(side=tk.RIGHT)
     btn_menu.bind("<Button-1>", lambda e: parent_app._show_active_card_menu(btn_menu))
 
+    btn_pause = tk.Label(
+        row1,
+        text="⏸",
+        font=("Segoe UI", 9, "bold"),
+        bg="#1c2533",
+        fg="#19f3ee",
+        padx=6,
+        pady=0,
+        cursor="hand2",
+    )
+    btn_pause.pack(side=tk.RIGHT, padx=(0, 6))
+    btn_pause.bind("<Button-1>", lambda e: getattr(parent_app, "_on_pause_resume", lambda: None)())
+    btn_pause.bind("<Enter>", lambda e: btn_pause.configure(bg="#263346"))
+    btn_pause.bind("<Leave>", lambda e: btn_pause.configure(bg="#1c2533"))
+
     row2 = tk.Frame(card, bg="#151a24")
     row2.pack(fill=tk.X, pady=(0, 6))
 
@@ -376,6 +391,7 @@ def build_active_card_shell(card: Any, parent_app: Any) -> Dict[str, Any]:
 
     return {
         "lbl_filename": lbl_fn,
+        "btn_pause": btn_pause,
         "btn_menu": btn_menu,
         "lbl_pct": lbl_pct,
         "canvas_prog": cv_prog,

@@ -16,7 +16,26 @@ class DownloadChunk:
     status: str = "pending"  # pending, active, completed, failed
     part_filepath: str = ""
     error_msg: str = ""
+    retry_count: int = 0
     lock: threading.RLock = field(default_factory=threading.RLock)
+
+    @property
+    def current_byte(self) -> int:
+        with self.lock:
+            return self.start_byte + self.downloaded_bytes
+
+    @property
+    def is_completed(self) -> bool:
+        with self.lock:
+            return self.status == "completed"
+
+    @is_completed.setter
+    def is_completed(self, value: bool):
+        with self.lock:
+            if value:
+                self.status = "completed"
+            elif self.status == "completed":
+                self.status = "pending"
 
     @property
     def total_bytes(self) -> int:

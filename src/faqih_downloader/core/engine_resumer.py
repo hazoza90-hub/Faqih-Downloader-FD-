@@ -1,15 +1,109 @@
 """
 Engine resumer and dynamic URL refresh mixin for Smart Download (SD).
 """
+import os
 import time
+import socket
 import threading
-from typing import Optional, Dict, Tuple
+from typing import Optional, Dict, Tuple, Any
 
 from .html_resolver import validate_refresh_url
 
 
 class EngineResumerMixin:
     """Provides methods for updating download URLs, validating refreshed links, and resuming transfers."""
+
+    @staticmethod
+    def _close_conn_safely(conn: Any):
+        """Force-shuts underlying socket (if any) and closes connection/response immediately."""
+        if conn is None:
+            return
+        sock = getattr(conn, "sock", None)
+        if sock is not None and not hasattr(sock, "_mock_name"):
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except Exception:
+                pass
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+    def _drain_conn_pool(self):
+        """Closes and removes all idle keep-alive connections stored in _conn_pool."""
+        pool_map = getattr(self, "_conn_pool", None)
+        if not pool_map:
+            return
+        with self._lock:
+            for conns in list(pool_map.values()):
+                for conn in conns:
+                    self._close_conn_safely(conn)
+            pool_map.clear()
+
+    def _acquire_pooled_conn(self, conn_key: Tuple[str, str, int]) -> Any:
+        """Pops a healthy idle HTTP(S)Connection from _conn_pool for conn_key, if available."""
+        pool_map = getattr(self, "_conn_pool", None)
+        if not pool_map:
+            return None
+        with self._lock:
+            pool = pool_map.get(conn_key)
+            while pool:
+                conn = pool.pop()
+                if getattr(conn, "sock", None) is not None:
+                    return conn
+                self._close_conn_safely(conn)
+        return None
+
+    def _cleanup_worker_conns(self, resp: Any, conn: Any):
+        """Removes worker response/connection from _active_connections and closes both."""
+        with self._lock:
+            if resp in self._active_connections: self._active_connections.remove(resp)
+            if conn in self._active_connections: self._active_connections.remove(conn)
+        self._close_conn_safely(resp); self._close_conn_safely(conn)
+
+    def _release_or_close_conn(
+        self,
+        conn: Any,
+        resp: Any,
+        raw_resp: Any,
+        conn_key: Optional[Tuple[str, str, int]],
+        seg_bytes_read: int,
+        expected_seg_bytes: Optional[int],
+    ) -> None:
+        """Returns clean keep-alive connection to _conn_pool when length==0; otherwise closes directly."""
+        with self._lock:
+            if resp in self._active_connections:
+                self._active_connections.remove(resp)
+            if conn in self._active_connections:
+                self._active_connections.remove(conn)
+
+        can_reuse = (
+            conn is not None
+            and conn_key is not None
+            and raw_resp is not None
+            and not self._is_stopped()
+            and not self._pause_event.is_set()
+            and not getattr(raw_resp, "will_close", False)
+            and getattr(raw_resp, "length", None) == 0
+            and getattr(raw_resp, "isclosed", lambda: False)()
+            and (expected_seg_bytes is None or seg_bytes_read >= expected_seg_bytes)
+            and getattr(conn, "sock", None) is not None
+        )
+        if can_reuse:
+            pool_map = getattr(self, "_conn_pool", None)
+            if pool_map is None:
+                pool_map = {}
+                self._conn_pool = pool_map
+            with self._lock:
+                pool_map.setdefault(conn_key, []).append(conn)
+            return
+
+        if resp is not None and hasattr(resp, "_mock_name"):
+            self._close_conn_safely(resp)
+        if conn is not None:
+            self._close_conn_safely(conn)
+        elif resp is not None:
+            self._close_conn_safely(resp)
 
     def update_url(self, new_url: str, headers: Optional[Dict[str, str]] = None):
         """
@@ -45,6 +139,44 @@ class EngineResumerMixin:
             headers=headers or self.headers
         )
         return is_valid, msg, size
+
+    def _prepare_resume_chunks(self):
+        """Revalidates existing chunk part files, truncates excess bytes, and spawns pending workers."""
+        self.log(f"Resuming download from existing chunks ({len(self.chunks)} parts)...")
+        os.makedirs(self.temp_dir, exist_ok=True)
+        with self._lock:
+            prior_workers = list(self.active_workers)
+        for w in prior_workers:
+            if w.is_alive() and w != threading.current_thread():
+                w.join(timeout=0.3)
+        self._error_abort_event.clear()
+        with self._lock:
+            self.active_workers.clear()
+            if hasattr(self, "_worker_threads"):
+                self._worker_threads.clear()
+            self._active_connections.clear()
+            for c in self.chunks:
+                with c.lock:
+                    expected = c.end_byte - c.start_byte + 1
+                    if os.path.exists(c.part_filepath):
+                        try:
+                            actual_bytes = os.path.getsize(c.part_filepath)
+                            c.downloaded_bytes = min(actual_bytes, expected)
+                            if actual_bytes > expected:
+                                with open(c.part_filepath, "r+b") as tf:
+                                    tf.truncate(expected)
+                        except Exception:
+                            pass
+                    if self.total_size > 0 and c.downloaded_bytes >= expected:
+                        c.status = "completed"
+                    else:
+                        c.status = "pending"
+                        c.error_msg = ""
+            pending_chunks = [c for c in self.chunks if c.status == "pending"]
+            for c in pending_chunks[:self.max_connections]:
+                self._spawn_worker(c)
+        self._resume_mode = False
+        self.save_state()
 
     def resume_transfer(self):
         """Resumes download transfer using existing chunks and part files."""

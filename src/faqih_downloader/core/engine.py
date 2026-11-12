@@ -13,17 +13,10 @@ import ssl
 import shutil
 import tempfile
 import json
+from collections import deque
 from typing import List, Optional, Callable, Dict, Any, Union, Tuple
 
-from ..config import (
-    get_resource_path,
-    get_setting,
-    CHUNK_SIZE_KB,
-    MAX_CONCURRENT_CHUNKS,
-    DEFAULT_CHUNKS,
-    MIN_CHUNK_BYTES,
-    BUFFER_SIZE,
-)
+from ..config import get_resource_path, get_setting, CHUNK_SIZE_KB, MAX_CONCURRENT_CHUNKS, DEFAULT_CHUNKS, MIN_CHUNK_BYTES, BUFFER_SIZE
 from .rate_limiter import TokenBucketRateLimiter
 from .chunk import DownloadChunk, get_permissive_ssl_context
 from .html_resolver import validate_refresh_url
@@ -112,7 +105,9 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
 
         self.chunks: List[DownloadChunk] = []
         self.active_workers: List[threading.Thread] = []
+        self._worker_threads: Dict[int, threading.Thread] = {}
         self._active_connections: List[urllib.request.addinfourl] = []
+        self._conn_pool: Dict[Tuple[str, str, int], list] = {}
 
         self._lock = threading.RLock()
         self._cancel_event = threading.Event()
@@ -126,9 +121,10 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
 
         # Speed calculation metrics
         self.start_time = 0.0
-        self.last_speed_check_time = 0.0
-        self.last_downloaded_bytes = 0
+        self.last_speed_check_time = self._last_speed_time = 0.0
+        self.last_downloaded_bytes = self._last_speed_bytes = 0
         self.current_speed = 0.0
+        self._speed_samples: deque = deque()
         self._accumulated_active_sec = 0.0
         self._last_active_start_mono: Optional[float] = None
         self._session_start_bytes: int = 0
@@ -310,51 +306,75 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
 
     def start(self):
         """Launches the download supervisor thread."""
-        self.is_running = True
-        self.is_paused = False
-        self._cancel_event.clear()
-        self._pause_event.clear()
+        self.is_running, self.is_paused = True, False
+        self._cancel_event.clear(); self._pause_event.clear()
+        now = time.monotonic()
         self.start_time = time.time()
-        self._last_active_start_mono = time.monotonic()
-        self.last_speed_check_time = time.monotonic()
-        self.last_downloaded_bytes = sum(c.downloaded_bytes for c in self.chunks)
-        self._session_start_bytes = self.last_downloaded_bytes
+        self._last_active_start_mono = self.last_speed_check_time = self._last_speed_time = now
+        dl_bytes = sum(c.downloaded_bytes for c in self.chunks)
+        self.last_downloaded_bytes = self._last_speed_bytes = self._session_start_bytes = dl_bytes
+        self._speed_samples = deque([(now, dl_bytes)])
+        threading.Thread(target=self._supervisor_loop, daemon=True).start()
 
-        supervisor_thread = threading.Thread(target=self._supervisor_loop, daemon=True)
-        supervisor_thread.start()
+    @property
+    def is_cancelled(self) -> bool:
+        return self._cancel_event.is_set()
 
-    def _abort_active_conns(self, force: bool = False):
+    def _abort_active_conns(self, force: bool = True):
         with self._lock:
             for conn in self._active_connections:
-                if force or hasattr(conn, "_mock_name"):
-                    try: conn.close()
-                    except Exception: pass
+                self._close_conn_safely(conn)
             self._active_connections.clear()
+        self._drain_conn_pool()
 
     def pause(self):
-        """Pauses all active chunk downloads."""
+        """Pauses all active chunk downloads and aborts active sockets immediately."""
         if not self.is_running or self.is_paused: return
         self.is_paused = True
         if self._last_active_start_mono is not None:
             self._accumulated_active_sec += max(0.0, time.monotonic() - self._last_active_start_mono)
             self._last_active_start_mono = None
-        self._pause_event.set(); self._abort_active_conns()
+        self._pause_event.set(); self._abort_active_conns(force=True)
+        self.current_speed = 0.0
+        if hasattr(self, "_speed_samples"): self._speed_samples.clear()
+        dl_bytes = sum(c.downloaded_bytes for c in self.chunks)
+        self.last_downloaded_bytes = self._last_speed_bytes = dl_bytes
         threading.Thread(target=self.save_state, daemon=True).start()
+        if self.on_progress:
+            try: self.on_progress(dl_bytes, self.total_size, 0.0, "Paused", 0)
+            except Exception: pass
         self.log("Download paused by user.")
 
     def resume(self):
-        """Resumes all active chunk downloads."""
-        if not self.is_running or not self.is_paused: return
+        """Resumes all active chunk downloads and spawns workers for dead/incomplete chunks."""
+        if not self.is_paused or self.is_cancelled: return
         self.is_paused = False
-        self._last_active_start_mono = time.monotonic()
-        self.last_speed_check_time = time.monotonic()
-        self.last_downloaded_bytes = sum(c.downloaded_bytes for c in self.chunks)
-        self._session_start_bytes = self.last_downloaded_bytes
-        self._pause_event.clear(); self.log("Download resumed.")
+        now = time.monotonic()
+        self._last_active_start_mono = self.last_speed_check_time = self._last_speed_time = now
+        dl_bytes = sum(c.downloaded_bytes for c in self.chunks)
+        self.last_downloaded_bytes = self._last_speed_bytes = self._session_start_bytes = dl_bytes
+        self._speed_samples = deque([(now, dl_bytes)])
+        self._pause_event.clear()
+        active_cnt = 0
+        with self._lock:
+            incomplete = [c for c in self.chunks if not c.is_completed and c.status != "failed"]
+            wt = getattr(self, "_worker_threads", {})
+            active_cnt = sum(1 for c in incomplete if wt.get(c.chunk_id) is not None and wt[c.chunk_id].is_alive())
+            for c in incomplete:
+                t = wt.get(c.chunk_id)
+                if t is None or not t.is_alive():
+                    if active_cnt >= self.max_connections and c.status == "pending":
+                        continue
+                    c.status = "active"
+                    self._spawn_worker(c); active_cnt += 1
+        if self.on_progress:
+            try: self.on_progress(dl_bytes, self.total_size, 0.0, "Downloading", active_cnt)
+            except Exception: pass
+        self.log("Download resumed.")
 
     def cancel(self):
         """Cancels download and stops all worker threads immediately."""
-        self.is_running, self._last_active_start_mono = False, None
+        self.is_running, self.is_paused, self._last_active_start_mono = False, False, None
         self._cancel_event.set(); self._pause_event.clear()
         self._abort_active_conns(force=True)
         with self._lock: workers = list(self.active_workers)
@@ -433,41 +453,7 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
                 for c in to_spawn:
                     self._spawn_worker(c)
             else:
-                self.log(f"Resuming download from existing chunks ({len(self.chunks)} parts)...")
-                os.makedirs(self.temp_dir, exist_ok=True)
-                prior_workers = []
-                with self._lock:
-                    prior_workers = list(self.active_workers)
-                for w in prior_workers:
-                    if w.is_alive() and w != threading.current_thread():
-                        w.join(timeout=0.3)
-                self._error_abort_event.clear()
-                with self._lock:
-                    self.active_workers.clear()
-                    self._active_connections.clear()
-                    for c in self.chunks:
-                        with c.lock:
-                            expected = c.end_byte - c.start_byte + 1
-                            if os.path.exists(c.part_filepath):
-                                try:
-                                    actual_bytes = os.path.getsize(c.part_filepath)
-                                    c.downloaded_bytes = min(actual_bytes, expected)
-                                    if actual_bytes > expected:
-                                        with open(c.part_filepath, "r+b") as tf:
-                                            tf.truncate(expected)
-                                except Exception:
-                                    pass
-                            if self.total_size > 0 and c.downloaded_bytes >= expected:
-                                c.status = "completed"
-                            else:
-                                c.status = "pending"
-                                c.error_msg = ""
-                    # Spawn workers for pending chunks up to max_connections
-                    pending_chunks = [c for c in self.chunks if c.status == "pending"]
-                    for c in pending_chunks[:self.max_connections]:
-                        self._spawn_worker(c)
-                self._resume_mode = False
-                self.save_state()
+                self._prepare_resume_chunks()
 
             # Scheduling & Dynamic Splitting Loop
             while self.is_running and not self._cancel_event.is_set():
@@ -475,6 +461,7 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
                 time.sleep(0.02 if ramp_up else 0.08)
 
                 if self.is_paused:
+                    self.current_speed = 0.0
                     continue
 
                 # Schedule pending chunks if worker slots available
@@ -510,6 +497,12 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
 
             if self._cancel_event.is_set():
                 return
+
+            with self._lock:
+                _workers_to_join = list(self.active_workers)
+            for _w in _workers_to_join:
+                if _w.is_alive() and _w != threading.current_thread():
+                    _w.join(timeout=5.0)
 
             # Perform strict sequential assembly
             self.assemble()
