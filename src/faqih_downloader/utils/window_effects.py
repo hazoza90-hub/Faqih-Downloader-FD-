@@ -296,6 +296,11 @@ class RoundedGlassCard(_BaseCanvas):
                 req_w = self.inner.winfo_reqwidth() + pad_x * 2
                 if req_w > 10 and int(self.cget("width") or 0) != int(req_w):
                     self.configure(width=req_w)
+            else:
+                try:
+                    self.inner.unbind("<Configure>")
+                except Exception:
+                    pass
 
     def _draw_card_bg(self, w: int, h: int, state_sig: Optional[Tuple] = None):
         if not getattr(self, "winfo_exists", lambda: False)():

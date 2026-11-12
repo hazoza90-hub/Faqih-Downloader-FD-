@@ -49,7 +49,13 @@ class _KeepAliveResponseWrapper:
 
     def read(self, amt: int = -1) -> bytes:
         if amt > 0 and hasattr(type(self._resp), "read1") and not hasattr(self._resp, "_mock_name"):
-            return self._resp.read1(amt)
+            data = self._resp.read1(amt)
+            if getattr(self._resp, "length", None) == 0 and not self._resp.isclosed() and hasattr(self._resp, "_close_conn"):
+                try:
+                    self._resp._close_conn()
+                except Exception:
+                    pass
+            return data
         return self._resp.read(amt)
 
     def close(self):
@@ -347,18 +353,13 @@ class EngineWorkersMixin(EngineResumerMixin):
                         except Exception: pass
 
                     if paused_break or self._pause_event.is_set() or self.is_paused:
-                        with self._lock:
-                            if resp in self._active_connections: self._active_connections.remove(resp)
-                            if conn in self._active_connections: self._active_connections.remove(conn)
-                        self._close_conn_safely(resp); self._close_conn_safely(conn)
+                        self._cleanup_worker_conns(resp, conn)
                         resp = conn = None
                         if not self._wait_if_paused(): return
                         continue
 
                     if _is_urlopen_mocked():
-                        with self._lock:
-                            if resp in self._active_connections: self._active_connections.remove(resp)
-                        self._close_conn_safely(resp)
+                        self._cleanup_worker_conns(resp, None)
                         resp = None
                     else:
                         self._release_or_close_conn(conn, resp, raw_resp, conn_key, seg_bytes_read, expected_seg_bytes)

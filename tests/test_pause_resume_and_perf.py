@@ -635,6 +635,192 @@ class TestLivePauseResumeAndPerf(unittest.TestCase):
             server.shutdown()
             server.server_close()
 
+    def test_keepalive_read1_zero_length_closes_resp_and_pools_conn(self):
+        """Verifies _KeepAliveResponseWrapper.read and _release_or_close_conn close HTTPResponse when read1 leaves length==0."""
+        from faqih_downloader.core.engine_workers import _KeepAliveResponseWrapper
+
+        class FakeOldPyHTTPResponse:
+            def __init__(self, payload: bytes):
+                self._buf = payload
+                self.length = len(payload)
+                self.will_close = False
+                self._closed = False
+                self.status = 206
+                self.headers = {}
+
+            def read1(self, n=-1):
+                chunk = self._buf[:n] if n >= 0 else self._buf
+                self._buf = self._buf[len(chunk):]
+                self.length -= len(chunk)
+                # Intentionally do NOT call _close_conn() (older Python read1 behavior)
+                return chunk
+
+            def isclosed(self):
+                return self._closed
+
+            def _close_conn(self):
+                self._closed = True
+
+        raw = FakeOldPyHTTPResponse(b"hello")
+        conn = MagicMock()
+        conn.sock = MagicMock()
+        wrapper = _KeepAliveResponseWrapper(raw, conn)
+        self.assertEqual(wrapper.read(5), b"hello")
+        self.assertEqual(raw.length, 0)
+        self.assertTrue(raw.isclosed())
+
+        # Also test _release_or_close_conn defense-in-depth if raw_resp.isclosed() is still False
+        with tempfile.TemporaryDirectory() as td:
+            eng = TurboDownloadEngine("http://example.com/v.bin", os.path.join(td, "v.bin"))
+            eng.is_running = True
+            raw2 = FakeOldPyHTTPResponse(b"")
+            raw2.length = 0
+            conn2 = MagicMock()
+            conn2.sock = MagicMock()
+            self.assertFalse(raw2.isclosed())
+            eng._release_or_close_conn(conn2, None, raw2, ("http", "example.com", 80), 64, 64)
+            self.assertTrue(raw2.isclosed())
+            self.assertIs(eng._acquire_pooled_conn(("http", "example.com", 80)), conn2)
+
+    def test_stream_coordinator_pause_zeroes_dual_metrics_and_no_stale_speed_after_audio_done(self):
+        """Verifies pause() resets _v/_a metrics and _report_combined does not leak stale speed when only audio finished."""
+        payload_v = os.urandom(256 * 1024)
+        payload_a = os.urandom(16 * 1024)
+
+        class DualHandler(http.server.BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+            def log_message(self, *a):
+                pass
+            def do_HEAD(self):
+                sz = len(payload_a) if "/audio" in self.path else len(payload_v)
+                self.send_response(200)
+                self.send_header("Content-Length", str(sz))
+                self.send_header("Accept-Ranges", "bytes")
+                self.end_headers()
+            def do_GET(self):
+                data = payload_a if "/audio" in self.path else payload_v
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(data)))
+                self.send_header("Accept-Ranges", "bytes")
+                self.end_headers()
+                if "/audio" in self.path:
+                    self.wfile.write(data)
+                    self.wfile.flush()
+                else:
+                    # Slow video chunks so audio completes first, then video pauses/slows
+                    pos = 0
+                    while pos < len(data):
+                        try:
+                            self.wfile.write(data[pos:pos + 32768])
+                            self.wfile.flush()
+                        except OSError:
+                            return
+                        pos += 32768
+                        time.sleep(0.03)
+
+        class DualSrv(socketserver.ThreadingMixIn, http.server.HTTPServer):
+            daemon_threads = True
+
+        srv = DualSrv(("127.0.0.1", 0), DualHandler)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                si = YouTubeStreamInfo(
+                    video_id="d1", title="dual", clean_filename="dual.mp4", is_progressive=False,
+                    video_url=f"http://127.0.0.1:{srv.server_address[1]}/video",
+                    audio_url=f"http://127.0.0.1:{srv.server_address[1]}/audio",
+                    video_size=len(payload_v), audio_size=len(payload_a),
+                )
+                events = []
+                done = threading.Event()
+                coord = StreamDownloadCoordinator(
+                    si, os.path.join(td, "dual.mp4"), max_connections=1,
+                    on_progress=lambda d, t, sp, et, ac: events.append((d, t, sp, et, ac)),
+                    on_complete=lambda *a: done.set(),
+                    on_error=lambda e: done.set(),
+                )
+                with patch("faqih_downloader.services.youtube_service.YouTubeResolver.merge_video_audio"), \
+                     patch("faqih_downloader.services.media_env_helpers.ensure_complete_audio_file", return_value=True):
+                    coord.start()
+                    deadline = time.monotonic() + 5.0
+                    while time.monotonic() < deadline and coord._a_downloaded < len(payload_a):
+                        time.sleep(0.02)
+                    coord._v_speed = 12345.0
+                    coord._a_speed = 6789.0
+                    coord._v_active = 2
+                    coord._a_active = 1
+                    coord.pause()
+                    self.assertEqual(coord._v_speed, 0.0)
+                    self.assertEqual(coord._a_speed, 0.0)
+                    self.assertEqual(coord._v_active, 0)
+                    self.assertEqual(coord._a_active, 0)
+
+                    # Simulate resume before video sends non-zero speed while audio already completed
+                    coord._last_active_speed = 500_000.0
+                    coord._is_paused = False
+                    coord._pause_event.clear()
+                    # Trigger a zero-speed progress callback on video engine while audio is already done
+                    v_eng = coord._active_engines[0]
+                    events_before = len(events)
+                    v_eng.on_progress(coord._v_downloaded, len(payload_v), 0.0, "00:10:00", 1)
+                    self.assertGreater(len(events), events_before)
+                    self.assertEqual(events[-1][2], 0.0, "Stale _last_active_speed leaked while video is still incomplete")
+                    coord.cancel()
+        finally:
+            srv.shutdown()
+            srv.server_close()
+
+    def test_vault_column_resize_sync_and_glass_card_unbinds_configure(self):
+        """Verifies Column 3 scrollregion deferral, update_idletasks during resize, release refresh, and RoundedGlassCard unbind."""
+        from faqih_downloader.ui.panels.kanban_vault_helpers import setup_vault_scroll_view
+        from faqih_downloader.ui.controllers.window_resize_mixin import WindowResizeMixin
+
+        root = tk.Tk()
+        root.geometry("500x400")
+        try:
+            body = tk.Frame(root)
+            body.pack(fill=tk.BOTH, expand=True)
+            cv, container = setup_vault_scroll_view(body, body)
+            card = RoundedGlassCard(container, radius=8, inner_padx=6, inner_pady=4)
+            card.pack(fill=tk.X)
+            lbl = tk.Label(card.inner, text="Vault Item")
+            lbl.pack()
+            root.update()
+
+            # Once card width > 20, _on_inner_resize unbinds <Configure> on card.inner
+            card._on_inner_resize()
+            self.assertEqual(card.inner.bind("<Configure>"), "")
+
+            # During active resize, _schedule_vault_scrollregion defers bbox("all")
+            root._is_resizing_window = True
+            with patch.object(cv, "bbox", wraps=cv.bbox) as mock_bbox, \
+                 patch.object(container, "update_idletasks", wraps=container.update_idletasks) as mock_uid:
+                cv._schedule_vault_scrollregion()
+                root.update_idletasks()
+                mock_bbox.assert_not_called()
+                cv._last_win_w = 0
+                cv.event_generate("<Configure>", width=320, height=300)
+                root.update_idletasks()
+                self.assertTrue(mock_uid.called)
+
+            # On resize release, WindowResizeMixin._on_resize_release refreshes vault_cards_canvas scrollregion
+            class DummyWin(WindowResizeMixin):
+                def __init__(self, r, c):
+                    self.root = r
+                    self.vault_cards_canvas = c
+                    self._resize_state = {"mode": "e"}
+
+            dw = DummyWin(root, cv)
+            with patch.object(cv, "bbox", wraps=cv.bbox) as mock_bbox_rel:
+                dw._on_resize_release()
+                self.assertFalse(root._is_resizing_window)
+                self.assertTrue(mock_bbox_rel.called)
+        finally:
+            try:
+                root.destroy()
+            except Exception:
+                pass
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -188,6 +188,8 @@ class StreamDownloadCoordinator:
     def pause(self):
         with self._lock:
             self._is_paused = True; self._pause_event.set(); self._toggle_subproc(True)
+            self._v_speed = 0.0; self._a_speed = 0.0
+            self._v_active = 0; self._a_active = 0
             for eng in (self._active_engines or ([self.current_engine] if self.current_engine else [])):
                 try: eng.pause()
                 except Exception: pass
@@ -387,7 +389,7 @@ class StreamDownloadCoordinator:
                         elif combined_dl > 0 and self._last_active_speed <= 0.0:
                             st = self.start_time; el = (time.time() - st) if (isinstance(st, (int, float)) and st > 0) else 0.1
                             self._last_active_speed = combined_dl / max(0.05, el)
-                        if combined_speed <= 0.0 and self._last_active_speed > 0 and (v_completed.is_set() or a_completed.is_set()):
+                        if combined_speed <= 0.0 and self._last_active_speed > 0 and (v_completed.is_set() and a_completed.is_set()):
                             combined_speed = self._last_active_speed
                 if self._is_paused:
                     eta_str = "Paused"

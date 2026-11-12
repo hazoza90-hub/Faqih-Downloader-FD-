@@ -258,12 +258,24 @@ def setup_vault_scroll_view(col_frame: Any, body: Any, panel: Any = None) -> tup
     cv._scrollregion_pending = False
 
     def _schedule_vault_scrollregion(e=None):
+        try:
+            top = cv.winfo_toplevel()
+            if getattr(top, "_is_resizing_window", False):
+                return
+        except Exception:
+            pass
         if getattr(cv, "_scrollregion_pending", False):
             return
         cv._scrollregion_pending = True
 
         def _apply():
             cv._scrollregion_pending = False
+            try:
+                top = cv.winfo_toplevel()
+                if getattr(top, "_is_resizing_window", False):
+                    return
+            except Exception:
+                pass
             if cv.winfo_exists():
                 cv.configure(scrollregion=cv.bbox("all"))
 
@@ -275,6 +287,11 @@ def setup_vault_scroll_view(col_frame: Any, body: Any, panel: Any = None) -> tup
         if cv.winfo_exists() and e.width > 10 and e.width != getattr(cv, "_last_win_w", 0):
             cv._last_win_w = e.width
             cv.itemconfigure(win_id, width=e.width)
+            try:
+                if getattr(cv.winfo_toplevel(), "_is_resizing_window", False):
+                    container.update_idletasks()
+            except Exception:
+                pass
 
     cv.bind("<Configure>", _on_cv_configure)
 

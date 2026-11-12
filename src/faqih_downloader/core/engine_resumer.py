@@ -77,6 +77,18 @@ class EngineResumerMixin:
             if conn in self._active_connections:
                 self._active_connections.remove(conn)
 
+        if (
+            raw_resp is not None
+            and getattr(raw_resp, "length", None) == 0
+            and not getattr(raw_resp, "will_close", False)
+            and not getattr(raw_resp, "isclosed", lambda: True)()
+            and hasattr(raw_resp, "_close_conn")
+        ):
+            try:
+                raw_resp._close_conn()
+            except Exception:
+                pass
+
         can_reuse = (
             conn is not None
             and conn_key is not None

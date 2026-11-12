@@ -181,6 +181,12 @@ class WindowResizeMixin:
         except Exception:
             pass
 
+        try:
+            if hasattr(self, "vault_cards_canvas") and self.vault_cards_canvas and self.vault_cards_canvas.winfo_exists():
+                self.vault_cards_canvas.configure(scrollregion=self.vault_cards_canvas.bbox("all"))
+        except Exception:
+            pass
+
         if hasattr(self, "_resize_state"):
             self._resize_state.clear()
         self._last_resize_geo = None
