@@ -237,12 +237,15 @@ def process_post_download_clip_and_subtitles(
             if trim_media_file(target_path, clip_start, clip_end, ffmpeg_bin=ff, on_log=on_log, cancel_event=cancel_event, audio_boost=apply_boost_here, total_duration=exp_d, on_progress_pct=_clip_cb) and apply_boost_here:
                 boost_applied = True
 
-    if audio_boost and not boost_applied and os.path.isfile(target_path):
+    boost_already_done = boost_applied or bool(getattr(stream_info, "_audio_boost_applied", False))
+    if audio_boost and not boost_already_done and os.path.isfile(target_path):
         from .audio_and_chapters_engine import apply_audio_boost_to_file
         from .media_env_helpers import find_ffmpeg_bin
-        if on_stage_progress: on_stage_progress("Audio Boost", 10.0, "--:--")
-        if apply_audio_boost_to_file(target_path, ffmpeg_bin=find_ffmpeg_bin(), on_log=on_log, cancel_event=cancel_event): boost_applied = True
-        if on_stage_progress: on_stage_progress("Audio Boost", 100.0, "00:00")
+        boost_dur = (clip_end - clip_start) if (clip_end > clip_start >= 0.0) else float(getattr(stream_info, "duration", 0.0) or 0.0)
+        _boost_cb = (lambda p, eta: on_stage_progress("Audio Boost", p, eta)) if on_stage_progress else None
+        if apply_audio_boost_to_file(target_path, ffmpeg_bin=find_ffmpeg_bin(), on_log=on_log, cancel_event=cancel_event, total_duration=boost_dur, on_progress_pct=_boost_cb):
+            boost_applied = True
+            setattr(stream_info, "_audio_boost_applied", True)
 
     if (has_clip or chapter_title) and os.path.isfile(target_path):
         d_dir, f_name = os.path.split(target_path); stem, ext = os.path.splitext(f_name)

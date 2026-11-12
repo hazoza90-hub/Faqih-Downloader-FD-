@@ -6,9 +6,11 @@ studio-grade voice normalization and audio boosting filters via FFmpeg.
 from __future__ import annotations
 
 import os
+import sys
 import re
 import time
 import shutil
+import subprocess
 from typing import Dict, List, Optional, Any, Callable
 
 
@@ -186,6 +188,8 @@ def apply_audio_boost_to_file(
     ffmpeg_bin: Optional[str] = None,
     on_log: Optional[Callable[[str], None]] = None,
     cancel_event: Optional[Any] = None,
+    total_duration: float = 0.0,
+    on_progress_pct: Optional[Callable[[float, str], None]] = None,
 ) -> bool:
     """
     Applies the studio vocal boost and normalizer filter to an existing video or audio file.
@@ -235,9 +239,17 @@ def apply_audio_boost_to_file(
             cmd.extend(["-movflags", "+faststart"])
         cmd.append(temp_out)
 
+    cflags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if sys.platform.startswith("win") else 0
+    from .media_env_helpers import run_ffmpeg_with_progress, probe_media_duration
+    eff_dur = float(total_duration or 0.0)
+    if eff_dur <= 0.0 and os.path.isfile(file_path):
+        eff_dur = max(0.0, probe_media_duration(file_path, ffmpeg_bin))
+
     try:
-        from .subtitle_processor import run_cancellable_ffmpeg
-        res = run_cancellable_ffmpeg(cmd, cancel_event=cancel_event)
+        rc, err = run_ffmpeg_with_progress(
+            cmd, cancel_event=cancel_event, creationflags=cflags,
+            total_duration=eff_dur, on_progress_pct=on_progress_pct
+        )
     except Exception as exc:
         if on_log:
             on_log(f"[AUDIO-BOOST] FFmpeg execution error: {exc}")
@@ -248,7 +260,7 @@ def apply_audio_boost_to_file(
                 pass
         return False
 
-    if res.returncode == 0 and os.path.isfile(temp_out) and os.path.getsize(temp_out) > 0:
+    if rc == 0 and os.path.isfile(temp_out) and os.path.getsize(temp_out) > 0:
         for _ in range(5):
             try:
                 os.replace(temp_out, file_path)
@@ -263,6 +275,6 @@ def apply_audio_boost_to_file(
             os.remove(temp_out)
         except Exception:
             pass
-    if on_log and getattr(res, "stderr", None):
-        on_log(f"[AUDIO-BOOST] Audio boost failed: {res.stderr[-180:].strip()}")
+    if on_log and err:
+        on_log(f"[AUDIO-BOOST] Audio boost failed: {err[-180:].strip()}")
     return False

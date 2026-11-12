@@ -53,7 +53,9 @@ class DownloadCallbacksMixin:
                     return f"{b / (1024**2):.1f} MB"
                 return f"{b / 1024:.1f} KB" if b >= 1024 else f"{b} B"
 
-            size_str = f"{_fmt_size(d)} / {_fmt_size(t)} ({pct:.1f}%)" if t > 0 else f"{_fmt_size(d)} (Streaming...)"
+            et_clean = et.split("|", 1)[0].lower() if "|" in et else et.lower()
+            is_proc = any(k in et_clean for k in ("merging", "burning", "embedding", "clipping", "boost", "transcoding"))
+            size_str = f"{_fmt_size(t)} / {_fmt_size(t)} ({pct:.1f}%) ✓" if (is_proc and t > 0) else (f"{_fmt_size(d)} / {_fmt_size(t)} ({pct:.1f}%)" if t > 0 else f"{_fmt_size(d)} (Streaming...)")
             if hasattr(self, "card_size"):
                 self.card_size.configure(text=size_str)
             if hasattr(self, "card_eta"):

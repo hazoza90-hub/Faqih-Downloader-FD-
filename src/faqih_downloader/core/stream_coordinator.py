@@ -496,7 +496,9 @@ class StreamDownloadCoordinator:
             def _merge_prog(pct: float, eta_str: str): self._emit_stage_progress("Merging", pct, eta_str)
             from ..services.youtube_service import YouTubeResolver
             v_dur = float(getattr(self.stream_info, "duration", 0.0) or 0.0)
-            YouTubeResolver.merge_video_audio(video_tmp, audio_tmp, self.destination_path, on_log=self.log, cancel_event=self._cancel_event, total_duration=v_dur, on_progress_pct=_merge_prog)
+            boost_on = bool(getattr(self.stream_info, "audio_boost_enabled", False))
+            YouTubeResolver.merge_video_audio(video_tmp, audio_tmp, self.destination_path, on_log=self.log, cancel_event=self._cancel_event, total_duration=v_dur, on_progress_pct=_merge_prog, audio_boost=boost_on)
+            if boost_on: setattr(self.stream_info, "_audio_boost_applied", True)
             self._process_subtitles(self.destination_path)
 
             elapsed = max(0.01, time.time() - self.start_time)

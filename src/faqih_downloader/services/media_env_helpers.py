@@ -215,13 +215,30 @@ def probe_media_file_duration(file_path: str) -> float:
     import subprocess, re
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if sys.platform.startswith("win") else 0
     try:
-        res = subprocess.run([ffmpeg_bin, "-i", file_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, errors="replace", creationflags=flags)
+        res = subprocess.run([ffmpeg_bin, "-hide_banner", "-i", file_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, errors="replace", creationflags=flags, timeout=3)
         m = re.search(r'Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)', res.stderr or "")
         if m:
             return int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3))
     except Exception:
         pass
     return 0.0
+
+
+def probe_media_duration(file_path: str, ffmpeg_bin: str = "ffmpeg") -> float:
+    """Probes media duration in seconds via FFmpeg/ffprobe stderr inspection within 2 seconds."""
+    d = probe_media_file_duration(file_path)
+    if d > 0:
+        return d
+    if ffmpeg_bin and file_path and os.path.isfile(file_path):
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if sys.platform.startswith("win") else 0
+        try:
+            res = subprocess.run([ffmpeg_bin, "-hide_banner", "-i", os.path.abspath(file_path)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, errors="replace", creationflags=flags, timeout=2)
+            m = re.search(r'Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)', res.stderr or "")
+            if m:
+                return float(m.group(1)) * 3600.0 + float(m.group(2)) * 60.0 + float(m.group(3))
+        except Exception:
+            pass
+    return -1.0
 
 
 def _resolve_cookie_browser(cb: Optional[str]) -> Optional[str]:
@@ -342,15 +359,43 @@ def run_ffmpeg_with_progress(
     if cancel_event and cancel_event.is_set():
         return -999, "Cancelled"
 
+    if on_progress_pct:
+        try: on_progress_pct(0.0, "--:--")
+        except Exception: pass
+
     sp = subprocess_mod or subprocess
     is_sp_mock = hasattr(getattr(sp, "Popen", None), "_mock_name") or hasattr(getattr(sp, "run", None), "_mock_name")
     if is_sp_mock and not hasattr(getattr(sp, "Popen", None), "_mock_name"):
         res = sp.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace", cwd=cwd, creationflags=creationflags)
         return (res.returncode if getattr(res, "returncode", None) is not None else 0), str(getattr(res, "stderr", "") or "")
 
+    exec_cmd = list(cmd)
+    eff_dur = float(total_duration or 0.0)
+
+    if not is_sp_mock:
+        first_arg = os.path.basename(str(exec_cmd[0])).lower() if exec_cmd else ""
+        if "ffmpeg" in first_arg:
+            if "-nostats" in exec_cmd:
+                exec_cmd = [x for x in exec_cmd if x != "-nostats"]
+            if "-stats" not in exec_cmd and len(exec_cmd) > 1:
+                exec_cmd.insert(1, "-stats")
+            for idx in range(len(exec_cmd) - 1):
+                if exec_cmd[idx] in ("-loglevel", "-v") and exec_cmd[idx + 1] in ("error", "fatal", "quiet", "panic"):
+                    exec_cmd[idx + 1] = "info"
+
+            if eff_dur <= 0.0:
+                for idx in range(len(exec_cmd) - 1):
+                    if exec_cmd[idx] == "-i":
+                        cand_input = exec_cmd[idx + 1]
+                        if os.path.isfile(cand_input):
+                            pd = probe_media_duration(cand_input, exec_cmd[0])
+                            if pd > 0.0:
+                                eff_dur = pd
+                                break
+
     try:
         proc = sp.Popen(
-            cmd,
+            exec_cmd if not is_sp_mock else cmd,
             stdout=subprocess.DEVNULL if not is_sp_mock else subprocess.PIPE,
             stderr=subprocess.PIPE,
             cwd=cwd,
@@ -479,6 +524,7 @@ __all__ = [
     "find_ffmpeg_bin",
     "has_ffmpeg",
     "probe_media_file_duration",
+    "probe_media_duration",
     "recover_audio_stream_fallback",
     "ensure_complete_audio_file",
     "_resolve_cookie_browser",

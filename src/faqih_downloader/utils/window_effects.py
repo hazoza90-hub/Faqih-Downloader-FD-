@@ -22,15 +22,14 @@ from faqih_downloader.services.startup_service import IS_WINDOWS
 # ──────────────────────────────────────────────────────────────────────────────
 # Windows Acrylic / Mica Win32 DWM Backdrop Integration
 # ──────────────────────────────────────────────────────────────────────────────
-def apply_acrylic_or_mica_effect(root: Any, alpha: float = 0.92) -> bool:
+def apply_acrylic_or_mica_effect(root: Any, alpha: float = 1.0) -> bool:
     """
-    Enables Windows 11 / Windows 10 Acrylic Glass Transparency, Dark Mode,
-    and rounded corners behind the frameless window with default alpha 0.92.
+    Enables Windows 11 / Windows 10 Dark Mode and rounded corners behind
+    the frameless window. Eliminates ACCENT_ENABLE_ACRYLICBLURBEHIND for 60fps smooth resize.
     """
     if not root:
         return False
 
-    # 1. Set window transparency alpha attribute (default 0.92 acrylic glass)
     clamped_alpha = max(0.60, min(1.0, float(alpha)))
     try:
         root.attributes("-alpha", clamped_alpha)
@@ -44,7 +43,7 @@ def apply_acrylic_or_mica_effect(root: Any, alpha: float = 0.92) -> bool:
     if tk is not None and not isinstance(root, tk.Tk):
         return True
 
-    # 2. Apply Win32 DWM Backdrop Attributes & Acrylic Blur Behind on root window only
+    # Apply Win32 DWM Backdrop Attributes on root window only
     try:
         user32 = ctypes.windll.user32
         user32.GetParent.argtypes = [ctypes.c_void_p]
@@ -73,50 +72,17 @@ def apply_acrylic_or_mica_effect(root: Any, alpha: float = 0.92) -> bool:
         except Exception:
             pass
 
-        # DWMWA_SYSTEMBACKDROP_TYPE (38): 4 = DWMSBT_TRANSIENTWINDOW (Acrylic), 3 = Mica
-        backdrop_type = ctypes.c_int(4 if clamped_alpha < 1.0 else 1)
-        try:
-            ctypes.windll.dwmapi.DwmSetWindowAttribute(
-                hwnd, 38, ctypes.byref(backdrop_type), ctypes.sizeof(backdrop_type)
-            )
-        except Exception:
-            pass
+        return True
+    except Exception:
+        return False
 
-        # SetWindowCompositionAttribute (WCA_ACCENT_POLICY) with ACCENT_ENABLE_ACRYLICBLURBEHIND
-        try:
-            class ACCENT_POLICY(ctypes.Structure):
-                _fields_ = [
-                    ("AccentState", ctypes.c_int),
-                    ("AccentFlags", ctypes.c_int),
-                    ("GradientColor", ctypes.c_int),
-                    ("AnimationId", ctypes.c_int),
-                ]
 
-            class WINDOWCOMPOSITIONATTRIBDATA(ctypes.Structure):
-                _fields_ = [
-                    ("Attribute", ctypes.c_int),
-                    ("Data", ctypes.c_void_p),
-                    ("SizeOfData", ctypes.c_size_t),
-                ]
-
-            accent = ACCENT_POLICY()
-            # 4 = ACCENT_ENABLE_ACRYLICBLURBEHIND, 3 = ACCENT_ENABLE_BLURBEHIND, 0 = DISABLED
-            accent.AccentState = 4 if clamped_alpha < 1.0 else 0
-            accent.AccentFlags = 2
-            accent.GradientColor = 0xCC180E0A  # Deep luxury dark-navy glass tint (0xAABBGGRR)
-            accent.AnimationId = 0
-
-            wca_data = WINDOWCOMPOSITIONATTRIBDATA()
-            wca_data.Attribute = 19  # WCA_ACCENT_POLICY
-            wca_data.Data = ctypes.cast(ctypes.pointer(accent), ctypes.c_void_p)
-            wca_data.SizeOfData = ctypes.sizeof(accent)
-
-            set_win_comp = getattr(ctypes.windll.user32, "SetWindowCompositionAttribute", None)
-            if set_win_comp:
-                set_win_comp(hwnd, ctypes.byref(wca_data))
-        except Exception:
-            pass
-
+def apply_window_opacity(root: Any, alpha: float = 1.0) -> bool:
+    """Sets window opacity cleanly on root window."""
+    if not root:
+        return False
+    try:
+        root.attributes("-alpha", max(0.60, min(1.0, float(alpha))))
         return True
     except Exception:
         return False
@@ -356,37 +322,43 @@ class RoundedGlassCard(_BaseCanvas):
         if w < 10 or h < 10:
             return
 
-        if (w, h) != getattr(self, "_last_win_size", None):
-            self._last_win_size = (w, h)
-            if hasattr(self, "_win_id"):
-                self.coords(self._win_id, self.inner_padx, self.inner_pady)
-                self.itemconfigure(
-                    self._win_id,
-                    width=max(10, w - self.inner_padx * 2),
-                    height=max(10, h - self.inner_pady * 2)
-                )
-
         b_curr = "#38bdf8" if (self._is_hovered and not self._orig_glow_color) else self.border_color
         state_sig = (w, h, b_curr, self.glow_color, self.card_bg)
         if state_sig == getattr(self, "_last_drawn_state", None):
             return
+
+        def _do_layout_and_draw():
+            if not getattr(self, "winfo_exists", lambda: False)():
+                return
+            self._resize_redraw_job = None
+            if (w, h) != getattr(self, "_last_win_size", None):
+                self._last_win_size = (w, h)
+                if hasattr(self, "_win_id"):
+                    self.coords(self._win_id, self.inner_padx, self.inner_pady)
+                    self.itemconfigure(
+                        self._win_id,
+                        width=max(10, w - self.inner_padx * 2),
+                        height=max(10, h - self.inner_pady * 2)
+                    )
+            self._draw_card_bg(w, h, state_sig)
 
         from faqih_downloader.config import is_test_environment
         if event is not None and getattr(self, "_last_drawn_state", None) is not None and not is_test_environment():
             if getattr(self, "_resize_redraw_job", None) is not None:
                 try: self.after_cancel(self._resize_redraw_job)
                 except Exception: pass
-            self._resize_redraw_job = self.after(16, lambda: self._draw_card_bg(w, h, state_sig))
+            self._resize_redraw_job = self.after(30, _do_layout_and_draw)
         else:
             if getattr(self, "_resize_redraw_job", None) is not None:
                 try: self.after_cancel(self._resize_redraw_job)
                 except Exception: pass
                 self._resize_redraw_job = None
-            self._draw_card_bg(w, h, state_sig)
+            _do_layout_and_draw()
 
 
 __all__ = [
     "apply_acrylic_or_mica_effect",
+    "apply_window_opacity",
     "draw_rounded_rect",
     "draw_glow_border",
     "RoundedGlassCard",

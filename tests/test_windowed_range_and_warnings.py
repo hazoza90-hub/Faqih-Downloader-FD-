@@ -1095,6 +1095,86 @@ class TestWindowedRangeAndWarnings(unittest.TestCase):
             card._on_inner_resize()
             mock_conf.assert_not_called()
 
+    def test_kanban_active_stream_downloaded_mb_counter_during_post_processing(self):
+        """Verifies that during post-processing stages, active stream card shows total/total with checkmark."""
+        if not self.root:
+            self.skipTest("Tkinter GUI not available")
+
+        from faqih_downloader.ui.panels.kanban_active_mixin import KanbanActiveColumnMixin
+
+        class DummyKanban(KanbanActiveColumnMixin):
+            def __init__(self, root):
+                self.root = root
+                self._active_stream_live = False
+                self._build_col2_active(root)
+
+        kanban = DummyKanban(self.root)
+        total_203mb = 203 * 1024 * 1024
+
+        # Simulate post-processing stage (merging) with 203MB total
+        kanban.update_kanban_active_stream(
+            filename="lecture.mp4",
+            pct=60.0,
+            speed_str="0.0 MB/s",
+            chunks=[],
+            active_chunks=0,
+            downloaded=150 * 1024 * 1024,
+            total=total_203mb,
+            eta="Merging|00:25"
+        )
+        self.assertEqual(kanban.lbl_a1_size.cget("text"), "📦 203.0 MB / 203.0 MB ✓")
+        self.assertIn("(60%) • ⏱ 00:25", kanban.lbl_a1_eta.cget("text"))
+
+    def test_apply_audio_boost_progress_streaming(self):
+        """Verifies apply_audio_boost_to_file forwards progress callback to run_ffmpeg_with_progress."""
+        from faqih_downloader.services.audio_and_chapters_engine import apply_audio_boost_to_file
+
+        progress_calls = []
+        def dummy_cb(pct, eta):
+            progress_calls.append((pct, eta))
+
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tf:
+            tf.write(b"dummy video data")
+            tf_path = tf.name
+
+        def fake_ffmpeg(cmd, **kwargs):
+            out_file = cmd[-1]
+            with open(out_file, "wb") as f:
+                f.write(b"boosted video data")
+            cb = kwargs.get("on_progress_pct")
+            if cb:
+                cb(50.0, "00:05")
+            return (0, "")
+
+        try:
+            with patch("faqih_downloader.services.media_env_helpers.run_ffmpeg_with_progress", side_effect=fake_ffmpeg) as mock_run:
+                with patch("shutil.which", return_value="ffmpeg"):
+                    ok = apply_audio_boost_to_file(tf_path, total_duration=120.0, on_progress_pct=dummy_cb)
+                    self.assertTrue(ok)
+                    mock_run.assert_called_once()
+                    self.assertEqual(progress_calls, [(50.0, "00:05")])
+        finally:
+            if os.path.exists(tf_path):
+                try:
+                    os.remove(tf_path)
+                except Exception:
+                    pass
+
+    def test_apply_acrylic_or_mica_effect_no_acrylic_blur_behind(self):
+        """Verifies apply_acrylic_or_mica_effect does not call SetWindowCompositionAttribute."""
+        from faqih_downloader.utils.window_effects import apply_acrylic_or_mica_effect, apply_window_opacity
+
+        if not self.root:
+            self.skipTest("Tkinter GUI not available")
+
+        with patch("ctypes.windll.user32.SetWindowCompositionAttribute", create=True) as mock_set_attr:
+            res = apply_acrylic_or_mica_effect(self.root)
+            self.assertTrue(res)
+            mock_set_attr.assert_not_called()
+
+        res_op = apply_window_opacity(self.root, 0.95)
+        self.assertTrue(res_op)
+
 
 if __name__ == "__main__":
     unittest.main()

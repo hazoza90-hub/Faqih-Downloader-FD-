@@ -38,52 +38,20 @@ ISO_639_2: Dict[str, str] = {
     "sv": "swe", "no": "nor", "da": "dan", "fi": "fin",
 }
 
-def run_cancellable_ffmpeg(cmd, cancel_event=None, creationflags=0, timeout=1800, subprocess_mod=None):
+def run_cancellable_ffmpeg(cmd, cancel_event=None, creationflags=0, timeout=1800, subprocess_mod=None, total_duration=0.0, on_progress_pct=None):
     """
-    Executes an FFmpeg command with cancellation event polling, process group kill on cancel/timeout,
-    and fallback mock compatibility with standard subprocess.run.
+    Executes an FFmpeg command with cancellation event polling, progress tracking,
+    and returns subprocess.CompletedProcess for 100% backward compatibility.
     """
     sp = subprocess_mod or subprocess
     if cancel_event and cancel_event.is_set():
         return subprocess.CompletedProcess(cmd, returncode=-1, stdout="", stderr="Cancelled before execution")
-
-    if hasattr(getattr(sp, "run", None), "_mock_name") and not hasattr(getattr(sp, "Popen", None), "_mock_name"):
-        return sp.run(cmd, stdout=sp.PIPE, stderr=sp.PIPE, text=True, encoding="utf-8", errors="replace", creationflags=creationflags, timeout=timeout)
-
-    proc = sp.Popen(cmd, stdout=sp.PIPE, stderr=sp.PIPE, text=True, encoding="utf-8", errors="replace", creationflags=creationflags)
-    start_t = time.time()
-    is_mock = hasattr(proc, "_mock_name") or hasattr(getattr(proc, "poll", None), "_mock_name")
-    try:
-        while True:
-            if (cancel_event and cancel_event.is_set()) or (timeout and (time.time() - start_t) > timeout):
-                try: proc.kill(); proc.wait(timeout=2)
-                except Exception: pass
-                return subprocess.CompletedProcess(cmd, returncode=-1, stdout="", stderr="Cancelled or timed out")
-
-            if is_mock:
-                try: p_res = proc.poll()
-                except Exception: p_res = 0
-                if p_res is None:
-                    time.sleep(0.06)
-                    continue
-                comm = proc.communicate()
-                out, err = (comm[0], comm[1]) if isinstance(comm, (tuple, list)) and len(comm) >= 2 else ("", "")
-                return subprocess.CompletedProcess(cmd, proc.returncode if proc.returncode is not None else 0, out, err)
-
-            try:
-                comm = proc.communicate(timeout=0.1)
-                out, err = (comm[0], comm[1]) if (isinstance(comm, (tuple, list)) and len(comm) >= 2) else ("", "")
-                rc = proc.returncode if proc.returncode is not None else 0
-                return subprocess.CompletedProcess(cmd, rc, out, err)
-            except subprocess.TimeoutExpired:
-                pass
-    finally:
-        try:
-            if proc and proc.poll() is None:
-                proc.kill()
-                proc.wait(timeout=1)
-        except (Exception, StopIteration):
-            pass
+    rc, err = run_ffmpeg_with_progress(
+        cmd, cancel_event=cancel_event, creationflags=creationflags,
+        total_duration=total_duration, on_progress_pct=on_progress_pct,
+        subprocess_mod=sp
+    )
+    return subprocess.CompletedProcess(cmd, returncode=rc, stdout="", stderr=err)
 
 
 def strip_burn_tag_from_filename(filepath: str) -> str:

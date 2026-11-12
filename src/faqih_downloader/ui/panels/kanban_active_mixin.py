@@ -219,7 +219,9 @@ class KanbanActiveColumnMixin:
             self.lbl_a1_speed.configure(text=speed_str)
 
         if hasattr(self, "lbl_a1_size") and self.lbl_a1_size and self.lbl_a1_size.winfo_exists():
-            if total > 0:
+            if is_processing and total > 0:
+                sz_txt = f"📦 {_fmt_sz(total)} / {_fmt_sz(total)} ✓"
+            elif total > 0:
                 sz_txt = f"📦 {_fmt_sz(downloaded)} / {_fmt_sz(total)}"
             elif downloaded > 0:
                 sz_txt = f"📦 {_fmt_sz(downloaded)}"
@@ -230,7 +232,7 @@ class KanbanActiveColumnMixin:
         if hasattr(self, "lbl_a1_eta") and self.lbl_a1_eta and self.lbl_a1_eta.winfo_exists():
             stage_part, stage_timer = [x.strip() for x in eta_raw.split("|", 1)] if "|" in eta_raw else (eta_raw, "")
             stage_lower = stage_part.lower()
-            timer_suffix = f" • ⏱ {stage_timer}" if (stage_timer and stage_timer not in ("--:--", "--:--:--")) else f" ({int(pct)}%)"
+            timer_suffix = f" ({int(pct)}%) • ⏱ {stage_timer}" if (stage_timer and stage_timer not in ("--:--", "--:--:--")) else f" ({int(pct)}%)"
 
             if "merging" in stage_lower:
                 eta_txt = f"⚙️ جاري دمج الصوت والفيديو{timer_suffix}"
