@@ -218,8 +218,8 @@ def load_settings() -> Dict[str, Any]:
         "preferred_subtitle_lang": "none",
         "subtitle_embed_mode": "hard_burn",
         "subtitle_position": "bottom",
-        "window_alpha": 0.92,
-        "window_opacity": 0.92,
+        "window_alpha": 1.0,
+        "window_opacity": 1.0,
         "sniffer_platforms": dict(DEFAULT_SNIFFER_PLATFORMS),
     }
 
@@ -250,14 +250,14 @@ def load_settings() -> Dict[str, Any]:
             except Exception:
                 pass
 
-        # Auto-migrate stuck window_alpha (<= 0.72) from previous build
+        # Auto-migrate stuck window_alpha (<= 0.95) from previous build
         try:
             val = cur.get("window_alpha")
-            if val is not None and not cur.get("window_alpha_migrated_v202", False):
-                if float(val) <= 0.72:
-                    cur["window_alpha"] = 0.95
-                    cur["window_opacity"] = 0.95
-                    cur["window_alpha_migrated_v202"] = True
+            if val is not None and not cur.get("window_alpha_migrated_v203", False) and not is_test_environment():
+                if float(val) <= 0.95:
+                    cur["window_alpha"] = 1.0
+                    cur["window_opacity"] = 1.0
+                    cur["window_alpha_migrated_v203"] = True
                     if stat_key[1] != -1:
                         try:
                             _atomic_write_json(path, cur)

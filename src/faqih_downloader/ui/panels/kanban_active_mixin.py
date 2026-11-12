@@ -171,7 +171,17 @@ class KanbanActiveColumnMixin:
             is_running = bool(r() if callable(r) else r)
 
         eta_raw = str(eta or "").strip()
-        eta_lower = eta_raw.lower()
+        stage_part, stage_timer = [x.strip() for x in eta_raw.split("|", 1)] if "|" in eta_raw else (eta_raw, "")
+        has_at = False
+        if "@" in stage_part:
+            try:
+                clean_stage, stage_pct_str = stage_part.split("@", 1)
+                pct = max(0.0, min(100.0, float(stage_pct_str)))
+                stage_part = clean_stage
+                has_at = True
+            except Exception:
+                pass
+        eta_lower = stage_part.lower()
         is_processing = any(k in eta_lower for k in ("merging", "burning", "embedding", "clipping", "boost", "transcoding"))
 
         if not is_running and not is_processing and pct <= 0 and (not speed_str or speed_str in ("0 B/s", "0.0 MB/s")):
@@ -230,9 +240,15 @@ class KanbanActiveColumnMixin:
             self.lbl_a1_size.configure(text=sz_txt)
 
         if hasattr(self, "lbl_a1_eta") and self.lbl_a1_eta and self.lbl_a1_eta.winfo_exists():
-            stage_part, stage_timer = [x.strip() for x in eta_raw.split("|", 1)] if "|" in eta_raw else (eta_raw, "")
             stage_lower = stage_part.lower()
-            timer_suffix = f" ({int(pct)}%) • ⏱ {stage_timer}" if (stage_timer and stage_timer not in ("--:--", "--:--:--")) else f" ({int(pct)}%)"
+            if stage_timer and stage_timer not in ("--:--", "--:--:--"):
+                timer_suffix = f" ({int(pct)}%) • ⏱ {stage_timer}"
+            elif has_at or ("|" in eta_raw and stage_timer in ("--:--", "--:--:--")):
+                timer_suffix = f" ({int(pct)}%)"
+            elif stage_part.endswith("..."):
+                timer_suffix = "..."
+            else:
+                timer_suffix = f" ({int(pct)}%)" if pct > 0 else ""
 
             if "merging" in stage_lower:
                 eta_txt = f"⚙️ جاري دمج الصوت والفيديو{timer_suffix}"

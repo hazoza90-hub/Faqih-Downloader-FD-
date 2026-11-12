@@ -454,7 +454,6 @@ def run_ffmpeg_with_progress(
 
     start_t = time.time()
     last_emit = 0.0
-    eff_dur = float(total_duration or 0.0)
 
     try:
         while True:
@@ -505,8 +504,21 @@ def run_ffmpeg_with_progress(
                 proc.kill()
         except Exception:
             pass
+        try:
+            proc.wait(timeout=1.0)
+        except Exception:
+            pass
+        for stream in (getattr(proc, "stderr", None), getattr(proc, "stdout", None)):
+            if stream and hasattr(stream, "close"):
+                try:
+                    stream.close()
+                except Exception:
+                    pass
 
-    proc.wait()
+    try:
+        proc.wait()
+    except Exception:
+        pass
     rc = proc.returncode if proc.returncode is not None else 0
     if rc == 0 and on_progress_pct:
         try: on_progress_pct(100.0, "00:00")

@@ -292,14 +292,15 @@ class MediaOptionsBarMixin(MediaOptionsActionsMixin):
             ctx["subtitle_embed_mode"] = sub_mode
 
         # Connections / Threads and Subtitle position
-        conn_v = str(self.cb_main_sub_pos.get() if hasattr(self.cb_main_sub_pos, "get") else "").strip()
+        cb_pos = getattr(self, "cb_main_sub_pos", None)
+        conn_v = str(cb_pos.get() if (cb_pos and hasattr(cb_pos, "get")) else "").strip()
         if conn_v.isdigit() and int(conn_v) in (1, 2, 4, 8, 16, 24, 32):
             conn_int = int(conn_v)
             if opt: opt.max_connections = conn_int
             ctx["max_connections"] = conn_int
             sub_pos = getattr(opt, "subtitle_position", "bottom") or "bottom"
         else:
-            p_idx = self.cb_main_sub_pos.current() if hasattr(self.cb_main_sub_pos, "current") else 0
+            p_idx = cb_pos.current() if (cb_pos and hasattr(cb_pos, "current")) else 0
             sub_pos = self._main_sub_pos_codes[p_idx] if (hasattr(self, "_main_sub_pos_codes") and 0 <= p_idx < len(self._main_sub_pos_codes)) else "bottom"
         if opt:
             opt.subtitle_position = sub_pos

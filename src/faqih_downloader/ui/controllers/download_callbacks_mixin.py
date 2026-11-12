@@ -32,7 +32,16 @@ class DownloadCallbacksMixin:
             if not args:
                 return
             d, t, sp, et, ac = args
-            if t <= 0 and getattr(self, "engine", None):
+            stage_part = et.split("|", 1)[0] if "|" in et else et
+            if "@" in stage_part:
+                try:
+                    clean_stage, stage_pct_str = stage_part.split("@", 1)
+                    pct = max(0.0, min(100.0, float(stage_pct_str)))
+                    rest_et = ("|" + et.split("|", 1)[1]) if "|" in et else ""
+                    et = f"{clean_stage}{rest_et}"
+                except Exception:
+                    pct = (d / t * 100.0) if t > 0 else 0.0
+            elif t <= 0 and getattr(self, "engine", None):
                 try:
                     raw_t = getattr(self.engine, "total_size", 0)
                     t = int(raw_t() if callable(raw_t) else raw_t or 0)

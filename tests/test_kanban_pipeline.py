@@ -255,10 +255,10 @@ class TestKanbanPipeline(unittest.TestCase):
         gui = ModernFramelessGUI(self.root, start_hidden=True)
         try:
             # Window alpha setting
-            self.assertAlmostEqual(float(get_setting("window_alpha", 0.92)), 0.92, places=2)
+            self.assertAlmostEqual(float(get_setting("window_alpha", 1.0)), 1.0, places=2)
             set_setting("window_alpha", 0.85)
-            self.assertAlmostEqual(float(get_setting("window_alpha", 0.92)), 0.85, places=2)
-            set_setting("window_alpha", 0.92)
+            self.assertAlmostEqual(float(get_setting("window_alpha", 1.0)), 0.85, places=2)
+            set_setting("window_alpha", 1.0)
 
             # Stream coordinator filename resolution (destination_path attribute)
             mock_coord = MagicMock()

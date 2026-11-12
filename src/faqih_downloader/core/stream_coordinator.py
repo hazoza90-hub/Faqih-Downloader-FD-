@@ -77,11 +77,12 @@ class StreamDownloadCoordinator:
             if len(self._active_engines) > 1:
                 v_eng = self._active_engines[0]
                 try:
-                    v_chunks = getattr(v_eng, "chunks", [])
-                    if v_chunks and any(getattr(c, "status", "") != "completed" for c in v_chunks):
-                        targets = [v_eng]
-                    elif v_chunks and len(self._active_engines) > 1:
-                        targets = [self._active_engines[1]]
+                    if sum(len(getattr(e, "chunks", []) or []) for e in self._active_engines) > self.max_connections:
+                        v_chunks = getattr(v_eng, "chunks", [])
+                        if v_chunks and any(getattr(c, "status", "") != "completed" for c in v_chunks):
+                            targets = [v_eng]
+                        elif v_chunks and len(self._active_engines) > 1:
+                            targets = [self._active_engines[1]]
                 except Exception:
                     pass
             offset = 0
@@ -100,8 +101,8 @@ class StreamDownloadCoordinator:
 
     def _emit_stage_progress(self, stage_name: str, pct: float, eta_str: str = ""):
         tot = max(100, self.total_size)
-        clamped_pct = max(0.0, min(100.0, float(pct)))
-        done = int(tot * clamped_pct / 100.0)
+        clamped_pct = max(0.0, min(100.0, float(pct or 0.0)))
+        done = tot
         n_lanes = max(1, self.max_connections)
         if not getattr(self, "_clip_chunks", None) or len(self._clip_chunks) != n_lanes:
             span = max(1, tot // n_lanes)
@@ -113,7 +114,7 @@ class StreamDownloadCoordinator:
             c_span = max(1, c.end_byte - c.start_byte + 1)
             c.downloaded_bytes = int(c_span * (clamped_pct / 100.0))
             c.status = "completed" if clamped_pct >= 99.9 else "active"
-        prog_lbl = f"{stage_name}|{eta_str}" if eta_str else f"{stage_name}..."
+        prog_lbl = f"{stage_name}@{clamped_pct:.1f}|{eta_str}" if eta_str else f"{stage_name}@{clamped_pct:.1f}"
         if self.on_progress: self.on_progress(done, tot, self._last_active_speed, prog_lbl, self.max_connections)
         if self.on_chunk_update:
             try: self.on_chunk_update()

@@ -240,16 +240,22 @@ def apply_audio_boost_to_file(
         cmd.append(temp_out)
 
     cflags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if sys.platform.startswith("win") else 0
-    from .media_env_helpers import run_ffmpeg_with_progress, probe_media_duration
+    from .media_env_helpers import probe_media_duration
+    from .subtitle_processor import run_cancellable_ffmpeg
     eff_dur = float(total_duration or 0.0)
     if eff_dur <= 0.0 and os.path.isfile(file_path):
         eff_dur = max(0.0, probe_media_duration(file_path, ffmpeg_bin))
 
     try:
-        rc, err = run_ffmpeg_with_progress(
-            cmd, cancel_event=cancel_event, creationflags=cflags,
-            total_duration=eff_dur, on_progress_pct=on_progress_pct
-        )
+        try:
+            proc_res = run_cancellable_ffmpeg(
+                cmd, cancel_event=cancel_event, creationflags=cflags,
+                total_duration=eff_dur, on_progress_pct=on_progress_pct
+            )
+        except TypeError:
+            proc_res = run_cancellable_ffmpeg(cmd, cancel_event=cancel_event)
+        rc = getattr(proc_res, "returncode", 0) if hasattr(proc_res, "returncode") else (proc_res[0] if isinstance(proc_res, tuple) else 0)
+        err = getattr(proc_res, "stderr", "") if hasattr(proc_res, "stderr") else (proc_res[1] if isinstance(proc_res, tuple) and len(proc_res) > 1 else "")
     except Exception as exc:
         if on_log:
             on_log(f"[AUDIO-BOOST] FFmpeg execution error: {exc}")

@@ -1025,9 +1025,9 @@ class TestWindowedRangeAndWarnings(unittest.TestCase):
 
         self.assertTrue(len(prog_events) > 0)
         d, t, sp, eta, ac = prog_events[-1]
-        self.assertEqual(eta, "Merging|00:45")
+        self.assertEqual(eta, "Merging@50.0|00:45")
         self.assertEqual(ac, 4)
-        self.assertEqual(d, t // 2)
+        self.assertEqual(d, t)
 
         chunks = coord.get_chunks_snapshot()
         self.assertEqual(len(chunks), 4)
@@ -1147,7 +1147,7 @@ class TestWindowedRangeAndWarnings(unittest.TestCase):
             return (0, "")
 
         try:
-            with patch("faqih_downloader.services.media_env_helpers.run_ffmpeg_with_progress", side_effect=fake_ffmpeg) as mock_run:
+            with patch("faqih_downloader.services.subtitle_processor.run_ffmpeg_with_progress", side_effect=fake_ffmpeg) as mock_run:
                 with patch("shutil.which", return_value="ffmpeg"):
                     ok = apply_audio_boost_to_file(tf_path, total_duration=120.0, on_progress_pct=dummy_cb)
                     self.assertTrue(ok)

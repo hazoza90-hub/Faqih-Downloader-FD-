@@ -93,15 +93,16 @@ class WindowChromeMixin(ThemeControllerMixin, DispatchControllerMixin, WindowLif
                     except Exception: pass
             except Exception: pass
 
-        # Native Windows 10/11 Dark Mode and Window Alpha (0.92 default for acrylic glass display)
+        # Native Windows 10/11 Dark Mode and Window Alpha (1.0 default)
         try:
             from faqih_downloader.utils.window_effects import apply_acrylic_or_mica_effect
             from faqih_downloader.config import is_test_environment, set_setting
-            alpha = float(getattr(self, "_window_alpha", None) or get_setting("window_alpha", 0.92))
-            if alpha <= 0.72 and not get_setting("window_alpha_migrated_v202", False):
-                alpha = 0.95
-                set_setting("window_alpha", 0.95)
-                set_setting("window_alpha_migrated_v202", True)
+            alpha = float(getattr(self, "_window_alpha", None) or get_setting("window_alpha", 1.0))
+            if alpha <= 0.95 and not get_setting("window_alpha_migrated_v203", False) and not is_test_environment():
+                alpha = 1.0
+                set_setting("window_alpha", 1.0)
+                set_setting("window_opacity", 1.0)
+                set_setting("window_alpha_migrated_v203", True)
             self._window_alpha = alpha
             apply_acrylic_or_mica_effect(self.root, alpha=alpha)
             if not is_test_environment() and not getattr(self, "_start_hidden", False):
@@ -133,7 +134,7 @@ class WindowChromeMixin(ThemeControllerMixin, DispatchControllerMixin, WindowLif
         self._cancel_min_anim_jobs()
         if getattr(event, "widget", None) == self.root:
             try:
-                target_alpha = float(getattr(self, "_window_alpha", None) or get_setting("window_alpha", 0.92))
+                target_alpha = float(getattr(self, "_window_alpha", None) or get_setting("window_alpha", 1.0))
                 self.root.attributes("-alpha", target_alpha)
             except Exception: pass
             if getattr(self, "_start_hidden", False):
@@ -145,7 +146,7 @@ class WindowChromeMixin(ThemeControllerMixin, DispatchControllerMixin, WindowLif
             try:
                 if float(self.root.attributes("-alpha") or 1.0) < 0.60:
                     self._cancel_min_anim_jobs()
-                    target_alpha = float(getattr(self, "_window_alpha", None) or get_setting("window_alpha", 0.92))
+                    target_alpha = float(getattr(self, "_window_alpha", None) or get_setting("window_alpha", 1.0))
                     self.root.attributes("-alpha", target_alpha)
             except Exception: pass
 
@@ -153,7 +154,7 @@ class WindowChromeMixin(ThemeControllerMixin, DispatchControllerMixin, WindowLif
         """Restores and brings the main window to foreground if hidden or minimized."""
         self._cancel_min_anim_jobs()
         self._start_hidden = False
-        target_alpha = float(getattr(self, "_window_alpha", None) or get_setting("window_alpha", 0.92))
+        target_alpha = float(getattr(self, "_window_alpha", None) or get_setting("window_alpha", 1.0))
         try:
             self.root.attributes("-alpha", target_alpha)
             self.root.deiconify()

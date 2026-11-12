@@ -3,16 +3,12 @@ WindowResizeMixin: 8-edge & corner resizing grips and border drag handlers for f
 """
 from __future__ import annotations
 
-import ctypes
 from typing import Any
 
 try:
     import tkinter as tk
 except Exception:
     tk = None  # type: ignore
-
-from faqih_downloader.services.startup_service import IS_WINDOWS
-from faqih_downloader.config import is_test_environment
 
 
 class WindowResizeMixin:
@@ -75,16 +71,6 @@ class WindowResizeMixin:
         if getattr(self, "_is_maximized", False):
             return "break"
         try:
-            try:
-                curr_a = float(self.root.attributes("-alpha") or 1.0)
-            except Exception:
-                curr_a = 1.0
-            self._saved_alpha = curr_a
-            if curr_a < 1.0:
-                try:
-                    self.root.attributes("-alpha", 1.0)
-                except Exception:
-                    pass
             win_w, win_h = self.root.winfo_width(), self.root.winfo_height()
             win_x, win_y = self.root.winfo_x(), self.root.winfo_y()
             if win_w <= 1 or win_h <= 1:
@@ -123,7 +109,7 @@ class WindowResizeMixin:
 
         import time
         now = time.perf_counter()
-        if now - getattr(self, "_last_resize_ts", 0.0) < 0.024:
+        if now - getattr(self, "_last_resize_ts", 0.0) < 0.016:
             return "break"
 
         try:
@@ -151,20 +137,7 @@ class WindowResizeMixin:
             self._last_resize_ts = now
 
             geo = self._format_geometry(w, h, x, y)
-            moved = False
-            if IS_WINDOWS and not is_test_environment():
-                try:
-                    user32 = getattr(ctypes, "windll", None) and getattr(ctypes.windll, "user32", None)
-                    if user32 and hasattr(user32, "MoveWindow"):
-                        raw_id = self.root.winfo_id()
-                        hwnd = (user32.GetParent(raw_id) if hasattr(user32, "GetParent") else None) or raw_id
-                        if hwnd:
-                            user32.MoveWindow(hwnd, int(x), int(y), int(w), int(h), True)
-                            moved = True
-                except Exception:
-                    moved = False
-            if not moved:
-                self.root.geometry(geo)
+            self.root.geometry(geo)
             self._normal_geometry = geo
             self.width, self.height = w, h
         except Exception:
@@ -172,25 +145,6 @@ class WindowResizeMixin:
         return "break"
 
     def _on_resize_release(self, event):
-        saved_a = getattr(self, "_saved_alpha", 1.0)
-        if saved_a < 1.0 and hasattr(self, "root") and self.root:
-            try:
-                self.root.attributes("-alpha", saved_a)
-            except Exception:
-                pass
-        self._saved_alpha = 1.0
-
-        last_geo = getattr(self, "_last_resize_geo", None)
-        if last_geo and hasattr(self, "root") and self.root:
-            w, h, x, y = last_geo
-            geo = self._format_geometry(w, h, x, y)
-            try:
-                self.root.geometry(geo)
-                self._normal_geometry = geo
-                self.width, self.height = w, h
-            except Exception:
-                pass
-
         if hasattr(self, "_resize_state"):
             self._resize_state.clear()
         self._last_resize_geo = None
