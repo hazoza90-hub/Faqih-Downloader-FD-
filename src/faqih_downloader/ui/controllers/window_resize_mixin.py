@@ -300,26 +300,30 @@ class WindowResizeMixin:
         try:
             if hasattr(self, "root") and self.root:
                 from faqih_downloader.utils.window_effects import RoundedGlassCard
+                from faqih_downloader.ui.panels.kanban_card_graphics import draw_neon_progress_bar
                 stack = [self.root]
                 while stack:
                     curr = stack.pop()
                     if isinstance(curr, RoundedGlassCard):
                         curr._fast_resize_rect = None
                         curr._last_drawn_state = None
-                        try:
-                            curr._on_resize(None)
-                        except Exception:
-                            pass
+                        try: curr._on_resize(None)
+                        except Exception: pass
+                    if callable(getattr(curr, "_rerender_empty_state", None)):
+                        curr._fast_rect = None
+                        curr._last_size = None
+                        try: curr._rerender_empty_state()
+                        except Exception: pass
+                    if hasattr(curr, "_prog_ratio"):
+                        try: draw_neon_progress_bar(curr, curr._prog_ratio)
+                        except Exception: pass
                     owner = getattr(curr, "_visualizer_owner", None)
                     if owner is not None and hasattr(owner, "redraw"):
-                        try:
-                            owner.redraw()
-                        except Exception:
-                            pass
+                        try: owner.redraw()
+                        except Exception: pass
                     try:
                         children = curr.winfo_children()
-                        if children:
-                            stack.extend(children)
+                        if children: stack.extend(children)
                     except Exception:
                         pass
         except Exception:

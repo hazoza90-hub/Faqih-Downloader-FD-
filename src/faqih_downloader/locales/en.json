@@ -337,7 +337,7 @@
   "vault_restore_search_placeholder": "⌕ Search files...",
   "vault_btn_restore_selected": "✓ Restore Selected",
   "vault_btn_browse_file": "▣ Browse File...",
-  "vault_btn_browse_folder": "📁 Browse Folder...",
+  "vault_btn_browse_folder": "▤ Browse Folder...",
   "vault_btn_restore_all": "↻ Restore All",
   "vault_select_all": "Select All",
   "vault_deselect_all": "Deselect All",

@@ -107,12 +107,12 @@ class TestRebrandingAndImprovements(unittest.TestCase):
                 self.assertTrue(res, f"Expected notify_running_instance to accept app name '{name}'")
 
     def test_acrylic_glass_defaults_and_slider(self):
-        """Verifies default alpha is 0.92 and slider updates alpha live."""
-        alpha = float(get_setting("window_alpha", 0.92))
-        self.assertAlmostEqual(alpha, 0.92, places=2)
+        """Verifies default alpha is 1.0 (solid high contrast) and slider updates alpha live."""
+        alpha = float(get_setting("window_alpha", 1.0))
+        self.assertAlmostEqual(alpha, 1.0, places=2)
 
         # Test apply_acrylic_or_mica_effect
-        applied = apply_acrylic_or_mica_effect(self.root, alpha=0.92)
+        applied = apply_acrylic_or_mica_effect(self.root, alpha=1.0)
         self.assertTrue(isinstance(applied, bool))
 
         # Test SettingsModal system tab slider
@@ -125,12 +125,12 @@ class TestRebrandingAndImprovements(unittest.TestCase):
             # Slide to 85%
             modal._on_transparency_slider_changed("85")
             self.assertEqual(modal.lbl_transparency_val.cget("text"), "85%")
-            self.assertAlmostEqual(float(get_setting("window_alpha", 0.92)), 0.85, places=2)
-            self.assertAlmostEqual(float(get_setting("window_opacity", 0.92)), 0.85, places=2)
+            self.assertAlmostEqual(float(get_setting("window_alpha", 1.0)), 0.85, places=2)
+            self.assertAlmostEqual(float(get_setting("window_opacity", 1.0)), 0.85, places=2)
 
-            # Reset back to 92%
-            modal._on_transparency_slider_changed("92")
-            self.assertAlmostEqual(float(get_setting("window_alpha", 0.92)), 0.92, places=2)
+            # Reset back to 100%
+            modal._on_transparency_slider_changed("100")
+            self.assertAlmostEqual(float(get_setting("window_alpha", 1.0)), 1.0, places=2)
         finally:
             modal.destroy()
 
@@ -568,7 +568,7 @@ class TestRebrandingAndImprovements(unittest.TestCase):
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
     def test_window_alpha_auto_migration_from_70(self):
-        """Verifies that window_alpha <= 0.72 is automatically corrected to 0.95."""
+        """Verifies that stuck window_alpha <= 0.95 is auto-migrated to 1.0 in v203."""
         import tempfile, json, shutil
         from faqih_downloader.config import load_settings, _clear_settings_cache
 
@@ -578,17 +578,19 @@ class TestRebrandingAndImprovements(unittest.TestCase):
             with open(settings_path, "w", encoding="utf-8") as f:
                 json.dump({"window_alpha": 0.70, "language": "en"}, f)
 
-            with patch("faqih_downloader.config.get_settings_file_path", return_value=settings_path):
+            with patch("faqih_downloader.config.get_settings_file_path", return_value=settings_path), \
+                 patch("faqih_downloader.config.is_test_environment", return_value=False):
                 _clear_settings_cache()
                 data = load_settings()
-                self.assertAlmostEqual(data["window_alpha"], 0.95, places=2)
-                self.assertTrue(data.get("window_alpha_migrated_v202"))
+                self.assertAlmostEqual(data["window_alpha"], 1.0, places=2)
+                self.assertTrue(data.get("window_alpha_migrated_v203"))
 
-            # Test that 0.85 is NOT modified
+            # Test that already-migrated custom 0.85 is NOT overwritten
             with open(settings_path, "w", encoding="utf-8") as f:
-                json.dump({"window_alpha": 0.85, "language": "en"}, f)
+                json.dump({"window_alpha": 0.85, "window_alpha_migrated_v203": True, "language": "en"}, f)
 
-            with patch("faqih_downloader.config.get_settings_file_path", return_value=settings_path):
+            with patch("faqih_downloader.config.get_settings_file_path", return_value=settings_path), \
+                 patch("faqih_downloader.config.is_test_environment", return_value=False):
                 _clear_settings_cache()
                 data2 = load_settings()
                 self.assertAlmostEqual(data2["window_alpha"], 0.85, places=2)
@@ -1545,9 +1547,11 @@ class TestRebrandingAndImprovements(unittest.TestCase):
         res = run_cancellable_ffmpeg(["ffmpeg", "-version"], cancel_event=ev)
         self.assertEqual(res.returncode, -1)
 
+        import subprocess
         ev2 = threading.Event()
         mock_proc = MagicMock()
         mock_proc.poll.side_effect = [None, None, 0]
+        mock_proc.communicate.side_effect = lambda timeout=None: (_ for _ in ()).throw(subprocess.TimeoutExpired("ffmpeg", timeout or 0.05))
         mock_sp = MagicMock()
         mock_sp.Popen.return_value = mock_proc
         del mock_sp.run._mock_name

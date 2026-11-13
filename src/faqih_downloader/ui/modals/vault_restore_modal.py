@@ -157,7 +157,7 @@ class VaultRestoreModal(tk.Toplevel if tk is not None else object):
         # ── 3. Current Folder Bar ────────────────────────────────────────────
         folder_bar = tk.Frame(self, bg=self.c_panel, padx=16, pady=6)
         folder_bar.pack(fill=tk.X)
-        self.btn_browse_folder_top = tk.Button(folder_bar, text=tr("vault_btn_browse_folder", "📁 Browse Folder..."), font=("Segoe UI", 9, "bold"), bg=self.c_card, fg=self.c_accent, activebackground=self.c_border, activeforeground=self.c_accent, relief=tk.FLAT, padx=10, pady=3, cursor="hand2", command=self.browse_folder)
+        self.btn_browse_folder_top = tk.Button(folder_bar, text=tr("vault_btn_browse_folder", "▤ Browse Folder..."), font=("Segoe UI", 9, "bold"), bg=self.c_card, fg=self.c_accent, activebackground=self.c_border, activeforeground=self.c_accent, relief=tk.FLAT, padx=10, pady=3, cursor="hand2", command=self.browse_folder)
         self.btn_browse_folder_top.pack(side=tk.RIGHT)
 
         disp_path = self._current_scan_dir or tr("downloads_title", "Downloads")
@@ -171,7 +171,7 @@ class VaultRestoreModal(tk.Toplevel if tk is not None else object):
         self.btn_restore_sel = tk.Button(btn_bar, text=tr("vault_btn_restore_selected", "✓ Restore Selected"), font=("Segoe UI", 9, "bold"), bg="#2563eb", fg="#ffffff", activebackground="#1d4ed8", activeforeground="#ffffff", relief=tk.FLAT, padx=14, pady=6, cursor="hand2", command=self.restore_selected)
         self.btn_restore_sel.pack(side=tk.LEFT, padx=(0, 8))
 
-        self.btn_browse_folder = tk.Button(btn_bar, text=tr("vault_btn_browse_folder", "📁 Browse Folder..."), font=("Segoe UI", 9, "bold"), bg=self.c_card, fg=self.c_accent, activebackground=self.c_border, activeforeground=self.c_accent, relief=tk.FLAT, padx=12, pady=6, cursor="hand2", command=self.browse_folder)
+        self.btn_browse_folder = tk.Button(btn_bar, text=tr("vault_btn_browse_folder", "▤ Browse Folder..."), font=("Segoe UI", 9, "bold"), bg=self.c_card, fg=self.c_accent, activebackground=self.c_border, activeforeground=self.c_accent, relief=tk.FLAT, padx=12, pady=6, cursor="hand2", command=self.browse_folder)
         self.btn_browse_folder.pack(side=tk.LEFT, padx=(0, 8))
 
         self.btn_browse = tk.Button(btn_bar, text=tr("vault_btn_browse_file", "▣ Browse File..."), font=("Segoe UI", 9, "bold"), bg=self.c_card, fg=self.c_text_bright, activebackground=self.c_border, activeforeground="#ffffff", relief=tk.FLAT, padx=12, pady=6, cursor="hand2", command=self.browse_files)
@@ -456,7 +456,7 @@ class VaultRestoreModal(tk.Toplevel if tk is not None else object):
 
     def browse_folder(self) -> int:
         """Prompts user to select a folder from disk and loads unregistered files from it."""
-        selected_dir = filedialog.askdirectory(parent=self, title=tr("vault_btn_browse_folder", "📁 Browse Folder..."))
+        selected_dir = filedialog.askdirectory(parent=self, title=tr("vault_btn_browse_folder", "▤ Browse Folder..."))
         if not selected_dir or not os.path.isdir(selected_dir):
             return 0
         self._current_scan_dir = selected_dir

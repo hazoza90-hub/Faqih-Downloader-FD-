@@ -1015,8 +1015,9 @@ class TestLivePauseResumeAndPerf(unittest.TestCase):
         from cryptography.hazmat.primitives import hashes, serialization
         from cryptography.hazmat.primitives.asymmetric import rsa
 
-        payload = os.urandom(1536 * 1024)
+        payload = os.urandom(2 * 1024 * 1024 + 137)
         expected_sha = hashlib.sha256(payload).hexdigest()
+        write_delay = [0.025]
 
         class HttpsRangeHandler(http.server.BaseHTTPRequestHandler):
             protocol_version = "HTTP/1.1"
@@ -1050,7 +1051,8 @@ class TestLivePauseResumeAndPerf(unittest.TestCase):
                     except OSError:
                         return
                     pos += 32768
-                    time.sleep(0.008)
+                    if write_delay[0] > 0:
+                        time.sleep(write_delay[0])
 
         class ThreadedHttpsSrv(socketserver.ThreadingMixIn, http.server.HTTPServer):
             daemon_threads = True
@@ -1092,14 +1094,18 @@ class TestLivePauseResumeAndPerf(unittest.TestCase):
                     on_error=lambda e: (errs.append(e), done.set()),
                 )
                 eng.start()
+                deadline = time.monotonic() + 8.0
+                while time.monotonic() < deadline and sum(c.downloaded_bytes for c in eng.chunks) < 64 * 1024:
+                    time.sleep(0.02)
                 for _ in range(3):
-                    time.sleep(0.08)
+                    time.sleep(0.05)
                     eng.pause()
                     self.assertTrue(eng.is_paused)
                     self.assertEqual(eng.current_speed, 0.0)
-                    time.sleep(0.05)
+                    time.sleep(0.04)
                     eng.resume()
                     self.assertFalse(eng.is_paused)
+                write_delay[0] = 0.0
                 self.assertTrue(done.wait(timeout=15.0))
                 self.assertEqual(errs, [])
                 with open(dest, "rb") as f:
@@ -1109,8 +1115,9 @@ class TestLivePauseResumeAndPerf(unittest.TestCase):
                 srv.server_close()
 
     def test_ui_speed_throttle_neon_bar_scale_and_win32_atomic_resize(self):
-        """Verifies 0.35s speed/ETA UI throttle, neon bar canvas.scale during drag, and WM_SETREDRAW lock/RedrawWindow."""
+        """Verifies 0.35s speed/ETA UI throttle, neon bar & empty card fast drag scaling, and WM_SETREDRAW + release redraw."""
         from faqih_downloader.ui.panels.kanban_card_graphics import draw_neon_progress_bar
+        from faqih_downloader.ui.panels.kanban_cards import create_empty_state
         from faqih_downloader.ui.controllers.window_resize_mixin import WindowResizeMixin
         from faqih_downloader.ui.controllers.window_controller import WindowChromeMixin
 
@@ -1175,6 +1182,29 @@ class TestLivePauseResumeAndPerf(unittest.TestCase):
                 self.assertEqual(mock_sm.call_args_list[1].args, (777, 0x000B, 1, 0))
                 vcv.itemconfigure.assert_called_once_with(42, width=300)
                 mock_rw.assert_called_once_with(777, None, None, 0x0581)
+
+            # Verify create_empty_state updates synchronously during drag via _fast_rect + coords without after()/delete()
+            empty_cv = create_empty_state(root, "⏳", "Empty", "Waiting")
+            root.update()
+            root._is_resizing_window = True
+            with patch.object(empty_cv, "after") as mock_after:
+                root.geometry("600x680")
+                root.update()
+                mock_after.assert_not_called()
+                self.assertIsNotNone(empty_cv._fast_rect)
+                with patch.object(empty_cv, "delete") as mock_emp_del, \
+                     patch.object(empty_cv, "coords", wraps=empty_cv.coords) as mock_emp_coords:
+                    root.geometry("760x680")
+                    root.update()
+                    mock_emp_del.assert_not_called()
+                    self.assertGreaterEqual(mock_emp_coords.call_count, 4)
+
+            # Verify _on_resize_release restores empty state rounded card and neon progress bar crisp drawing
+            with patch("faqih_downloader.ui.panels.kanban_card_graphics.draw_neon_progress_bar", wraps=draw_neon_progress_bar) as mock_prog_rel:
+                rd._on_resize_release()
+                self.assertFalse(root._is_resizing_window)
+                self.assertIsNone(empty_cv._fast_rect)
+                mock_prog_rel.assert_called_with(cv_prog, 0.5)
         finally:
             try: root.destroy()
             except Exception: pass

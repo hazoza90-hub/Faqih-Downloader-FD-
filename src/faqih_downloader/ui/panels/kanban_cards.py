@@ -68,17 +68,13 @@ def create_empty_state(
     cv = tk.Canvas(parent, bg=bg, height=height, bd=0, highlightthickness=0)
     cv.pack(fill=tk.X, pady=(4, 6))
     cv._last_size = None
-    cv._redraw_job = None
-
-    def _flush_draw():
-        cv._redraw_job = None
-        if not getattr(cv, "winfo_exists", lambda: False)():
-            return
-        _render()
+    cv._fast_rect = None
+    cv._icon_id = cv._title_id = cv._sub_id = None
 
     def _render():
         w = max(100, cv._last_size[0] if cv._last_size else cv.winfo_width())
         h = max(60, cv._last_size[1] if cv._last_size else cv.winfo_height())
+        cv._fast_rect = None
         cv.delete("all")
 
         # Rounded Glass Card background
@@ -87,14 +83,13 @@ def create_empty_state(
         else:
             draw_rounded_rect(cv, 2, 2, w - 2, h - 2, radius=12, fill=card_bg, outline=border_color, width=1, tags="bg")
 
-        # Icon
+        # Icon & labels
         cy = h // 2 - (14 if subtitle else 0)
-        cv.create_text(w // 2, cy - 18, text=icon, font=("Segoe UI", 20), fill="#475569")
-        # Title text
-        cv.create_text(w // 2, cy + 10, text=title, font=("Segoe UI", 9, "bold"), fill="#94a3b8")
-        # Subtitle text (increased vertical distance to 26px to prevent Arabic font collision)
-        if subtitle:
-            cv.create_text(w // 2, cy + 36, text=subtitle, font=("Segoe UI", 8), fill="#64748b")
+        cv._icon_id = cv.create_text(w // 2, cy - 18, text=icon, font=("Segoe UI", 20), fill="#475569")
+        cv._title_id = cv.create_text(w // 2, cy + 10, text=title, font=("Segoe UI", 9, "bold"), fill="#94a3b8")
+        cv._sub_id = cv.create_text(w // 2, cy + 36, text=subtitle, font=("Segoe UI", 8), fill="#64748b") if subtitle else None
+
+    cv._rerender_empty_state = _render
 
     def _draw(event=None):
         if not getattr(cv, "winfo_exists", lambda: False)():
@@ -109,13 +104,21 @@ def create_empty_state(
         try: top = cv.winfo_toplevel()
         except Exception: pass
         if top and getattr(top, "_is_resizing_window", False):
-            if getattr(cv, "_redraw_job", None) is None:
-                cv._redraw_job = cv.after(16, _flush_draw)
+            w = max(100, w)
+            h = max(60, h)
+            cy = h // 2 - (14 if subtitle else 0)
+            if getattr(cv, "_fast_rect", None) is None:
+                cv.delete("all")
+                cv._fast_rect = cv.create_rectangle(2, 2, w - 2, h - 2, fill=card_bg, outline=glow_color or border_color, width=1)
+                cv._icon_id = cv.create_text(w // 2, cy - 18, text=icon, font=("Segoe UI", 20), fill="#475569")
+                cv._title_id = cv.create_text(w // 2, cy + 10, text=title, font=("Segoe UI", 9, "bold"), fill="#94a3b8")
+                cv._sub_id = cv.create_text(w // 2, cy + 36, text=subtitle, font=("Segoe UI", 8), fill="#64748b") if subtitle else None
+            else:
+                cv.coords(cv._fast_rect, 2, 2, w - 2, h - 2)
+                if getattr(cv, "_icon_id", None): cv.coords(cv._icon_id, w // 2, cy - 18)
+                if getattr(cv, "_title_id", None): cv.coords(cv._title_id, w // 2, cy + 10)
+                if subtitle and getattr(cv, "_sub_id", None): cv.coords(cv._sub_id, w // 2, cy + 36)
         else:
-            if getattr(cv, "_redraw_job", None) is not None:
-                try: cv.after_cancel(cv._redraw_job)
-                except Exception: pass
-                cv._redraw_job = None
             _render()
 
     cv.bind("<Configure>", _draw)

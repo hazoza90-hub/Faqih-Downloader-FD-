@@ -414,15 +414,24 @@ def run_ffmpeg_with_progress(
     )
     if is_mock:
         try:
-            comm = proc.communicate(timeout=0.05) if hasattr(proc, "communicate") else ("", "")
+            comm = ("", "")
+            while hasattr(proc, "communicate"):
+                if cancel_event and cancel_event.is_set():
+                    try: proc.kill()
+                    except Exception: pass
+                    return -999, "Cancelled"
+                try:
+                    comm = proc.communicate(timeout=0.05); break
+                except subprocess.TimeoutExpired:
+                    time.sleep(0.01)
             out, err = (comm[0], comm[1]) if isinstance(comm, (tuple, list)) and len(comm) >= 2 else ("", "")
-            rc = proc.returncode if getattr(proc, "returncode", None) is not None else 0
+            rc = proc.returncode if isinstance(getattr(proc, "returncode", None), int) else 0
             if rc == 0 and on_progress_pct:
                 try: on_progress_pct(100.0, "00:00")
                 except Exception: pass
             return rc, str(err or "")
         except Exception:
-            rc = getattr(proc, "returncode", 0) or 0
+            rc = getattr(proc, "returncode", 0)
             return (rc if isinstance(rc, int) else 0), ""
 
     err_tail: List[str] = []
@@ -500,25 +509,17 @@ def run_ffmpeg_with_progress(
                     last_emit = now_t
     finally:
         try:
-            if proc.poll() is None:
-                proc.kill()
-        except Exception:
-            pass
-        try:
-            proc.wait(timeout=1.0)
-        except Exception:
-            pass
+            if proc.poll() is None: proc.kill()
+        except Exception: pass
+        try: proc.wait(timeout=1.0)
+        except Exception: pass
         for stream in (getattr(proc, "stderr", None), getattr(proc, "stdout", None)):
             if stream and hasattr(stream, "close"):
-                try:
-                    stream.close()
-                except Exception:
-                    pass
+                try: stream.close()
+                except Exception: pass
 
-    try:
-        proc.wait()
-    except Exception:
-        pass
+    try: proc.wait()
+    except Exception: pass
     rc = proc.returncode if proc.returncode is not None else 0
     if rc == 0 and on_progress_pct:
         try: on_progress_pct(100.0, "00:00")

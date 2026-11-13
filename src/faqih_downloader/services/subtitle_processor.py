@@ -51,7 +51,7 @@ def run_cancellable_ffmpeg(cmd, cancel_event=None, creationflags=0, timeout=1800
         total_duration=total_duration, on_progress_pct=on_progress_pct,
         subprocess_mod=sp
     )
-    return subprocess.CompletedProcess(cmd, returncode=rc, stdout="", stderr=err)
+    return subprocess.CompletedProcess(cmd, returncode=(-1 if rc == -999 else rc), stdout="", stderr=err)
 
 
 def strip_burn_tag_from_filename(filepath: str) -> str:

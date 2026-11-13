@@ -10,7 +10,7 @@ except Exception:
     tk = ttk = filedialog = None  # type: ignore
 from typing import Optional, Callable, Dict, Any, List
 
-from ...config import get_resource_path, get_base_downloads_dir
+from ...config import get_resource_path, get_base_downloads_dir, get_setting
 from ...locales.i18n import tr
 from ...utils.file_ops import CATEGORY_SUBFOLDERS, resolve_categorized_path, apply_media_filename_tags
 from ...services.youtube_service import VideoFormatOption, format_filesize
