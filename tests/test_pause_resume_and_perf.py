@@ -915,17 +915,34 @@ class TestLivePauseResumeAndPerf(unittest.TestCase):
         root = tk.Tk()
         root.geometry("900x650+50+50")
         try:
-            # 1. WS_EX_LAYERED cleared when alpha >= 0.99
+            # 1. WS_EX_LAYERED is preserved (no _clear_layered_style_if_opaque) and restore_window keeps 0x00080000
+            self.assertFalse(hasattr(WindowChromeMixin, "_clear_layered_style_if_opaque"))
             class DummyChrome(WindowChromeMixin):
                 def __init__(self, r):
                     self.root = r
+                    self._window_alpha = 1.0
+                    self.dpi_scale = 1.0
+                    self.width, self.height = 900, 650
             dc = DummyChrome(root)
             with patch("faqih_downloader.ui.controllers.window_controller.IS_WINDOWS", True), \
                  patch("ctypes.windll.user32.GetParent", return_value=999), \
                  patch("ctypes.windll.user32.GetWindowLongW", return_value=0x000C0000), \
-                 patch("ctypes.windll.user32.SetWindowLongW") as mock_set_wl:
-                dc._clear_layered_style_if_opaque(1.0)
-                mock_set_wl.assert_called_once_with(999, -20, 0x00040000)
+                 patch("ctypes.windll.user32.SetWindowLongW") as mock_set_wl, \
+                 patch("ctypes.windll.user32.ShowWindow"), \
+                 patch("ctypes.windll.user32.SetWindowPos"), \
+                 patch("ctypes.windll.user32.SetForegroundWindow"):
+                dc.restore_window()
+                mock_set_wl.assert_called_once_with(999, -20, 0x000C0000)
+
+            # _setup_window applies opaque alpha directly without 0.2 fade-in timer loop
+            alpha_calls = []
+            with patch.object(root, "attributes", side_effect=lambda *a: alpha_calls.append(a)), \
+                 patch("faqih_downloader.ui.controllers.window_controller.IS_WINDOWS", False), \
+                 patch("faqih_downloader.utils.window_effects.apply_acrylic_or_mica_effect"):
+                dc._start_hidden = False
+                dc._setup_window()
+                self.assertIn(("-alpha", 1.0), alpha_calls)
+                self.assertNotIn(("-alpha", 0.2), alpha_calls)
 
             # 2. Fast resize rect reuses single item via coords() on drag frames 2+
             card = RoundedGlassCard(root, width=220, height=110)
@@ -1176,12 +1193,17 @@ class TestLivePauseResumeAndPerf(unittest.TestCase):
             vcv._win_id = 42
             rd = AtomicResizeDummy(root, vcv)
             with patch.object(root, "geometry", side_effect=lambda g: order.append("geo")) as mock_geo, \
-                 patch.object(root, "update_idletasks", side_effect=lambda: order.append("uit")) as mock_uit:
+                 patch.object(root, "update_idletasks", side_effect=lambda: order.append("uit")) as mock_uit, \
+                 patch("faqih_downloader.ui.controllers.window_resize_mixin.IS_WINDOWS", True), \
+                 patch("faqih_downloader.ui.controllers.window_resize_mixin.is_test_environment", return_value=False), \
+                 patch("ctypes.windll.user32.GetParent", return_value=777), \
+                 patch("ctypes.windll.user32.RedrawWindow", side_effect=lambda *a: order.append("rw")) as mock_rw:
                 rd._apply_resize_geometry(920, 680, 10, 10)
                 mock_geo.assert_called_once_with("920x680+10+10")
                 vcv.itemconfigure.assert_called_once_with(42, width=300)
                 self.assertEqual(mock_uit.call_count, 2)
-                self.assertEqual(order, ["geo", "uit", "vcv_w", "vcv_cfg", "uit"])
+                mock_rw.assert_called_once_with(777, None, None, 0x0585)
+                self.assertEqual(order, ["geo", "uit", "vcv_w", "vcv_cfg", "uit", "rw"])
 
             # Verify create_empty_state updates synchronously during drag via _fast_rect + coords without after()/delete()
             empty_cv = create_empty_state(root, "⏳", "Empty", "Waiting")

@@ -229,7 +229,7 @@ class TestYouTubeResolver(unittest.TestCase):
             YouTubeResolver.merge_video_audio("nonexistent_v.mp4", "nonexistent_a.m4a", "out.mp4")
 
     def test_extract_format_options_ydl_opts_socket_timeout_and_extractor_args(self):
-        """Verifies extract_format_options sets player_client priority and avoids injecting Cookie into googlevideo URLs."""
+        """Verifies extract_format_options uses yt-dlp defaults (no extractor_args), prioritizes unthrottled clients, and skips Cookie on googlevideo."""
         with patch("yt_dlp.YoutubeDL") as MockYDL:
             instance = MockYDL.return_value.__enter__.return_value
             gv_web_url = "https://rr1---sn-4g5e6nzz.googlevideo.com/videoplayback?c=WEB&itag=137"
@@ -291,7 +291,7 @@ class TestYouTubeResolver(unittest.TestCase):
             MockYDL.assert_called_once()
             passed_opts = MockYDL.call_args[0][0]
             self.assertIn(passed_opts.get("socket_timeout"), (8, 12))
-            self.assertEqual(passed_opts.get("extractor_args"), {"youtube": {"player_client": ["android_vr", "ios", "web"]}})
+            self.assertNotIn("extractor_args", passed_opts)
             opt_1080 = next(o for o in options if o.height == 1080)
             self.assertEqual(opt_1080.video_url, gv_vr_url)
             self.assertEqual(opt_1080.audio_url, gv_aud_url)

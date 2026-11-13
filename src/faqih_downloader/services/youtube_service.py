@@ -51,7 +51,7 @@ class YouTubeResolver(YouTubeFormatBuilderMixin):
             "nocheckcertificate": True, "noplaylist": True, "extract_flat": False,
             "socket_timeout": min(self.socket_timeout, 8),
             "youtube_include_dash_manifest": True, "youtube_include_hls_manifest": False,
-            "check_formats": False, "extractor_args": {"youtube": {"player_client": ["android_vr", "ios", "web"]}},
+            "check_formats": False,
         }
         if cookiefile and os.path.isfile(cookiefile): opts["cookiefile"] = cookiefile
         if browser and browser.lower() not in ("none", "auto", "off", ""):
