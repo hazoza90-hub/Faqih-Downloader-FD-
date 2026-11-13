@@ -136,6 +136,10 @@ class WindowResizeMixin:
         self._last_resize_geo = (w, h, x, y)
         geo = self._format_geometry(w, h, x, y)
         self.root.geometry(geo)
+        try:
+            self.root.update_idletasks()
+        except Exception:
+            pass
         v_cv = getattr(self, "vault_cards_canvas", None)
         if v_cv is not None:
             try:

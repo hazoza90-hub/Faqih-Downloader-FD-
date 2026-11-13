@@ -233,8 +233,10 @@ class TestYouTubeResolver(unittest.TestCase):
         with patch("yt_dlp.YoutubeDL") as MockYDL:
             instance = MockYDL.return_value.__enter__.return_value
             gv_web_url = "https://rr1---sn-4g5e6nzz.googlevideo.com/videoplayback?c=WEB&itag=137"
-            gv_vr_url = "https://rr1---sn-4g5e6nzz.googlevideo.com/videoplayback?c=ANDROID_VR&itag=137"
-            gv_aud_url = "https://rr1---sn-4g5e6nzz.googlevideo.com/videoplayback?c=ANDROID_VR&itag=140"
+            gv_vr_url_low = "https://rr1---sn-4g5e6nzz.googlevideo.com/videoplayback?c=ANDROID_VR&itag=137&q=low"
+            gv_vr_url = "https://rr1---sn-4g5e6nzz.googlevideo.com/videoplayback?c=ANDROID_VR&itag=137&q=best"
+            gv_aud_url_low = "https://rr1---sn-4g5e6nzz.googlevideo.com/videoplayback?c=ANDROID_VR&itag=140&q=low"
+            gv_aud_url = "https://rr1---sn-4g5e6nzz.googlevideo.com/videoplayback?c=ANDROID_VR&itag=140&q=best"
             instance.cookiejar = MagicMock()
             instance.cookiejar.get_cookie_header.return_value = "SID=abc; HSID=xyz"
             instance.extract_info.return_value = {
@@ -248,14 +250,36 @@ class TestYouTubeResolver(unittest.TestCase):
                         "protocol": "https", "url": gv_web_url, "http_headers": {},
                     },
                     {
+                        "format_id": "137-vr-0", "ext": "mp4", "height": 1080, "fps": 30,
+                        "filesize": 55_000_000, "vcodec": "avc1", "acodec": "none",
+                        "protocol": "https", "url": gv_vr_url_low, "http_headers": {"User-Agent": "AndroidVR/1.0"},
+                    },
+                    {
                         "format_id": "137-vr", "ext": "mp4", "height": 1080, "fps": 30,
                         "filesize": 55_000_000, "vcodec": "avc1", "acodec": "none",
                         "protocol": "https", "url": gv_vr_url, "http_headers": {"User-Agent": "AndroidVR/1.0"},
                     },
                     {
+                        "format_id": "140-vr-0", "ext": "m4a", "abr": 128,
+                        "filesize": 5_000_000, "vcodec": "none", "acodec": "mp4a",
+                        "protocol": "https", "url": gv_aud_url_low, "http_headers": {"User-Agent": "AndroidVR/1.0"},
+                    },
+                    {
                         "format_id": "140-vr", "ext": "m4a", "abr": 128,
                         "filesize": 5_000_000, "vcodec": "none", "acodec": "mp4a",
                         "protocol": "https", "url": gv_aud_url, "http_headers": {"User-Agent": "AndroidVR/1.0"},
+                    },
+                    {
+                        "format_id": "18-0", "ext": "mp4", "height": 360, "fps": 30,
+                        "filesize": 12_000_000, "vcodec": "avc1", "acodec": "mp4a",
+                        "protocol": "https", "url": "https://rr1---sn-4g5e6nzz.googlevideo.com/videoplayback?c=ANDROID_VR&itag=18&q=low",
+                        "http_headers": {"User-Agent": "AndroidVR/1.0"},
+                    },
+                    {
+                        "format_id": "18-best", "ext": "mp4", "height": 360, "fps": 30,
+                        "filesize": 12_000_000, "vcodec": "avc1", "acodec": "mp4a",
+                        "protocol": "https", "url": "https://rr1---sn-4g5e6nzz.googlevideo.com/videoplayback?c=ANDROID_VR&itag=18&q=best",
+                        "http_headers": {"User-Agent": "AndroidVR/1.0"},
                     },
                 ]
             }
@@ -270,6 +294,9 @@ class TestYouTubeResolver(unittest.TestCase):
             self.assertEqual(passed_opts.get("extractor_args"), {"youtube": {"player_client": ["android_vr", "ios", "web"]}})
             opt_1080 = next(o for o in options if o.height == 1080)
             self.assertEqual(opt_1080.video_url, gv_vr_url)
+            self.assertEqual(opt_1080.audio_url, gv_aud_url)
+            opt_360 = next(o for o in options if o.height == 360 and o.is_progressive)
+            self.assertEqual(opt_360.format_id, "18-best")
             self.assertNotIn("Cookie", opt_1080.video_headers)
             self.assertNotIn("cookie", opt_1080.video_headers)
 

@@ -1169,16 +1169,19 @@ class TestLivePauseResumeAndPerf(unittest.TestCase):
                     self.width, self.height = 850, 650
 
             vcv = MagicMock()
+            order = []
             vcv.winfo_exists.return_value = True
-            vcv.winfo_width.return_value = 300
+            vcv.winfo_width.side_effect = lambda: (order.append("vcv_w"), 300)[1]
+            vcv.itemconfigure.side_effect = lambda *a, **kw: order.append("vcv_cfg")
             vcv._win_id = 42
             rd = AtomicResizeDummy(root, vcv)
-            with patch.object(root, "geometry", wraps=root.geometry) as mock_geo, \
-                 patch.object(root, "update_idletasks", wraps=root.update_idletasks) as mock_uit:
+            with patch.object(root, "geometry", side_effect=lambda g: order.append("geo")) as mock_geo, \
+                 patch.object(root, "update_idletasks", side_effect=lambda: order.append("uit")) as mock_uit:
                 rd._apply_resize_geometry(920, 680, 10, 10)
                 mock_geo.assert_called_once_with("920x680+10+10")
                 vcv.itemconfigure.assert_called_once_with(42, width=300)
-                mock_uit.assert_called_once()
+                self.assertEqual(mock_uit.call_count, 2)
+                self.assertEqual(order, ["geo", "uit", "vcv_w", "vcv_cfg", "uit"])
 
             # Verify create_empty_state updates synchronously during drag via _fast_rect + coords without after()/delete()
             empty_cv = create_empty_state(root, "⏳", "Empty", "Waiting")
