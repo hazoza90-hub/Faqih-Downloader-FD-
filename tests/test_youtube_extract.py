@@ -291,7 +291,7 @@ class TestYouTubeResolver(unittest.TestCase):
             MockYDL.assert_called_once()
             passed_opts = MockYDL.call_args[0][0]
             self.assertIn(passed_opts.get("socket_timeout"), (8, 12))
-            self.assertEqual(passed_opts.get("extractor_args"), {"youtube": {"player_client": ["default", "android_vr", "tv"]}})
+            self.assertEqual(passed_opts.get("extractor_args"), {"youtube": {"player_client": ["android_vr", "default", "tv"]}})
             opt_1080 = next(o for o in options if o.height == 1080)
             self.assertEqual(opt_1080.video_url, gv_vr_url)
             self.assertEqual(opt_1080.audio_url, gv_aud_url)
@@ -299,6 +299,30 @@ class TestYouTubeResolver(unittest.TestCase):
             self.assertEqual(opt_360.format_id, "18-best")
             self.assertNotIn("Cookie", opt_1080.video_headers)
             self.assertNotIn("cookie", opt_1080.video_headers)
+
+            # Verify TV/WEB/throttled client tiers & original audio track selection preserve unthrottled Android URLs
+            from faqih_downloader.services.youtube_format_builder import get_format_client_tier
+            from faqih_downloader.services.youtube_tracks import extract_audio_tracks
+            self.assertEqual(get_format_client_tier({"url": "https://rr1.googlevideo.com/videoplayback?c=ANDROID_VR"}), 2)
+            self.assertEqual(get_format_client_tier({"url": "https://rr1.googlevideo.com/videoplayback?c=IOS"}), 2)
+            self.assertEqual(get_format_client_tier({"url": "https://rr1.googlevideo.com/videoplayback?c=TVHTML5"}), 0)
+            self.assertEqual(get_format_client_tier({"url": "https://rr1.googlevideo.com/videoplayback?c=WEB"}), 0)
+            self.assertEqual(get_format_client_tier({"url": "https://rr1.googlevideo.com/videoplayback?c=ANDROID_VR", "preference": -1000}), -1)
+            self.assertEqual(get_format_client_tier({"url": "https://rr1.googlevideo.com/videoplayback?c=ANDROID_VR", "format_note": "throttled"}), -1)
+
+            mixed_info = {
+                "title": "Mixed Tracks",
+                "formats": [
+                    {"format_id": "140-web", "ext": "m4a", "abr": 128, "vcodec": "none", "acodec": "mp4a", "url": gv_web_url + "&a=1", "http_headers": {}},
+                    {"format_id": "140-vr", "ext": "m4a", "abr": 128, "vcodec": "none", "acodec": "mp4a", "url": gv_aud_url, "http_headers": {}},
+                ],
+            }
+            tracks = extract_audio_tracks(mixed_info)
+            self.assertEqual(tracks[0]["url"], gv_aud_url)
+
+            opt_1080.selected_audio_track = {"track_id": "original", "is_original": True, "url": gv_web_url + "&a=1", "ext": "m4a", "http_headers": {}}
+            stream_info = resolver.build_stream_info(info, opt_1080)
+            self.assertEqual(stream_info.audio_url, gv_aud_url)
 
     def test_extract_format_options_null_entries_handling(self):
         """Verifies extract_format_options raises a clean RuntimeError if entries contains None."""

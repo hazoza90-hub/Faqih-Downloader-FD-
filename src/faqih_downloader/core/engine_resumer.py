@@ -14,13 +14,18 @@ from typing import Optional, Dict, Tuple, Any
 from .html_resolver import validate_refresh_url
 
 
-def _build_window_url(url: str, start_byte: int, end_byte: Optional[int], is_gv: bool) -> str:
-    """Strips any pre-existing range= query param on googlevideo URLs so HTTP Range headers control pacing."""
-    if not is_gv or not url or "range=" not in url.lower():
+def _build_window_url(url: str, start_byte: int, end_byte: Optional[int], is_gv: bool, req_num: Optional[int] = None) -> str:
+    """Replaces query range=/rn= params for googlevideo.com Initial Burst windowed HTTP 200 GETs."""
+    if not is_gv or end_byte is None or not url:
         return url
-    cleaned = re.sub(r"&range=[^&]*", "", url, flags=re.IGNORECASE)
-    cleaned = re.sub(r"\?range=[^&]*&", "?", cleaned, flags=re.IGNORECASE)
-    return re.sub(r"\?range=[^&]*$", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"&(?:range|rn)=[^&]*", "", url, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\?(?:range|rn)=[^&]*&", "?", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\?(?:range|rn)=[^&]*$", "", cleaned, flags=re.IGNORECASE)
+    sep = "&" if "?" in cleaned else "?"
+    suffix = f"range={start_byte}-{end_byte}"
+    if req_num is not None:
+        suffix += f"&rn={req_num}"
+    return f"{cleaned}{sep}{suffix}"
 
 
 def _is_urlopen_mocked() -> bool:

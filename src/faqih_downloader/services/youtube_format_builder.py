@@ -19,6 +19,28 @@ from .youtube_models import (
 )
 
 
+def get_format_client_tier(f: Dict[str, Any]) -> int:
+    """Ranks yt-dlp format URLs by client throttling tier (2=Android/iOS, 1=other, 0=WEB/MWEB/TV, -1=throttled)."""
+    if not isinstance(f, dict):
+        return 1
+    try:
+        if float(f.get("preference") or 0.0) <= -1000:
+            return -1
+    except Exception:
+        pass
+    if "throttled" in str(f.get("format_note") or "").lower():
+        return -1
+    m_c = re.search(r'[?&]c=([^&]+)', str(f.get("url") or ""), re.IGNORECASE)
+    if not m_c:
+        return 1
+    cv = m_c.group(1).upper()
+    if cv.startswith("ANDROID") or cv.startswith("IOS"):
+        return 2
+    if cv.startswith("WEB") or cv.startswith("MWEB") or cv.startswith("TV"):
+        return 0
+    return 1
+
+
 class YouTubeFormatBuilderMixin:
     """Mixin providing format options building and stream info resolution logic."""
 
@@ -94,12 +116,7 @@ class YouTubeFormatBuilderMixin:
 
         # Fix missing / zero heights by inferring from width or resolution string; preserve yt-dlp order
         ydl_idx_map = {id(f): idx for idx, f in enumerate(formats)}
-        def _client_tier(f: Dict[str, Any]) -> int:
-            m_c = re.search(r'[?&]c=([^&]+)', str(f.get("url") or ""), re.IGNORECASE)
-            if not m_c: return 1
-            cv = m_c.group(1).upper()
-            if cv.startswith("ANDROID") or cv == "IOS" or cv.startswith("TV"): return 2
-            return 0 if cv in ("WEB", "MWEB", "WEB_REMIX", "WEB_CREATOR") else 1
+        _client_tier = get_format_client_tier
 
         for f in formats:
             h = int(f.get("height") or 0)
@@ -444,13 +461,20 @@ class YouTubeFormatBuilderMixin:
             if sel_audio.get("filesize"):
                 opt.audio_size = int(sel_audio["filesize"])
         elif sel_audio and sel_audio.get("url") and not opt.is_progressive:
-            opt.audio_url = sel_audio["url"]
-            opt.audio_ext = sel_audio.get("ext", "m4a")
-            opt.audio_headers = sel_audio.get("http_headers") or info.get("http_headers") or {}
-            if hasattr(opt, "audio_format_id"):
-                setattr(opt, "audio_format_id", sel_audio.get("format_id", ""))
-            if sel_audio.get("filesize"):
-                opt.audio_size = int(sel_audio["filesize"])
+            is_orig_sel = bool(sel_audio.get("is_original") or sel_audio.get("track_id") == "original")
+            keep_existing = (
+                is_orig_sel
+                and bool(opt.audio_url)
+                and get_format_client_tier({"url": opt.audio_url}) >= get_format_client_tier(sel_audio)
+            )
+            if not keep_existing:
+                opt.audio_url = sel_audio["url"]
+                opt.audio_ext = sel_audio.get("ext", "m4a")
+                opt.audio_headers = sel_audio.get("http_headers") or info.get("http_headers") or {}
+                if hasattr(opt, "audio_format_id"):
+                    setattr(opt, "audio_format_id", sel_audio.get("format_id", ""))
+                if sel_audio.get("filesize"):
+                    opt.audio_size = int(sel_audio["filesize"])
 
         webpage_url = str(info.get("webpage_url") or info.get("original_url") or (f"https://www.youtube.com/watch?v={video_id}" if video_id else ""))
         out_fn = f"{clean_title}.{opt.ext}"

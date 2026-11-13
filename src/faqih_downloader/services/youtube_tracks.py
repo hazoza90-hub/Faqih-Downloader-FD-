@@ -22,6 +22,7 @@ except Exception:
     def set_setting(k: str, v: Any) -> bool: return True  # type: ignore
 
 from .youtube_models import find_ffmpeg_bin
+from .youtube_format_builder import get_format_client_tier
 from .subtitle_processor import (
     ISO_639_2,
     _format_srt_timestamp,
@@ -130,13 +131,19 @@ def extract_audio_tracks(info: Dict[str, Any]) -> List[Dict[str, Any]]:
     if "original" not in groups and groups:
         groups["original"] = groups.pop(next(iter(groups.keys())))
 
+    ydl_idx_map = {id(f): idx for idx, f in enumerate(formats)}
     result: List[Dict[str, Any]] = []
     for key, f_tuples in groups.items():
         direct_cand = [t for t in f_tuples if not _is_manifest_f(t[0])]
         active_tuples = direct_cand if direct_cand else f_tuples
         best_f, best_disp = max(
             active_tuples,
-            key=lambda t: (1 if str(t[0].get("ext") or "").lower() == "m4a" else 0, float(t[0].get("abr") or t[0].get("tbr") or 0.0))
+            key=lambda t: (
+                get_format_client_tier(t[0]),
+                1 if str(t[0].get("ext") or "").lower() == "m4a" else 0,
+                float(t[0].get("abr") or t[0].get("tbr") or 0.0),
+                ydl_idx_map.get(id(t[0]), 0),
+            )
         )
         abr = float(best_f.get("abr") or best_f.get("tbr") or 0.0)
         is_orig = (key == "original")

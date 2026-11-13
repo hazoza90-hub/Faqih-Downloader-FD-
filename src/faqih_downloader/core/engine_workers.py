@@ -14,7 +14,7 @@ from .engine_resumer import EngineResumerMixin, _build_window_url, _is_urlopen_m
 from ..utils.url_utils import parse_filename_from_cd_header
 
 
-GOOGLEVIDEO_WINDOW_BYTES = 2 * 1024 * 1024  # 2 MB fast burst window with HTTP Range headers + keep-alive reuse
+GOOGLEVIDEO_WINDOW_BYTES = 1 * 1024 * 1024  # 1 MB Initial Burst window with &range= query param + keep-alive reuse
 
 
 class _KeepAliveResponseWrapper:
@@ -132,6 +132,7 @@ class EngineWorkersMixin(EngineResumerMixin):
         """Worker thread with persistent Keep-Alive connection, fast burst windows, and file streaming."""
         max_retries = 8
         retry_count = 0
+        win_rn = 0
         is_gv = getattr(self, "is_googlevideo", False)
 
         while retry_count < max_retries and not self._is_stopped():
@@ -167,11 +168,14 @@ class EngineWorkersMixin(EngineResumerMixin):
                     self.log(f"Connection #{chunk.chunk_id} (Attempt {retry_count+1}): Byte range [{cur_offset:,} - {end_str}]")
                     if self.on_chunk_update: self.on_chunk_update()
 
-                    win_url = _build_window_url(current_url, cur_offset, req_end, is_gv)
+                    is_mocked = _is_urlopen_mocked()
+                    req_num = win_rn if (is_gv and not is_mocked and req_end is not None) else None
+                    if req_num is not None: win_rn += 1
+                    win_url = _build_window_url(current_url, cur_offset, req_end, is_gv, req_num=req_num)
                     expected_seg_bytes = (req_end - cur_offset + 1) if (req_end is not None) else None
                     seg_bytes_read = 0
 
-                    if _is_urlopen_mocked():
+                    if is_mocked:
                         req = self._create_request(url=win_url)
                         if self.supports_ranges and self.total_size > 0 and req_end is not None:
                             req.add_header("Range", f"bytes={cur_offset}-{req_end}")
@@ -184,7 +188,7 @@ class EngineWorkersMixin(EngineResumerMixin):
                         for hk, hv in self.headers.items():
                             if hk.lower() != "range":
                                 hdrs[hk] = hv
-                        if self.supports_ranges and self.total_size > 0 and req_end is not None:
+                        if self.supports_ranges and self.total_size > 0 and req_end is not None and not is_gv:
                             hdrs["Range"] = f"bytes={cur_offset}-{req_end}"
 
                         p = urllib.parse.urlsplit(win_url)
@@ -240,7 +244,7 @@ class EngineWorkersMixin(EngineResumerMixin):
                                 conn = None
                             current_url = urllib.parse.urljoin(current_url, loc)
                             is_gv = is_gv or self.is_googlevideo_url(current_url)
-                            win_url = _build_window_url(current_url, cur_offset, req_end, is_gv)
+                            win_url = _build_window_url(current_url, cur_offset, req_end, is_gv, req_num=(win_rn if is_gv else None))
                             p = urllib.parse.urlsplit(win_url)
                             scheme, host = p.scheme or "http", p.hostname or "localhost"
                             port = p.port or (443 if scheme == "https" else 80)
@@ -249,7 +253,8 @@ class EngineWorkersMixin(EngineResumerMixin):
                             conn_key = (scheme, host, port)
                             with self._lock:
                                 self._active_connections.append(conn)
-                            conn.request("GET", path_q, headers=dict(hdrs, Host=p.netloc))
+                            r_hdrs = {k: v for k, v in hdrs.items() if not (is_gv and k.lower() == "range")}
+                            conn.request("GET", path_q, headers=dict(r_hdrs, Host=p.netloc))
                             raw_resp = conn.getresponse()
                             if getattr(conn, "sock", None) is not None and hasattr(conn.sock, "settimeout"):
                                 conn.sock.settimeout(2.0)

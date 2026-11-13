@@ -1176,38 +1176,50 @@ class TestWindowedRangeAndWarnings(unittest.TestCase):
         self.assertTrue(res_op)
 
     def test_googlevideo_window_bytes_constant(self):
-        """Verifies GOOGLEVIDEO_WINDOW_BYTES is 2 MB fast burst window and _build_window_url strips query range=."""
+        """Verifies GOOGLEVIDEO_WINDOW_BYTES is 1 MB Initial Burst window and _build_window_url sets range= and rn=."""
         from faqih_downloader.core.engine_workers import GOOGLEVIDEO_WINDOW_BYTES
         from faqih_downloader.core.engine_resumer import _build_window_url
-        self.assertEqual(GOOGLEVIDEO_WINDOW_BYTES, 2 * 1024 * 1024)
+        self.assertEqual(GOOGLEVIDEO_WINDOW_BYTES, 1 * 1024 * 1024)
         self.assertEqual(
-            _build_window_url("https://rr1.googlevideo.com/videoplayback?id=1&range=0-1023", 0, 1023, True),
-            "https://rr1.googlevideo.com/videoplayback?id=1",
+            _build_window_url("https://rr1.googlevideo.com/videoplayback?id=1&range=0-1023", 0, 1023, True, req_num=2),
+            "https://rr1.googlevideo.com/videoplayback?id=1&range=0-1023&rn=2",
         )
         self.assertEqual(
-            _build_window_url("https://rr1.googlevideo.com/videoplayback?range=0-1023&id=1", 0, 1023, True),
-            "https://rr1.googlevideo.com/videoplayback?id=1",
+            _build_window_url("https://rr1.googlevideo.com/videoplayback?range=0-1023&rn=1&id=1", 1024, 2047, True),
+            "https://rr1.googlevideo.com/videoplayback?id=1&range=1024-2047",
         )
         self.assertEqual(
-            _build_window_url("https://rr1.googlevideo.com/videoplayback?range=0-1023", 0, 1023, True),
-            "https://rr1.googlevideo.com/videoplayback",
+            _build_window_url("https://rr1.googlevideo.com/videoplayback?range=0-1023", 0, 1023, True, req_num=0),
+            "https://rr1.googlevideo.com/videoplayback?range=0-1023&rn=0",
         )
 
     def test_rounded_glass_card_fast_rect_during_window_resize(self):
-        """Verifies _draw_card_bg uses the fast single create_rectangle path when _is_resizing_window is True."""
+        """Verifies _draw_card_bg skips _fast_resize_rect for fixed-width capsules, uses it for fluid cards, and _on_resize skips x-only moves."""
         if not self.root:
             self.skipTest("Tkinter GUI not available")
         from faqih_downloader.utils.window_effects import RoundedGlassCard
 
-        card = RoundedGlassCard(self.root, width=200, height=100)
+        card_fluid = RoundedGlassCard(self.root, height=100)
+        card_fixed = RoundedGlassCard(self.root, width=200, height=100)
         self.root._is_resizing_window = True
         try:
-            with patch.object(card, "create_rectangle") as mock_rect, \
+            with patch.object(card_fluid, "create_rectangle") as mock_rect, \
                  patch("faqih_downloader.utils.window_effects.draw_rounded_rect") as mock_round:
-                card._draw_card_bg(200, 100, (200, 100, "#252b3b", None, "#151a24"))
+                card_fluid._draw_card_bg(200, 100, (200, 100, "#252b3b", None, "#151a24"))
                 mock_rect.assert_called_once()
                 mock_round.assert_not_called()
-                self.assertIsNone(card._last_drawn_state)
+                self.assertIsNone(card_fluid._last_drawn_state)
+
+            with patch.object(card_fixed, "create_rectangle") as mock_rect_fx, \
+                 patch("faqih_downloader.utils.window_effects.draw_rounded_rect") as mock_round_fx:
+                card_fixed._draw_card_bg(200, 100, (200, 100, "#252b3b", None, "#151a24"))
+                mock_rect_fx.assert_not_called()
+                mock_round_fx.assert_called_once()
+                self.assertIsNotNone(card_fixed._last_drawn_state)
+
+            with patch.object(card_fixed, "_draw_card_bg") as mock_redraw:
+                card_fixed._on_resize(MagicMock(width=200, height=100))
+                mock_redraw.assert_not_called()
         finally:
             self.root._is_resizing_window = False
 

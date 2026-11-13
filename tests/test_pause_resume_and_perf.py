@@ -553,8 +553,8 @@ class TestLivePauseResumeAndPerf(unittest.TestCase):
                 self.assertEqual(counts["reqs"], 9)
                 self.assertEqual(counts["accepts"], 2)
                 self.assertEqual(len(range_headers), 8)
-                self.assertTrue(all(h and h.startswith("bytes=") for h in range_headers))
-                self.assertTrue(all("range=" not in p and "rn=" not in p for p in paths))
+                self.assertTrue(all(h is None for h in range_headers))
+                self.assertTrue(all("range=" in p and "rn=" in p for p in paths))
                 with open(dest, "rb") as f:
                     self.assertEqual(hashlib.sha256(f.read()).hexdigest(), expected_sha)
         finally:
@@ -955,7 +955,7 @@ class TestLivePauseResumeAndPerf(unittest.TestCase):
                 self.assertNotIn(("-alpha", 0.2), alpha_calls)
 
             # 2. Fast resize rect reuses single item via coords() on drag frames 2+
-            card = RoundedGlassCard(root, width=220, height=110)
+            card = RoundedGlassCard(root, height=110)
             card.pack(fill=tk.X)
             led = LedEqualizerMatrix(root, height=40)
             led.pack(fill=tk.X)
@@ -1211,12 +1211,12 @@ class TestLivePauseResumeAndPerf(unittest.TestCase):
                  patch("ctypes.windll.user32.RedrawWindow", side_effect=lambda *a: order.append(f"rw_{a[3]:04x}")) as mock_rw:
                 rd._apply_resize_geometry(920, 680, 10, 10)
                 mock_geo.assert_called_once_with("920x680+10+10")
-                self.assertEqual(mock_upd.call_count, 2)
+                mock_upd.assert_called_once()
                 vcv.itemconfigure.assert_called_once_with(42, width=300)
-                mock_uit.assert_called_once()
-                mock_rw.assert_called_once_with(777, None, None, 0x0185)
+                self.assertEqual(mock_uit.call_count, 2)
+                mock_rw.assert_called_once_with(777, None, None, 0x0585)
                 self.assertFalse(rd._in_resize_update)
-                self.assertEqual(order, ["geo", "upd", "vcv_w", "vcv_cfg", "uit", "rw_0185", "upd"])
+                self.assertEqual(order, ["geo", "uit", "vcv_w", "vcv_cfg", "upd", "rw_0585", "uit"])
 
             # Verify _on_resize_drag re-entrancy guard stores _pending_resize_geo and returns 'break'
             rd._resize_state = {"mode": "se", "x_root": 100, "y_root": 100, "win_x": 10, "win_y": 10, "win_w": 920, "win_h": 680}

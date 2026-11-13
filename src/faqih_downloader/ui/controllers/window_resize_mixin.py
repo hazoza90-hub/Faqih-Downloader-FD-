@@ -146,7 +146,7 @@ class WindowResizeMixin:
             geo = self._format_geometry(w, h, x, y)
             self.root.geometry(geo)
             try:
-                self.root.update()
+                self.root.update_idletasks()
             except Exception:
                 pass
             v_cv = getattr(self, "vault_cards_canvas", None)
@@ -160,7 +160,7 @@ class WindowResizeMixin:
                 except Exception:
                     pass
             try:
-                self.root.update_idletasks()
+                self.root.update()
             except Exception:
                 pass
             if IS_WINDOWS and not is_test_environment():
@@ -168,8 +168,8 @@ class WindowResizeMixin:
                     user32 = ctypes.windll.user32
                     hwnd = user32.GetParent(self.root.winfo_id()) or self.root.winfo_id()
                     if hwnd:
-                        user32.RedrawWindow(hwnd, None, None, 0x0185)
-                        self.root.update()
+                        user32.RedrawWindow(hwnd, None, None, 0x0585)
+                        self.root.update_idletasks()
                 except Exception:
                     pass
             self._normal_geometry = geo
@@ -306,10 +306,11 @@ class WindowResizeMixin:
                 while stack:
                     curr = stack.pop()
                     if isinstance(curr, RoundedGlassCard):
-                        curr._fast_resize_rect = None
-                        curr._last_drawn_state = None
-                        try: curr._on_resize(None)
-                        except Exception: pass
+                        if getattr(curr, "_fast_resize_rect", None) is not None or getattr(curr, "_explicit_width", None) is None:
+                            curr._fast_resize_rect = None
+                            curr._last_drawn_state = None
+                            try: curr._on_resize(None)
+                            except Exception: pass
                     if callable(getattr(curr, "_rerender_empty_state", None)):
                         curr._fast_rect = None
                         curr._last_size = None
@@ -338,11 +339,12 @@ class WindowResizeMixin:
 
         if IS_WINDOWS and not is_test_environment():
             try:
+                self.root.update()
                 user32 = ctypes.windll.user32
                 hwnd = user32.GetParent(self.root.winfo_id()) or self.root.winfo_id()
                 if hwnd:
                     user32.RedrawWindow(hwnd, None, None, 0x0585)
-                    self.root.update()
+                    self.root.update_idletasks()
             except Exception:
                 pass
 

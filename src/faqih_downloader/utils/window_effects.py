@@ -312,7 +312,7 @@ class RoundedGlassCard(_BaseCanvas):
         top = None
         try: top = self.winfo_toplevel()
         except Exception: pass
-        if top and getattr(top, "_is_resizing_window", False):
+        if top and getattr(top, "_is_resizing_window", False) and self._explicit_width is None:
             outline_col = self.glow_color or state_sig[2]
             w_line = 2 if self.glow_color else 1
             fast_rect = getattr(self, "_fast_resize_rect", None)
@@ -360,10 +360,13 @@ class RoundedGlassCard(_BaseCanvas):
         h = event.height if (event is not None and getattr(event, "height", 0) > 1) else self.winfo_height()
         if w < 10 or h < 10:
             return
-        self._last_size = (w, h)
         b_curr = "#38bdf8" if (self._is_hovered and not self._orig_glow_color) else self.border_color
+        last_state = getattr(self, "_last_drawn_state", None)
+        if (w, h) == getattr(self, "_last_size", None) and last_state is not None and len(last_state) >= 3 and b_curr == last_state[2]:
+            return
+        self._last_size = (w, h)
         state_sig = (w, h, b_curr, self.glow_color, self.card_bg)
-        if state_sig == getattr(self, "_last_drawn_state", None):
+        if state_sig == last_state:
             return
         self._draw_card_bg(w, h, state_sig)
 
