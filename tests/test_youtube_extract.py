@@ -291,7 +291,7 @@ class TestYouTubeResolver(unittest.TestCase):
             MockYDL.assert_called_once()
             passed_opts = MockYDL.call_args[0][0]
             self.assertIn(passed_opts.get("socket_timeout"), (8, 12))
-            self.assertNotIn("extractor_args", passed_opts)
+            self.assertEqual(passed_opts.get("extractor_args"), {"youtube": {"player_client": ["default", "android_vr", "tv"]}})
             opt_1080 = next(o for o in options if o.height == 1080)
             self.assertEqual(opt_1080.video_url, gv_vr_url)
             self.assertEqual(opt_1080.audio_url, gv_aud_url)

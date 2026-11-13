@@ -1,10 +1,7 @@
 """
 EngineWorkersMixin: Background worker thread pooling and dynamic chunk splitting.
 """
-import os
-import re
-import time
-import random
+import os, re, time, random
 import http.client
 import urllib.request
 import urllib.error
@@ -17,7 +14,7 @@ from .engine_resumer import EngineResumerMixin, _build_window_url, _is_urlopen_m
 from ..utils.url_utils import parse_filename_from_cd_header
 
 
-GOOGLEVIDEO_WINDOW_BYTES = 10 * 1024 * 1024  # 10 MB window matching yt-dlp & anti-throttle range
+GOOGLEVIDEO_WINDOW_BYTES = 4 * 1024 * 1024  # 4 MB window inside per-socket CDN initial burst quota
 
 
 class _KeepAliveResponseWrapper:
@@ -172,7 +169,8 @@ class EngineWorkersMixin(EngineResumerMixin):
                     self.log(f"Connection #{chunk.chunk_id} (Attempt {retry_count+1}): Byte range [{cur_offset:,} - {end_str}]")
                     if self.on_chunk_update: self.on_chunk_update()
 
-                    win_url = _build_window_url(current_url, cur_offset, req_end, is_gv)
+                    rn_val = self._next_gv_rn() if is_gv else None
+                    win_url = _build_window_url(current_url, cur_offset, req_end, is_gv, req_num=rn_val)
                     expected_seg_bytes = (req_end - cur_offset + 1) if (req_end is not None) else None
                     seg_bytes_read = 0
 
@@ -245,7 +243,7 @@ class EngineWorkersMixin(EngineResumerMixin):
                                 conn = None
                             current_url = urllib.parse.urljoin(current_url, loc)
                             is_gv = is_gv or self.is_googlevideo_url(current_url)
-                            win_url = _build_window_url(current_url, cur_offset, req_end, is_gv)
+                            win_url = _build_window_url(current_url, cur_offset, req_end, is_gv, req_num=(rn_val if rn_val is not None else (self._next_gv_rn() if is_gv else None)))
                             p = urllib.parse.urlsplit(win_url)
                             scheme, host = p.scheme or "http", p.hostname or "localhost"
                             port = p.port or (443 if scheme == "https" else 80)
@@ -353,8 +351,9 @@ class EngineWorkersMixin(EngineResumerMixin):
                             chunk_done = True
 
                     if chunk_done:
-                        if _is_urlopen_mocked():
-                            self._cleanup_worker_conns(resp, None); resp = None
+                        if is_gv or _is_urlopen_mocked():
+                            self._cleanup_worker_conns(resp, conn if is_gv else None)
+                            resp = None; conn = None if is_gv else conn
                         else:
                             seg_bytes_read = self._drain_small_tail(resp, raw_resp, seg_bytes_read, expected_seg_bytes, req_end, cur_chunk_end)
                             self._release_or_close_conn(conn, resp, raw_resp, conn_key, seg_bytes_read, expected_seg_bytes)
@@ -364,15 +363,16 @@ class EngineWorkersMixin(EngineResumerMixin):
                         return
 
                     if expected_seg_bytes is not None and seg_bytes_read >= expected_seg_bytes:
-                        with self._lock:
-                            if resp in self._active_connections: self._active_connections.remove(resp)
-                        if hasattr(resp, "_mock_name"): self._close_conn_safely(resp)
-                        resp = None
-                        if _is_urlopen_mocked() or not self._is_conn_reusable(conn, raw_resp, seg_bytes_read, expected_seg_bytes):
-                            self._cleanup_worker_conns(None, conn)
-                            conn = None
-                        retry_count = 0
-                        continue
+                        if is_gv:
+                            self._cleanup_worker_conns(resp, conn); resp = conn = None
+                        else:
+                            with self._lock:
+                                if resp in self._active_connections: self._active_connections.remove(resp)
+                            if hasattr(resp, "_mock_name"): self._close_conn_safely(resp)
+                            resp = None
+                            if _is_urlopen_mocked() or not self._is_conn_reusable(conn, raw_resp, seg_bytes_read, expected_seg_bytes):
+                                self._cleanup_worker_conns(None, conn); conn = None
+                        retry_count = 0; continue
 
                     if not _is_urlopen_mocked():
                         self._release_or_close_conn(conn, resp, raw_resp, conn_key, seg_bytes_read, expected_seg_bytes)

@@ -98,11 +98,11 @@ class WindowChromeMixin(ThemeControllerMixin, DispatchControllerMixin, WindowLif
             from faqih_downloader.utils.window_effects import apply_acrylic_or_mica_effect
             from faqih_downloader.config import is_test_environment, set_setting
             alpha = float(getattr(self, "_window_alpha", None) or get_setting("window_alpha", 1.0))
-            if alpha <= 0.95 and not get_setting("window_alpha_migrated_v203", False) and not is_test_environment():
+            if alpha < 0.99 and not get_setting("window_alpha_migrated_v205", False) and not is_test_environment():
                 alpha = 1.0
                 set_setting("window_alpha", 1.0)
                 set_setting("window_opacity", 1.0)
-                set_setting("window_alpha_migrated_v203", True)
+                set_setting("window_alpha_migrated_v205", True)
             self._window_alpha = alpha
             eff_alpha = 1.0 if alpha >= 0.99 else alpha
             apply_acrylic_or_mica_effect(self.root, alpha=eff_alpha)

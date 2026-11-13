@@ -98,7 +98,7 @@ class YouTubeFormatBuilderMixin:
             m_c = re.search(r'[?&]c=([^&]+)', str(f.get("url") or ""), re.IGNORECASE)
             if not m_c: return 1
             cv = m_c.group(1).upper()
-            if cv.startswith("ANDROID") or cv == "IOS": return 2
+            if cv.startswith("ANDROID") or cv == "IOS" or cv.startswith("TV"): return 2
             return 0 if cv in ("WEB", "MWEB", "WEB_REMIX", "WEB_CREATOR") else 1
 
         for f in formats:

@@ -335,7 +335,7 @@ class SettingsModalTabsMixin(SettingsModalExtraMixin):
         r_alpha = tk.Frame(parent, bg=self.c_bg)
         r_alpha.pack(fill=tk.X, pady=(0, 14))
 
-        cur_alpha = float(get_setting("window_alpha", 0.92))
+        cur_alpha = float(get_setting("window_alpha", 1.0))
         cur_pct = int(round(cur_alpha * 100))
 
         top_alpha = tk.Frame(r_alpha, bg=self.c_bg)
@@ -396,7 +396,7 @@ class SettingsModalTabsMixin(SettingsModalExtraMixin):
             pct = int(float(val_str))
             alpha = max(0.60, min(1.0, pct / 100.0))
         except Exception:
-            alpha = 0.92
+            alpha = 1.0
         if hasattr(self, "lbl_transparency_val") and self.lbl_transparency_val:
             try:
                 self.lbl_transparency_val.configure(text=f"{int(round(alpha * 100))}%")

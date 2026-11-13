@@ -488,6 +488,7 @@ class TestLivePauseResumeAndPerf(unittest.TestCase):
         payload = os.urandom(512 * 1024)
         expected_sha = hashlib.sha256(payload).hexdigest()
         counts = {"accepts": 0, "reqs": 0}
+        paths = []
         cnt_lock = threading.Lock()
 
         class CountingSrv(socketserver.ThreadingMixIn, http.server.HTTPServer):
@@ -512,6 +513,7 @@ class TestLivePauseResumeAndPerf(unittest.TestCase):
             def do_GET(self):
                 with cnt_lock:
                     counts["reqs"] += 1
+                    paths.append(self.path)
                 s, e = 0, len(payload) - 1
                 if "range=" in self.path:
                     r = self.path.split("range=")[1].split("&")[0]
@@ -544,7 +546,9 @@ class TestLivePauseResumeAndPerf(unittest.TestCase):
                 self.assertEqual(errs, [])
                 self.assertGreaterEqual(counts["reqs"], 9)
                 self.assertLessEqual(counts["reqs"], 10)
-                self.assertEqual(counts["accepts"], 2)
+                self.assertEqual(counts["accepts"], counts["reqs"])
+                self.assertEqual(len(eng._conn_pool), 0)
+                self.assertTrue(all(f"rn={i}" in p for i, p in enumerate(paths, 1)))
                 with open(dest, "rb") as f:
                     self.assertEqual(hashlib.sha256(f.read()).hexdigest(), expected_sha)
         finally:
@@ -1193,17 +1197,24 @@ class TestLivePauseResumeAndPerf(unittest.TestCase):
             vcv._win_id = 42
             rd = AtomicResizeDummy(root, vcv)
             with patch.object(root, "geometry", side_effect=lambda g: order.append("geo")) as mock_geo, \
-                 patch.object(root, "update_idletasks", side_effect=lambda: order.append("uit")) as mock_uit, \
-                 patch("faqih_downloader.ui.controllers.window_resize_mixin.IS_WINDOWS", True), \
-                 patch("faqih_downloader.ui.controllers.window_resize_mixin.is_test_environment", return_value=False), \
-                 patch("ctypes.windll.user32.GetParent", return_value=777), \
-                 patch("ctypes.windll.user32.RedrawWindow", side_effect=lambda *a: order.append("rw")) as mock_rw:
+                 patch.object(root, "update", side_effect=lambda: order.append("upd")) as mock_upd, \
+                 patch.object(root, "update_idletasks", side_effect=lambda: order.append("uit")) as mock_uit:
                 rd._apply_resize_geometry(920, 680, 10, 10)
                 mock_geo.assert_called_once_with("920x680+10+10")
+                mock_upd.assert_called_once()
                 vcv.itemconfigure.assert_called_once_with(42, width=300)
-                self.assertEqual(mock_uit.call_count, 2)
-                mock_rw.assert_called_once_with(777, None, None, 0x0585)
-                self.assertEqual(order, ["geo", "uit", "vcv_w", "vcv_cfg", "uit", "rw"])
+                mock_uit.assert_called_once()
+                self.assertFalse(rd._in_resize_update)
+                self.assertEqual(order, ["geo", "upd", "vcv_w", "vcv_cfg", "uit"])
+
+            # Verify _on_resize_drag re-entrancy guard stores _pending_resize_geo and returns 'break'
+            rd._resize_state = {"mode": "se", "x_root": 100, "y_root": 100, "win_x": 10, "win_y": 10, "win_w": 920, "win_h": 680}
+            rd._in_resize_update = True
+            rd._last_resize_ts = 0.0
+            ev = MagicMock(x_root=140, y_root=120)
+            self.assertEqual(rd._on_resize_drag(ev), "break")
+            self.assertEqual(rd._pending_resize_geo, (960, 700, 10, 10))
+            rd._in_resize_update = False
 
             # Verify create_empty_state updates synchronously during drag via _fast_rect + coords without after()/delete()
             empty_cv = create_empty_state(root, "⏳", "Empty", "Waiting")

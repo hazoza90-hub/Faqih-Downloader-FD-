@@ -3,16 +3,12 @@ WindowResizeMixin: 8-edge & corner resizing grips and border drag handlers for f
 """
 from __future__ import annotations
 
-import ctypes
 from typing import Any
 
 try:
     import tkinter as tk
 except Exception:
     tk = None  # type: ignore
-
-from faqih_downloader.config import is_test_environment
-from faqih_downloader.services import IS_WINDOWS
 
 
 class WindowResizeMixin:
@@ -137,37 +133,36 @@ class WindowResizeMixin:
     def _apply_resize_geometry(self, w: int, h: int, x: int, y: int):
         if (w, h, x, y) == getattr(self, "_last_resize_geo", None):
             return
-        self._last_resize_geo = (w, h, x, y)
-        geo = self._format_geometry(w, h, x, y)
-        self.root.geometry(geo)
+        if getattr(self, "_in_resize_update", False):
+            self._pending_resize_geo = (w, h, x, y)
+            return
+        self._in_resize_update = True
         try:
-            self.root.update_idletasks()
-        except Exception:
-            pass
-        v_cv = getattr(self, "vault_cards_canvas", None)
-        if v_cv is not None:
+            self._last_resize_geo = (w, h, x, y)
+            geo = self._format_geometry(w, h, x, y)
+            self.root.geometry(geo)
             try:
-                if v_cv.winfo_exists():
-                    cv_w = v_cv.winfo_width()
-                    win_id = getattr(v_cv, "_win_id", None)
-                    if cv_w > 10 and win_id is not None:
-                        v_cv.itemconfigure(win_id, width=cv_w)
+                self.root.update()
             except Exception:
                 pass
-        try:
-            self.root.update_idletasks()
-        except Exception:
-            pass
-        if IS_WINDOWS and not is_test_environment():
+            v_cv = getattr(self, "vault_cards_canvas", None)
+            if v_cv is not None:
+                try:
+                    if v_cv.winfo_exists():
+                        cv_w = v_cv.winfo_width()
+                        win_id = getattr(v_cv, "_win_id", None)
+                        if cv_w > 10 and win_id is not None:
+                            v_cv.itemconfigure(win_id, width=cv_w)
+                except Exception:
+                    pass
             try:
-                user32 = ctypes.windll.user32
-                hwnd = user32.GetParent(self.root.winfo_id()) or self.root.winfo_id()
-                if hwnd:
-                    user32.RedrawWindow(hwnd, None, None, 0x0585)
+                self.root.update_idletasks()
             except Exception:
                 pass
-        self._normal_geometry = geo
-        self.width, self.height = w, h
+            self._normal_geometry = geo
+            self.width, self.height = w, h
+        finally:
+            self._in_resize_update = False
 
     def _flush_pending_resize(self):
         self._resize_flush_job = None
@@ -247,6 +242,9 @@ class WindowResizeMixin:
                 y, h = y + (h - new_h), new_h
 
             if (w, h, x, y) == getattr(self, "_last_resize_geo", None):
+                return "break"
+            if getattr(self, "_in_resize_update", False):
+                self._pending_resize_geo = (w, h, x, y)
                 return "break"
             if now - getattr(self, "_last_resize_ts", 0.0) < 0.014:
                 self._pending_resize_geo = (w, h, x, y)
