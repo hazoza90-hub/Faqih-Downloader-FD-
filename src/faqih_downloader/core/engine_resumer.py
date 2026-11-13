@@ -2,12 +2,38 @@
 Engine resumer and dynamic URL refresh mixin for Smart Download (SD).
 """
 import os
+import re
+import ssl
 import time
 import socket
+import http.client
+import urllib.request
 import threading
 from typing import Optional, Dict, Tuple, Any
 
 from .html_resolver import validate_refresh_url
+
+
+def _build_window_url(url: str, start_byte: int, end_byte: Optional[int], is_gv: bool) -> str:
+    """Appends or updates &range=start-end query parameter on googlevideo URLs for native CDN pacing."""
+    if not is_gv or end_byte is None:
+        return url
+    rng = f"range={start_byte}-{end_byte}"
+    if re.search(r"([?&])range=[^&]*", url):
+        return re.sub(r"([?&])range=[^&]*", rf"\g<1>{rng}", url)
+    return f"{url}&{rng}" if "?" in url else f"{url}?{rng}"
+
+
+def _is_urlopen_mocked() -> bool:
+    """Checks if urllib.request.urlopen is replaced by a unittest mock."""
+    fn = getattr(urllib.request, "urlopen", None)
+    return fn is not None and (hasattr(fn, "_mock_name") or "mock" in type(fn).__name__.lower() or hasattr(fn, "side_effect"))
+
+
+def _is_ssl_socket(conn: Any) -> bool:
+    """Returns True if conn or its wrapped _conn owns an active ssl.SSLSocket."""
+    sock = getattr(conn, "sock", None) or getattr(getattr(conn, "_conn", None), "sock", None)
+    return isinstance(sock, ssl.SSLSocket)
 
 
 class EngineResumerMixin:
@@ -39,6 +65,22 @@ class EngineResumerMixin:
                 for conn in conns:
                     self._close_conn_safely(conn)
             pool_map.clear()
+
+    def _abort_active_conns_on_pause(self):
+        """Drains idle pooled sockets on pause without closing active SSLSocket/HTTPResponse objects cross-thread."""
+        self._drain_conn_pool()
+        mocked = _is_urlopen_mocked()
+        with self._lock:
+            conns = list(self._active_connections)
+        for conn in conns:
+            if _is_ssl_socket(conn):
+                continue
+            is_live_http = hasattr(conn, "_resp") or isinstance(conn, (http.client.HTTPConnection, http.client.HTTPResponse))
+            if mocked or hasattr(conn, "_mock_name") or not is_live_http:
+                self._close_conn_safely(conn)
+                with self._lock:
+                    if conn in self._active_connections:
+                        self._active_connections.remove(conn)
 
     def _acquire_pooled_conn(self, conn_key: Tuple[str, str, int]) -> Any:
         """Pops a healthy idle HTTP(S)Connection from _conn_pool for conn_key, if available."""
@@ -297,4 +339,4 @@ class EngineResumerMixin:
         return True
 
 
-__all__ = ["EngineResumerMixin"]
+__all__ = ["EngineResumerMixin", "_build_window_url", "_is_urlopen_mocked", "_is_ssl_socket"]

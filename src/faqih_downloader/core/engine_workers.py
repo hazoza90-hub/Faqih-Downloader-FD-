@@ -12,34 +12,22 @@ import threading
 from typing import Optional, Dict, Any
 
 from .chunk import DownloadChunk
-from .engine_resumer import EngineResumerMixin
+from .engine_resumer import EngineResumerMixin, _build_window_url, _is_urlopen_mocked, _is_ssl_socket
 from ..utils.url_utils import parse_filename_from_cd_header
 
 
-GOOGLEVIDEO_WINDOW_BYTES = 10 * 1024 * 1024  # 10 MB standard yt-dlp range window with keep-alive reuse
-
-
-def _build_window_url(url: str, start_byte: int, end_byte: Optional[int], is_gv: bool) -> str:
-    """Appends or updates &range=start-end query parameter on googlevideo URLs for native CDN pacing."""
-    if not is_gv or end_byte is None:
-        return url
-    rng = f"range={start_byte}-{end_byte}"
-    if re.search(r"([?&])range=[^&]*", url):
-        return re.sub(r"([?&])range=[^&]*", rf"\g<1>{rng}", url)
-    return f"{url}&{rng}" if "?" in url else f"{url}?{rng}"
-
-
-def _is_urlopen_mocked() -> bool:
-    """Checks if urllib.request.urlopen is replaced by a unittest mock."""
-    fn = getattr(urllib.request, "urlopen", None)
-    return fn is not None and (hasattr(fn, "_mock_name") or "mock" in type(fn).__name__.lower() or hasattr(fn, "side_effect"))
+GOOGLEVIDEO_WINDOW_BYTES = 2 * 1024 * 1024  # 2 MB fast burst window with keep-alive reuse
 
 
 class _KeepAliveResponseWrapper:
-    """Wraps an http.client.HTTPResponse for transparent compatibility with urllib response interface."""
-    def __init__(self, raw_resp: Any, conn: Any):
+    """Wraps an http.client.HTTPResponse for fast read1() TLS batching and safe pause exit."""
+    def __init__(self, raw_resp: Any, conn: Any, pause_event: Any = None, cancel_event: Any = None):
         self._resp = raw_resp
         self._conn = conn
+        self._pause_event = pause_event
+        self._cancel_event = cancel_event
+        self._owner_tid = threading.get_ident()
+        self._reading = False
         self.status = getattr(raw_resp, "status", 200)
         self.headers = getattr(raw_resp, "headers", {})
         self.will_close = getattr(raw_resp, "will_close", False)
@@ -48,12 +36,37 @@ class _KeepAliveResponseWrapper:
         return self.status
 
     def read(self, amt: int = -1) -> bytes:
-        return self._resp.read(amt)
+        self._reading = True
+        self._owner_tid = threading.get_ident()
+        try:
+            if amt > 0 and hasattr(type(self._resp), "read1") and not hasattr(self._resp, "_mock_name"):
+                chunks = []
+                got = 0
+                while got < amt:
+                    if (self._pause_event is not None and self._pause_event.is_set()) or (self._cancel_event is not None and self._cancel_event.is_set()):
+                        break
+                    piece = self._resp.read1(min(65536, amt - got))
+                    if not piece:
+                        break
+                    chunks.append(piece)
+                    got += len(piece)
+                    if getattr(self._resp, "length", None) == 0:
+                        break
+                if getattr(self._resp, "length", None) == 0 and not self._resp.isclosed() and hasattr(self._resp, "_close_conn"):
+                    try: self._resp._close_conn()
+                    except Exception: pass
+                return b"".join(chunks) if len(chunks) != 1 else chunks[0]
+            return self._resp.read(amt)
+        finally:
+            self._reading = False
 
     def close(self):
-        if self._conn and getattr(self._conn, "sock", None):
-            try: self._conn.sock.shutdown(2)
-            except Exception: pass
+        tid = threading.get_ident()
+        if self._reading and tid != self._owner_tid:
+            return
+        cancelled = self._cancel_event is not None and self._cancel_event.is_set()
+        if tid != self._owner_tid and not cancelled:
+            return
         try: self._resp.close()
         except Exception: pass
         if self._conn:
@@ -67,22 +80,16 @@ class EngineWorkersMixin(EngineResumerMixin):
     @staticmethod
     def is_googlevideo_url(url: str) -> bool:
         """Detects if a URL is hosted on YouTube CDN (googlevideo.com)."""
-        if not url or not isinstance(url, str):
-            return False
+        if not url or not isinstance(url, str): return False
         try:
             parsed = urllib.parse.urlsplit(url)
             host = (parsed.hostname or "").lower()
-            if host.endswith(".googlevideo.com") or host == "googlevideo.com":
-                return True
-            if any(dom in host for dom in ("youtube.com", "youtu.be", "ytimg.com")):
-                return True
-            path = (parsed.path or "").lower()
-            if "videoplayback" in path:
+            if host.endswith(".googlevideo.com") or host == "googlevideo.com" or any(d in host for d in ("youtube.com", "youtu.be", "ytimg.com")) or "videoplayback" in (parsed.path or "").lower():
                 return True
         except Exception:
             pass
-        url_lower = str(url).lower()
-        return "googlevideo.com" in url_lower or "videoplayback" in url_lower
+        u_lo = str(url).lower()
+        return "googlevideo.com" in u_lo or "videoplayback" in u_lo
 
     def _parse_filename_from_cd(self, cd: str) -> Optional[str]:
         """Extracts clean filename from Content-Disposition header, ignoring parameters."""
@@ -96,22 +103,18 @@ class EngineWorkersMixin(EngineResumerMixin):
             req.add_header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0.0.0")
         if not any(k.lower() == "connection" for k in self.headers):
             req.add_header("Connection", "keep-alive")
-        for k, v in self.headers.items():
-            req.add_header(k, v)
+        for k, v in self.headers.items(): req.add_header(k, v)
         return req
 
     def _spawn_worker(self, chunk: DownloadChunk):
         """Spawns an asynchronous worker thread for a chunk (single-worker guarded)."""
         with self._lock:
             wt = getattr(self, "_worker_threads", None)
-            if wt is None:
-                wt = {}; self._worker_threads = wt
+            if wt is None: wt = self._worker_threads = {}
             existing = wt.get(chunk.chunk_id)
-            if existing is not None and existing.is_alive():
-                return
+            if existing is not None and existing.is_alive(): return
             with chunk.lock:
-                if chunk.status == "completed":
-                    return
+                if chunk.status == "completed": return
                 chunk.status = "active"
             t = threading.Thread(target=self._chunk_worker, args=(chunk,), daemon=True)
             self.active_workers.append(t); wt[chunk.chunk_id] = t
@@ -212,6 +215,8 @@ class EngineWorkersMixin(EngineResumerMixin):
                             try:
                                 conn.request("GET", path_q, headers=req_h)
                                 raw_resp = conn.getresponse()
+                                if getattr(conn, "sock", None) is not None and hasattr(conn.sock, "settimeout"):
+                                    conn.sock.settimeout(2.0)
                                 break
                             except (http.client.HTTPException, ConnectionError, OSError):
                                 with self._lock:
@@ -249,8 +254,10 @@ class EngineWorkersMixin(EngineResumerMixin):
                                 self._active_connections.append(conn)
                             conn.request("GET", path_q, headers=dict(hdrs, Host=p.netloc))
                             raw_resp = conn.getresponse()
+                            if getattr(conn, "sock", None) is not None and hasattr(conn.sock, "settimeout"):
+                                conn.sock.settimeout(2.0)
 
-                        resp = _KeepAliveResponseWrapper(raw_resp, conn)
+                        resp = _KeepAliveResponseWrapper(raw_resp, conn, self._pause_event, self._cancel_event)
 
                     code = resp.getcode()
                     if code not in (200, 206):
@@ -472,7 +479,7 @@ class EngineWorkersMixin(EngineResumerMixin):
             self.save_state()
 
     def _update_progress_metrics(self):
-        """Computes responsive EMA-smoothed transfer speed over a >=1.0s window, ETA, and progress metrics."""
+        """Computes responsive EMA-smoothed transfer speed over a >=2.0s window, ETA, and progress metrics."""
         emit_lock = getattr(self, "_progress_emit_lock", None)
         if emit_lock is None:
             with self._lock: emit_lock = self._progress_emit_lock = getattr(self, "_progress_emit_lock", None) or threading.RLock()
@@ -496,19 +503,15 @@ class EngineWorkersMixin(EngineResumerMixin):
             samples.append((now, total_downloaded))
 
         dt = now - self.last_speed_check_time
-        if dt >= 0.15:
+        should_emit = (dt >= 0.20) or (self.total_size > 0 and total_downloaded >= self.total_size) or self._is_stopped()
+        if dt >= 0.20:
             samples.append((now, total_downloaded))
-            while len(samples) > 2 and (now - samples[1][0]) >= 1.0:
+            while len(samples) > 2 and (now - samples[1][0]) >= 2.0:
                 samples.popleft()
             win_dt = now - samples[0][0]
             win_bytes = max(0, total_downloaded - samples[0][1])
             instant_speed = (win_bytes / win_dt) if win_dt > 0 else 0.0
-            if self.current_speed <= 0.0:
-                self.current_speed = instant_speed
-            elif instant_speed > self.current_speed * 1.35:
-                self.current_speed = 0.70 * instant_speed + 0.30 * self.current_speed
-            else:
-                self.current_speed = 0.45 * instant_speed + 0.55 * self.current_speed
+            self.current_speed = instant_speed if self.current_speed <= 0.0 else (0.35 * instant_speed + 0.65 * self.current_speed)
             self.last_downloaded_bytes = self._last_speed_bytes = total_downloaded
             self.last_speed_check_time = self._last_speed_time = now
 
@@ -526,15 +529,16 @@ class EngineWorkersMixin(EngineResumerMixin):
             eta_str = "--:--:--"
 
         if self.is_paused or self._pause_event.is_set(): self.current_speed = 0.0; return
-        if self.on_progress:
+        if self.on_progress and should_emit:
             self.on_progress(total_downloaded, self.total_size, self.current_speed, eta_str, active_count)
 
     def _stop_workers_for_error(self):
-        """Closes active socket connections and signals all workers to abort immediately."""
+        """Closes active non-SSL connections and signals all workers to abort immediately."""
         self._error_abort_event.set()
         with self._lock:
             for conn in list(self._active_connections):
-                self._close_conn_safely(conn)
+                if not _is_ssl_socket(conn):
+                    self._close_conn_safely(conn)
             self._active_connections.clear()
         self._drain_conn_pool()
 

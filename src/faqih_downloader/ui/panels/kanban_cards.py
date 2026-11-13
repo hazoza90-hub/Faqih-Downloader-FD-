@@ -376,6 +376,7 @@ def build_active_card_shell(card: Any, parent_app: Any) -> Dict[str, Any]:
 
     cv_prog = tk.Canvas(row2, width=40, height=6, bg="#1c2533", bd=0, highlightthickness=0)
     cv_prog.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=8)
+    cv_prog.bind("<Configure>", lambda e=None: draw_neon_progress_bar(cv_prog, getattr(cv_prog, "_prog_ratio", 0.0)))
 
     row3 = tk.Frame(card, bg="#151a24")
     row3.pack(fill=tk.X, pady=(0, 6))

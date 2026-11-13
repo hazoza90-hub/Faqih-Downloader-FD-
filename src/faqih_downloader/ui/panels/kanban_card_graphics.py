@@ -193,9 +193,22 @@ def draw_neon_progress_bar(canvas: tk.Canvas, ratio: float):
     if w <= 10:
         w = 160
     h = 6
+    canvas._prog_ratio = max(0.0, min(1.0, float(ratio or 0.0)))
+    top = None
+    try:
+        top = canvas.winfo_toplevel()
+    except Exception:
+        pass
+    if top and getattr(top, "_is_resizing_window", False) and getattr(canvas, "_last_prog_w", 0) > 10 and canvas.find_all():
+        old_w = float(canvas._last_prog_w)
+        if abs(float(w) - old_w) >= 1.0:
+            canvas.scale("all", 0, 0, float(w) / old_w, 1.0)
+            canvas._last_prog_w = w
+        return
+    canvas._last_prog_w = w
     canvas.delete("all")
     canvas.create_line(3, h / 2, max(4, w - 3), h / 2, fill="#1c2533", width=h, capstyle=tk.ROUND)
-    fill_w = max(0.0, min(float(w), ratio * float(w)))
+    fill_w = max(0.0, min(float(w), canvas._prog_ratio * float(w)))
     if fill_w >= 6:
         canvas.create_line(3, h / 2, fill_w - 3, h / 2, fill="#19f3ee", width=h, capstyle=tk.ROUND)
     elif fill_w > 0:

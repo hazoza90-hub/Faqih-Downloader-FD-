@@ -4,6 +4,7 @@ queue advance, completion, and error callback handlers for Smart Download (SD).
 """
 import os
 import sys
+import time
 from typing import Optional, Callable, Dict, Any, List
 
 try:
@@ -58,7 +59,35 @@ class DownloadCallbacksMixin:
                 pct = (d / t * 100.0) if t > 0 else 0.0
             self._draw_main_progress(pct)
 
-            speed_str = f"{sp / (1024*1024):.2f} MB/s" if sp >= 1024*1024 else (f"{sp / 1024:.1f} KB/s" if sp >= 1024 else f"{int(sp)} B/s")
+            now_mono = time.monotonic()
+            is_paused_et = str(et or "").strip().lower() == "paused"
+            cur_stage = (stage_part.split("@", 1)[0] if ("@" in stage_part or "|" in et) else ("paused" if is_paused_et else "eta")).strip().lower()
+            prev_speed_str = getattr(self, "_last_speed_str", "")
+            prev_eta_str = getattr(self, "_last_eta_display_str", "")
+            prev_raw_sp = getattr(self, "_last_ui_raw_speed", -1.0)
+            prev_kanban_et = getattr(self, "_last_kanban_eta", "")
+            should_refresh_rate = (
+                (now_mono - getattr(self, "_last_speed_ui_ts", 0.0) >= 0.35)
+                or is_paused_et
+                or not prev_speed_str
+                or (prev_raw_sp <= 0.0 and sp > 0.0)
+                or (cur_stage != getattr(self, "_last_ui_stage", None))
+            )
+            if should_refresh_rate:
+                speed_str = f"{sp / (1024*1024):.2f} MB/s" if sp >= 1024*1024 else (f"{sp / 1024:.1f} KB/s" if sp >= 1024 else f"{int(sp)} B/s")
+                display_et = et.split("|", 1)[1] if ("|" in et and et.split("|", 1)[1]) else (et.split("|", 1)[0] if "|" in et else et)
+                kanban_et = et
+                self._last_speed_ui_ts = now_mono
+                self._last_speed_str = speed_str
+                self._last_eta_display_str = display_et
+                self._last_ui_raw_speed = sp
+                self._last_ui_stage = cur_stage
+                self._last_kanban_eta = kanban_et
+            else:
+                speed_str = prev_speed_str
+                display_et = prev_eta_str
+                kanban_et = prev_kanban_et or et
+
             self.card_speed.configure(text=speed_str)
 
             def _fmt_size(b):
@@ -74,7 +103,6 @@ class DownloadCallbacksMixin:
             if hasattr(self, "card_size"):
                 self.card_size.configure(text=size_str)
             if hasattr(self, "card_eta"):
-                display_et = et.split("|", 1)[1] if ("|" in et and et.split("|", 1)[1]) else (et.split("|", 1)[0] if "|" in et else et)
                 self.card_eta.configure(text=display_et)
             snap = self.engine.get_chunks_snapshot() if hasattr(self.engine, "get_chunks_snapshot") else (self.engine.chunks if self.engine else [])
             total_chunks = max(ac, len(snap))
@@ -83,7 +111,7 @@ class DownloadCallbacksMixin:
             if hasattr(self, "update_kanban_active_stream"):
                 fn = getattr(self.engine, "dest_path", None) or getattr(self.engine, "destination_path", None) or (self.entry_url.get() if hasattr(self, "entry_url") else "")
                 try:
-                    self.update_kanban_active_stream(fn, pct, speed_str, snap, ac, downloaded=d, total=t, eta=et)
+                    self.update_kanban_active_stream(fn, pct, speed_str, snap, ac, downloaded=d, total=t, eta=kanban_et)
                 except TypeError:
                     self.update_kanban_active_stream(fn, pct, speed_str, snap, ac)
 

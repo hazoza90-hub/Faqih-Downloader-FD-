@@ -143,6 +143,9 @@ class TestLivePauseResumeAndPerf(unittest.TestCase):
                 self.assertLess(pause_call_ms, 500.0, "engine.pause() must return rapidly without blocking")
                 self.assertTrue(eng.is_paused)
                 self.assertEqual(eng.current_speed, 0.0)
+                drain_dl = time.monotonic() + 0.5
+                while time.monotonic() < drain_dl and len(eng._active_connections) > 0:
+                    time.sleep(0.01)
                 self.assertEqual(len(eng._active_connections), 0)
 
                 paused_events = [ev for ev in prog_events if ev[3] == "Paused"]
@@ -221,31 +224,40 @@ class TestLivePauseResumeAndPerf(unittest.TestCase):
             mock_raw.read.assert_not_called()
             self.assertIs(eng._acquire_pooled_conn(("http", "example.com", 80)), mock_conn)
 
-            # Speed EMA calculation test over 1.0s sliding window with responsive ramp-up & steady EMA
+            # Speed EMA calculation test over 2.0s sliding window (0.35 instant + 0.65 previous) and dt >= 0.20 gate
             eng.chunks = [DownloadChunk(0, 0, 9_999_999, downloaded_bytes=0, status="active")]
+            emitted = []
+            eng.on_progress = lambda *a: emitted.append(a)
             now = 100.0
-            eng._speed_samples = deque([(98.5, 0), (99.4, 1_000_000)])
+            eng._speed_samples = deque([(97.8, 0), (99.0, 1_000_000)])
             eng.last_speed_check_time = 99.6
             eng.last_downloaded_bytes = 1_000_000
             eng.current_speed = 1_000_000.0
-            eng.chunks[0].downloaded_bytes = 2_500_000  # ramp-up: 2.5 MB over 1.5s window => ~1.67 MB/s (> 1.35x)
+            eng.chunks[0].downloaded_bytes = 2_500_000  # 2.5 MB over 2.2s window
 
             with patch("faqih_downloader.core.engine_workers.time.monotonic", return_value=now):
                 eng._update_progress_metrics()
 
-            ramp_instant = 2_500_000 / 1.5
-            expected_ramp = 0.70 * ramp_instant + 0.30 * 1_000_000.0
-            self.assertAlmostEqual(eng.current_speed, expected_ramp, places=2)
+            first_instant = 2_500_000 / 2.2
+            expected_first = 0.35 * first_instant + 0.65 * 1_000_000.0
+            self.assertAlmostEqual(eng.current_speed, expected_first, places=2)
+            self.assertEqual(len(emitted), 1)
 
-            # Steady-state EMA check (<= 1.35x)
+            # Update < 0.20s later must NOT update speed or emit on_progress
+            with patch("faqih_downloader.core.engine_workers.time.monotonic", return_value=100.10):
+                eng._update_progress_metrics()
+            self.assertAlmostEqual(eng.current_speed, expected_first, places=2)
+            self.assertEqual(len(emitted), 1)
+
+            # Next >= 0.20s sample (99.0 stays since 100.25 - 99.0 = 1.25 < 2.0)
             now2 = 100.25
             eng.chunks[0].downloaded_bytes = 2_900_000
             with patch("faqih_downloader.core.engine_workers.time.monotonic", return_value=now2):
                 eng._update_progress_metrics()
-            # (98.5, 0) stays since 100.25 - 99.4 = 0.85 < 1.0
-            steady_instant = 2_900_000 / (100.25 - 98.5)
-            expected_steady = 0.45 * steady_instant + 0.55 * expected_ramp
-            self.assertAlmostEqual(eng.current_speed, expected_steady, places=2)
+            second_instant = 2_900_000 / (100.25 - 97.8)
+            expected_second = 0.35 * second_instant + 0.65 * expected_first
+            self.assertAlmostEqual(eng.current_speed, expected_second, places=2)
+            self.assertEqual(len(emitted), 2)
 
     def test_stream_coordinator_pause_and_resume_emit_progress(self):
         """Verifies StreamDownloadCoordinator.pause()/resume() update state and emit Paused/Downloading callbacks."""
@@ -647,7 +659,7 @@ class TestLivePauseResumeAndPerf(unittest.TestCase):
             server.server_close()
 
     def test_keepalive_wrapper_uses_blocking_read_and_release_closes_unclosed_zero_length(self):
-        """Verifies _KeepAliveResponseWrapper.read delegates to read() directly and _release_or_close_conn closes unclosed length==0 responses."""
+        """Verifies _KeepAliveResponseWrapper.read batches read1(64KB) with pause/cancel break and owner-thread close guard."""
         from faqih_downloader.core.engine_workers import _KeepAliveResponseWrapper
 
         class FakeStdlibResp:
@@ -659,6 +671,7 @@ class TestLivePauseResumeAndPerf(unittest.TestCase):
                 self.status = 206
                 self.headers = {}
                 self.read_calls = 0
+                self.read1_calls = 0
 
             def read(self, n=-1):
                 self.read_calls += 1
@@ -670,7 +683,11 @@ class TestLivePauseResumeAndPerf(unittest.TestCase):
                 return chunk
 
             def read1(self, n=-1):
-                raise AssertionError("read1() must NOT be called (GIL contention fix)")
+                self.read1_calls += 1
+                chunk = self._buf[:n] if n >= 0 else self._buf
+                self._buf = self._buf[len(chunk):]
+                self.length -= len(chunk)
+                return chunk
 
             def isclosed(self):
                 return self._closed
@@ -678,13 +695,28 @@ class TestLivePauseResumeAndPerf(unittest.TestCase):
             def _close_conn(self):
                 self._closed = True
 
+            def close(self):
+                self._closed = True
+
+        pause_ev = threading.Event()
         raw = FakeStdlibResp(b"hello")
         conn = MagicMock()
         conn.sock = MagicMock()
-        wrapper = _KeepAliveResponseWrapper(raw, conn)
+        wrapper = _KeepAliveResponseWrapper(raw, conn, pause_event=pause_ev)
         self.assertEqual(wrapper.read(5), b"hello")
-        self.assertEqual(raw.read_calls, 1)
+        self.assertEqual(raw.read1_calls, 1)
         self.assertTrue(raw.isclosed())
+
+        # Cross-thread close while another thread is inside read1() must NOT close raw resp
+        raw_slow = FakeStdlibResp(b"a" * 131072)
+        pause_slow = threading.Event()
+        w_slow = _KeepAliveResponseWrapper(raw_slow, MagicMock(), pause_event=pause_slow)
+        w_slow._reading = True
+        w_slow._owner_tid = -1
+        w_slow.close()
+        self.assertFalse(raw_slow.isclosed())
+        pause_slow.set()
+        self.assertEqual(w_slow.read(65536), b"")
 
         with tempfile.TemporaryDirectory() as td:
             eng = TurboDownloadEngine("http://example.com/v.bin", os.path.join(td, "v.bin"))
@@ -951,9 +983,10 @@ class TestLivePauseResumeAndPerf(unittest.TestCase):
             app._on_resize_press(MagicMock(x_root=900, y_root=650), "se")
             self.assertTrue(root._is_resizing_window)
             self.assertEqual(len(app._resize_hidden_vault_cards), 4)
-            app._on_resize_drag(MagicMock(x_root=940, y_root=670))
-            # Immediate second drag within <14ms schedules pending flush
-            app._on_resize_drag(MagicMock(x_root=980, y_root=690))
+            with patch("time.perf_counter", side_effect=[10.0, 10.005]):
+                app._on_resize_drag(MagicMock(x_root=940, y_root=670))
+                # Immediate second drag within <14ms schedules pending flush
+                app._on_resize_drag(MagicMock(x_root=980, y_root=690))
             self.assertIsNotNone(app._pending_resize_geo)
 
             with patch.object(led, "redraw", wraps=led.redraw) as mock_led_rel, \
@@ -971,6 +1004,180 @@ class TestLivePauseResumeAndPerf(unittest.TestCase):
                 root.destroy()
             except Exception:
                 pass
+
+    def test_live_https_multithread_repeated_pause_resume_completes_without_crash(self):
+        """Live HTTPS (SSLSocket) multi-thread download with repeated pause()/resume() calls must never crash or hang."""
+        import ssl
+        import ipaddress
+        from datetime import datetime, timedelta, timezone
+        from cryptography import x509
+        from cryptography.x509.oid import NameOID
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import rsa
+
+        payload = os.urandom(1536 * 1024)
+        expected_sha = hashlib.sha256(payload).hexdigest()
+
+        class HttpsRangeHandler(http.server.BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+            def log_message(self, *a): pass
+            def do_HEAD(self):
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(payload)))
+                self.send_header("Accept-Ranges", "bytes")
+                self.end_headers()
+            def do_GET(self):
+                rng = self.headers.get("Range")
+                start, end = 0, len(payload) - 1
+                status = 200
+                if rng and rng.startswith("bytes="):
+                    s, e = rng[6:].split("-", 1)
+                    start = int(s) if s else 0
+                    end = int(e) if e else len(payload) - 1
+                    status = 206
+                data = payload[start:end + 1]
+                self.send_response(status)
+                self.send_header("Content-Length", str(len(data)))
+                self.send_header("Accept-Ranges", "bytes")
+                if status == 206:
+                    self.send_header("Content-Range", f"bytes {start}-{end}/{len(payload)}")
+                self.end_headers()
+                pos = 0
+                while pos < len(data):
+                    try:
+                        self.wfile.write(data[pos:pos + 32768])
+                        self.wfile.flush()
+                    except OSError:
+                        return
+                    pos += 32768
+                    time.sleep(0.008)
+
+        class ThreadedHttpsSrv(socketserver.ThreadingMixIn, http.server.HTTPServer):
+            daemon_threads = True
+
+        with tempfile.TemporaryDirectory() as td:
+            key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+            subj = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "127.0.0.1")])
+            cert = (
+                x509.CertificateBuilder()
+                .subject_name(subj).issuer_name(subj)
+                .public_key(key.public_key())
+                .serial_number(x509.random_serial_number())
+                .not_valid_before(datetime.now(timezone.utc) - timedelta(minutes=1))
+                .not_valid_after(datetime.now(timezone.utc) + timedelta(days=1))
+                .add_extension(x509.SubjectAlternativeName([x509.IPAddress(ipaddress.IPv4Address("127.0.0.1"))]), critical=False)
+                .sign(key, hashes.SHA256())
+            )
+            cert_p = os.path.join(td, "cert.pem")
+            key_p = os.path.join(td, "key.pem")
+            with open(cert_p, "wb") as f: f.write(cert.public_bytes(serialization.Encoding.PEM))
+            with open(key_p, "wb") as f: f.write(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.TraditionalOpenSSL, serialization.NoEncryption()))
+
+            srv_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            srv_ctx.load_cert_chain(certfile=cert_p, keyfile=key_p)
+            srv = ThreadedHttpsSrv(("127.0.0.1", 0), HttpsRangeHandler)
+            srv.socket = srv_ctx.wrap_socket(srv.socket, server_side=True)
+            threading.Thread(target=srv.serve_forever, daemon=True).start()
+
+            cli_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            cli_ctx.check_hostname = False
+            cli_ctx.verify_mode = ssl.CERT_NONE
+            done, errs = threading.Event(), []
+            dest = os.path.join(td, "https_out.bin")
+            try:
+                eng = TurboDownloadEngine(
+                    f"https://127.0.0.1:{srv.server_address[1]}/https_out.bin",
+                    dest, max_connections=4, ssl_context=cli_ctx,
+                    on_complete=lambda *a: done.set(),
+                    on_error=lambda e: (errs.append(e), done.set()),
+                )
+                eng.start()
+                for _ in range(3):
+                    time.sleep(0.08)
+                    eng.pause()
+                    self.assertTrue(eng.is_paused)
+                    self.assertEqual(eng.current_speed, 0.0)
+                    time.sleep(0.05)
+                    eng.resume()
+                    self.assertFalse(eng.is_paused)
+                self.assertTrue(done.wait(timeout=15.0))
+                self.assertEqual(errs, [])
+                with open(dest, "rb") as f:
+                    self.assertEqual(hashlib.sha256(f.read()).hexdigest(), expected_sha)
+            finally:
+                srv.shutdown()
+                srv.server_close()
+
+    def test_ui_speed_throttle_neon_bar_scale_and_win32_atomic_resize(self):
+        """Verifies 0.35s speed/ETA UI throttle, neon bar canvas.scale during drag, and WM_SETREDRAW lock/RedrawWindow."""
+        from faqih_downloader.ui.panels.kanban_card_graphics import draw_neon_progress_bar
+        from faqih_downloader.ui.controllers.window_resize_mixin import WindowResizeMixin
+        from faqih_downloader.ui.controllers.window_controller import WindowChromeMixin
+
+        class FakeApp(DownloadCallbacksMixin):
+            def __init__(self):
+                self.root = MagicMock()
+                self.root.winfo_exists.return_value = True
+                self.root.after.side_effect = lambda _ms, fn: fn()
+                self.engine = None
+                self.card_speed = MagicMock()
+                self.card_size = MagicMock()
+                self.card_eta = MagicMock()
+                self.card_threads = MagicMock()
+                self.update_kanban_active_stream = MagicMock()
+                self._draw_main_progress = MagicMock()
+
+        app = FakeApp()
+        with patch("faqih_downloader.ui.controllers.download_callbacks_mixin.time.monotonic", side_effect=[10.0, 10.1, 10.4]):
+            app._engine_progress_cb(100, 1000, 1024 * 1024, "00:00:10", 2)
+            first_spd = app.card_speed.configure.call_args.kwargs["text"]
+            app._engine_progress_cb(200, 1000, 5 * 1024 * 1024, "00:00:02", 2)
+            throttled_spd = app.card_speed.configure.call_args.kwargs["text"]
+            self.assertEqual(throttled_spd, first_spd)
+            app._engine_progress_cb(400, 1000, 5 * 1024 * 1024, "00:00:02", 2)
+            updated_spd = app.card_speed.configure.call_args.kwargs["text"]
+            self.assertEqual(updated_spd, "5.00 MB/s")
+
+        root = tk.Tk()
+        try:
+            cv_prog = tk.Canvas(root, width=160, height=6)
+            cv_prog.pack()
+            root.update()
+            draw_neon_progress_bar(cv_prog, 0.5)
+            cv_prog._last_prog_w = 160
+            root._is_resizing_window = True
+            with patch.object(cv_prog, "winfo_width", return_value=320), \
+                 patch.object(cv_prog, "scale", wraps=cv_prog.scale) as mock_scale, \
+                 patch.object(cv_prog, "delete", wraps=cv_prog.delete) as mock_del:
+                draw_neon_progress_bar(cv_prog, 0.5)
+                mock_scale.assert_called_once_with("all", 0, 0, 2.0, 1.0)
+                mock_del.assert_not_called()
+                self.assertEqual(cv_prog._last_prog_w, 320)
+
+            class AtomicResizeDummy(WindowChromeMixin, WindowResizeMixin):
+                def __init__(self, r, vcv):
+                    self.root = r
+                    self.vault_cards_canvas = vcv
+                    self.width, self.height = 850, 650
+
+            vcv = MagicMock()
+            vcv.winfo_exists.return_value = True
+            vcv.winfo_width.return_value = 300
+            vcv._win_id = 42
+            rd = AtomicResizeDummy(root, vcv)
+            with patch("faqih_downloader.ui.controllers.window_resize_mixin.IS_WINDOWS", True), \
+                 patch("faqih_downloader.ui.controllers.window_resize_mixin.is_test_environment", return_value=False), \
+                 patch("ctypes.windll.user32.GetParent", return_value=777), \
+                 patch("ctypes.windll.user32.SendMessageW") as mock_sm, \
+                 patch("ctypes.windll.user32.RedrawWindow") as mock_rw:
+                rd._apply_resize_geometry(920, 680, 10, 10)
+                self.assertEqual(mock_sm.call_args_list[0].args, (777, 0x000B, 0, 0))
+                self.assertEqual(mock_sm.call_args_list[1].args, (777, 0x000B, 1, 0))
+                vcv.itemconfigure.assert_called_once_with(42, width=300)
+                mock_rw.assert_called_once_with(777, None, None, 0x0581)
+        finally:
+            try: root.destroy()
+            except Exception: pass
 
 
 if __name__ == "__main__":

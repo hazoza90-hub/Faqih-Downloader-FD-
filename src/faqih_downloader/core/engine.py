@@ -320,25 +320,24 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
 
     def _abort_active_conns(self, force: bool = True):
         with self._lock:
-            for conn in self._active_connections:
-                self._close_conn_safely(conn)
+            for conn in list(self._active_connections):
+                sock = getattr(conn, "sock", None) or getattr(getattr(conn, "_conn", None), "sock", None)
+                if not isinstance(sock, ssl.SSLSocket): self._close_conn_safely(conn)
             self._active_connections.clear()
         self._drain_conn_pool()
 
     def pause(self):
-        """Pauses all active chunk downloads and aborts active sockets immediately."""
+        """Pauses all active chunk downloads and signals workers to exit cleanly."""
         if not self.is_running or self.is_paused: return
         with self._lock:
-            self.is_paused = True
-            self._pause_event.set()
-            if getattr(self, "_progress_emit_lock", None) is None:
-                self._progress_emit_lock = threading.RLock()
+            self.is_paused = True; self._pause_event.set()
+            if getattr(self, "_progress_emit_lock", None) is None: self._progress_emit_lock = threading.RLock()
             if self._last_active_start_mono is not None:
                 self._accumulated_active_sec += max(0.0, time.monotonic() - self._last_active_start_mono)
                 self._last_active_start_mono = None
             self.current_speed = 0.0
             if hasattr(self, "_speed_samples"): self._speed_samples.clear()
-        self._abort_active_conns(force=True)
+        self._abort_active_conns_on_pause()
         with self._lock:
             dl_bytes = sum(c.downloaded_bytes for c in self.chunks)
             self.last_downloaded_bytes = self._last_speed_bytes = dl_bytes
