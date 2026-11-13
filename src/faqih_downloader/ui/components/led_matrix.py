@@ -146,7 +146,7 @@ class LedEqualizerMatrix:
                         levels[i] = 1.0
                         statuses[i] = "completed"
                     elif st in ("active", "downloading"):
-                        levels[i] = max(0.08, min(1.0, pct))
+                        levels[i] = pct
                         statuses[i] = "active"
                     else:
                         levels[i] = pct
@@ -178,7 +178,7 @@ class LedEqualizerMatrix:
                         levels[b] = 1.0
                         statuses[b] = "completed"
                     elif b_has_active[b]:
-                        levels[b] = max(0.08, min(1.0, pct))
+                        levels[b] = pct
                         statuses[b] = "active"
                     else:
                         levels[b] = pct
@@ -246,6 +246,8 @@ class LedEqualizerMatrix:
             inner_h = max(0.0, lane_h - 2 * pad)
             inner_w = max(0.0, lane_w - 2 * pad)
             fill_h = max(0.0, min(inner_h, level * inner_h))
+            if level > 0 and inner_h > 0:
+                fill_h = max(3.0, fill_h)
 
             if fill_h > 0 and inner_w > 0:
                 fy1 = y1 - pad
@@ -283,7 +285,7 @@ class LedEqualizerMatrix:
 
             # Lane percentage text when n <= 8 and lane_w >= 26
             if n <= 8 and lane_w >= 26:
-                txt = f"{int(round(level * 100))}%" if level > 0 else f"#{i+1}"
+                txt = f"{int(round(level * 100))}%" if (level > 0 or status == "active") else f"#{i+1}"
                 self.canvas.create_text(
                     (x0 + x1) / 2.0,
                     (y0 + y1) / 2.0,

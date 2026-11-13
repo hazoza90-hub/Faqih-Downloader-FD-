@@ -216,12 +216,20 @@ class TestPreviewReopenAndNetworkStability(unittest.TestCase):
             self.assertEqual(chunk.status, "completed")
             self.assertEqual(chunk.downloaded_bytes, total_test_size)
 
-            # 2. Sequential windows were requested:
-            expected_w1 = f"bytes=0-{GOOGLEVIDEO_WINDOW_BYTES - 1}"
-            expected_w2 = f"bytes={GOOGLEVIDEO_WINDOW_BYTES}-{2 * GOOGLEVIDEO_WINDOW_BYTES - 1}"
-            expected_w3 = f"bytes={2 * GOOGLEVIDEO_WINDOW_BYTES}-{total_test_size - 1}"
-
-            self.assertEqual(ranges_requested, [expected_w1, expected_w2, expected_w3])
+            # 2. Sequential contiguous jittered windows covering [0 .. total_test_size - 1]
+            self.assertGreaterEqual(len(ranges_requested), 3)
+            cursor = 0
+            min_win = int(GOOGLEVIDEO_WINDOW_BYTES * 0.95)
+            for idx, r_hdr in enumerate(ranges_requested):
+                s_str, e_str = r_hdr.replace("bytes=", "").split("-")
+                s_val, e_val = int(s_str), int(e_str)
+                self.assertEqual(s_val, cursor)
+                win_len = e_val - s_val + 1
+                if idx < len(ranges_requested) - 1:
+                    self.assertGreaterEqual(win_len, min_win)
+                    self.assertLessEqual(win_len, GOOGLEVIDEO_WINDOW_BYTES)
+                cursor = e_val + 1
+            self.assertEqual(cursor, total_test_size)
         finally:
             if os.path.exists(chunk.part_filepath):
                 try: os.remove(chunk.part_filepath)

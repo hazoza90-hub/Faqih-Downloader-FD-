@@ -229,32 +229,49 @@ class TestYouTubeResolver(unittest.TestCase):
             YouTubeResolver.merge_video_audio("nonexistent_v.mp4", "nonexistent_a.m4a", "out.mp4")
 
     def test_extract_format_options_ydl_opts_socket_timeout_and_extractor_args(self):
-        """Verifies extract_format_options configures socket_timeout and does not pass restrictive extractor_args."""
+        """Verifies extract_format_options sets player_client priority and avoids injecting Cookie into googlevideo URLs."""
         with patch("yt_dlp.YoutubeDL") as MockYDL:
             instance = MockYDL.return_value.__enter__.return_value
+            gv_web_url = "https://rr1---sn-4g5e6nzz.googlevideo.com/videoplayback?c=WEB&itag=137"
+            gv_vr_url = "https://rr1---sn-4g5e6nzz.googlevideo.com/videoplayback?c=ANDROID_VR&itag=137"
+            gv_aud_url = "https://rr1---sn-4g5e6nzz.googlevideo.com/videoplayback?c=ANDROID_VR&itag=140"
+            instance.cookiejar = MagicMock()
+            instance.cookiejar.get_cookie_header.return_value = "SID=abc; HSID=xyz"
             instance.extract_info.return_value = {
                 "id": "GTNypvv2Nbg",
                 "title": "Test Video",
+                "cookies": "SID=abc; HSID=xyz",
                 "formats": [
                     {
-                        "format_id": "18",
-                        "ext": "mp4",
-                        "height": 360,
-                        "vcodec": "avc1",
-                        "acodec": "mp4a",
-                        "protocol": "https",
-                        "url": "https://example.com/video.mp4"
-                    }
+                        "format_id": "137-web", "ext": "mp4", "height": 1080, "fps": 30,
+                        "filesize": 99_000_000, "vcodec": "avc1", "acodec": "none",
+                        "protocol": "https", "url": gv_web_url, "http_headers": {},
+                    },
+                    {
+                        "format_id": "137-vr", "ext": "mp4", "height": 1080, "fps": 30,
+                        "filesize": 55_000_000, "vcodec": "avc1", "acodec": "none",
+                        "protocol": "https", "url": gv_vr_url, "http_headers": {"User-Agent": "AndroidVR/1.0"},
+                    },
+                    {
+                        "format_id": "140-vr", "ext": "m4a", "abr": 128,
+                        "filesize": 5_000_000, "vcodec": "none", "acodec": "mp4a",
+                        "protocol": "https", "url": gv_aud_url, "http_headers": {"User-Agent": "AndroidVR/1.0"},
+                    },
                 ]
             }
 
             resolver = YouTubeResolver()
-            info, options = resolver.extract_format_options("https://youtu.be/GTNypvv2Nbg")
+            with patch("faqih_downloader.services.youtube_format_builder.has_ffmpeg", return_value=True):
+                info, options = resolver.extract_format_options("https://youtu.be/GTNypvv2Nbg")
 
             MockYDL.assert_called_once()
             passed_opts = MockYDL.call_args[0][0]
             self.assertIn(passed_opts.get("socket_timeout"), (8, 12))
-            self.assertNotIn("extractor_args", passed_opts)
+            self.assertEqual(passed_opts.get("extractor_args"), {"youtube": {"player_client": ["android_vr", "ios", "web"]}})
+            opt_1080 = next(o for o in options if o.height == 1080)
+            self.assertEqual(opt_1080.video_url, gv_vr_url)
+            self.assertNotIn("Cookie", opt_1080.video_headers)
+            self.assertNotIn("cookie", opt_1080.video_headers)
 
     def test_extract_format_options_null_entries_handling(self):
         """Verifies extract_format_options raises a clean RuntimeError if entries contains None."""

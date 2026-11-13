@@ -72,8 +72,11 @@ def create_empty_state(
     cv._icon_id = cv._title_id = cv._sub_id = None
 
     def _render():
-        w = max(100, cv._last_size[0] if cv._last_size else cv.winfo_width())
-        h = max(60, cv._last_size[1] if cv._last_size else cv.winfo_height())
+        real_w = cv.winfo_width() if cv.winfo_width() > 10 else (cv._last_size[0] if cv._last_size else 240)
+        real_h = cv.winfo_height() if cv.winfo_height() > 10 else (cv._last_size[1] if cv._last_size else height)
+        w = max(100, real_w)
+        h = max(60, real_h)
+        cv._last_size = (w, h)
         cv._fast_rect = None
         cv.delete("all")
 
@@ -96,6 +99,8 @@ def create_empty_state(
             return
         w = event.width if (event and getattr(event, "width", 0) > 10) else cv.winfo_width()
         h = event.height if (event and getattr(event, "height", 0) > 10) else cv.winfo_height()
+        if w <= 10 or h <= 10:
+            return
         if (w, h) == getattr(cv, "_last_size", None):
             return
         cv._last_size = (w, h)
@@ -122,6 +127,9 @@ def create_empty_state(
             _render()
 
     cv.bind("<Configure>", _draw)
+    cv.bind("<Map>", lambda _e: _draw(), add="+")
+    try: cv.after_idle(_render)
+    except Exception: pass
     return cv
 
 

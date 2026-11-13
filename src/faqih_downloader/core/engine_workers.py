@@ -4,6 +4,7 @@ EngineWorkersMixin: Background worker thread pooling and dynamic chunk splitting
 import os
 import re
 import time
+import random
 import http.client
 import urllib.request
 import urllib.error
@@ -16,7 +17,7 @@ from .engine_resumer import EngineResumerMixin, _build_window_url, _is_urlopen_m
 from ..utils.url_utils import parse_filename_from_cd_header
 
 
-GOOGLEVIDEO_WINDOW_BYTES = 2 * 1024 * 1024  # 2 MB fast burst window with keep-alive reuse
+GOOGLEVIDEO_WINDOW_BYTES = 10 * 1024 * 1024  # 10 MB window matching yt-dlp & anti-throttle range
 
 
 class _KeepAliveResponseWrapper:
@@ -161,9 +162,11 @@ class EngineWorkersMixin(EngineResumerMixin):
                         return
 
                     if self.supports_ranges and self.total_size > 0:
-                        req_end = min(target_end, cur_offset + GOOGLEVIDEO_WINDOW_BYTES - 1) if (is_gv and (target_end - cur_offset + 1) > GOOGLEVIDEO_WINDOW_BYTES) else target_end
-                    else:
-                        req_end = None
+                        if is_gv and (target_end - cur_offset + 1) > GOOGLEVIDEO_WINDOW_BYTES:
+                            win_sz = random.randint(int(GOOGLEVIDEO_WINDOW_BYTES * 0.95), GOOGLEVIDEO_WINDOW_BYTES)
+                            req_end = min(target_end, cur_offset + win_sz - 1)
+                        else: req_end = target_end
+                    else: req_end = None
 
                     end_str = f"{req_end:,}" if req_end is not None else "end"
                     self.log(f"Connection #{chunk.chunk_id} (Attempt {retry_count+1}): Byte range [{cur_offset:,} - {end_str}]")
@@ -179,11 +182,10 @@ class EngineWorkersMixin(EngineResumerMixin):
                             req.add_header("Range", f"bytes={cur_offset}-{req_end}")
                         resp = urllib.request.urlopen(req, timeout=15, context=self.ssl_context)
                     else:
-                        hdrs = {
-                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0.0.0",
-                            "Connection": "keep-alive",
-                            "Accept-Encoding": "identity",
-                        }
+                        has_ua = any(k.lower() == "user-agent" for k in self.headers)
+                        hdrs = {"Connection": "keep-alive", "Accept-Encoding": "identity"}
+                        if not has_ua:
+                            hdrs["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0.0.0"
                         for hk, hv in self.headers.items():
                             if not (is_gv and hk.lower() == "range"):
                                 hdrs[hk] = hv

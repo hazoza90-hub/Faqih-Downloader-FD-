@@ -3,16 +3,12 @@ WindowResizeMixin: 8-edge & corner resizing grips and border drag handlers for f
 """
 from __future__ import annotations
 
-import ctypes
 from typing import Any
 
 try:
     import tkinter as tk
 except Exception:
     tk = None  # type: ignore
-
-from faqih_downloader.config import is_test_environment
-from faqih_downloader.services import IS_WINDOWS
 
 
 class WindowResizeMixin:
@@ -139,43 +135,21 @@ class WindowResizeMixin:
             return
         self._last_resize_geo = (w, h, x, y)
         geo = self._format_geometry(w, h, x, y)
-        hwnd, user32 = 0, None
-        if IS_WINDOWS and not is_test_environment():
+        self.root.geometry(geo)
+        v_cv = getattr(self, "vault_cards_canvas", None)
+        if v_cv is not None:
             try:
-                user32 = ctypes.windll.user32
-                wid = self.root.winfo_id()
-                hwnd = user32.GetParent(wid) or wid
-            except Exception:
-                hwnd = 0
-        if hwnd and user32 is not None:
-            try:
-                user32.SendMessageW(hwnd, 0x000B, 0, 0)
-            except Exception:
-                hwnd = 0
-        try:
-            self.root.geometry(geo)
-            try:
-                self.root.update_idletasks()
+                if v_cv.winfo_exists():
+                    cv_w = v_cv.winfo_width()
+                    win_id = getattr(v_cv, "_win_id", None)
+                    if cv_w > 10 and win_id is not None:
+                        v_cv.itemconfigure(win_id, width=cv_w)
             except Exception:
                 pass
-            v_cv = getattr(self, "vault_cards_canvas", None)
-            if v_cv is not None:
-                try:
-                    if v_cv.winfo_exists():
-                        cv_w = v_cv.winfo_width()
-                        win_id = getattr(v_cv, "_win_id", None)
-                        if cv_w > 10 and win_id is not None:
-                            v_cv.itemconfigure(win_id, width=cv_w)
-                            self.root.update_idletasks()
-                except Exception:
-                    pass
-        finally:
-            if hwnd and user32 is not None:
-                try:
-                    user32.SendMessageW(hwnd, 0x000B, 1, 0)
-                    user32.RedrawWindow(hwnd, None, None, 0x0581)
-                except Exception:
-                    pass
+        try:
+            self.root.update_idletasks()
+        except Exception:
+            pass
         self._normal_geometry = geo
         self.width, self.height = w, h
 

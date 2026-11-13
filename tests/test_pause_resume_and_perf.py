@@ -542,7 +542,8 @@ class TestLivePauseResumeAndPerf(unittest.TestCase):
                 eng.start()
                 self.assertTrue(done.wait(timeout=10.0))
                 self.assertEqual(errs, [])
-                self.assertEqual(counts["reqs"], 9)
+                self.assertGreaterEqual(counts["reqs"], 9)
+                self.assertLessEqual(counts["reqs"], 10)
                 self.assertEqual(counts["accepts"], 2)
                 with open(dest, "rb") as f:
                     self.assertEqual(hashlib.sha256(f.read()).hexdigest(), expected_sha)
@@ -1172,20 +1173,17 @@ class TestLivePauseResumeAndPerf(unittest.TestCase):
             vcv.winfo_width.return_value = 300
             vcv._win_id = 42
             rd = AtomicResizeDummy(root, vcv)
-            with patch("faqih_downloader.ui.controllers.window_resize_mixin.IS_WINDOWS", True), \
-                 patch("faqih_downloader.ui.controllers.window_resize_mixin.is_test_environment", return_value=False), \
-                 patch("ctypes.windll.user32.GetParent", return_value=777), \
-                 patch("ctypes.windll.user32.SendMessageW") as mock_sm, \
-                 patch("ctypes.windll.user32.RedrawWindow") as mock_rw:
+            with patch.object(root, "geometry", wraps=root.geometry) as mock_geo, \
+                 patch.object(root, "update_idletasks", wraps=root.update_idletasks) as mock_uit:
                 rd._apply_resize_geometry(920, 680, 10, 10)
-                self.assertEqual(mock_sm.call_args_list[0].args, (777, 0x000B, 0, 0))
-                self.assertEqual(mock_sm.call_args_list[1].args, (777, 0x000B, 1, 0))
+                mock_geo.assert_called_once_with("920x680+10+10")
                 vcv.itemconfigure.assert_called_once_with(42, width=300)
-                mock_rw.assert_called_once_with(777, None, None, 0x0581)
+                mock_uit.assert_called_once()
 
             # Verify create_empty_state updates synchronously during drag via _fast_rect + coords without after()/delete()
             empty_cv = create_empty_state(root, "⏳", "Empty", "Waiting")
             root.update()
+            self.assertGreaterEqual(empty_cv._last_size[0], 100)
             root._is_resizing_window = True
             with patch.object(empty_cv, "after") as mock_after:
                 root.geometry("600x680")
@@ -1199,12 +1197,51 @@ class TestLivePauseResumeAndPerf(unittest.TestCase):
                     mock_emp_del.assert_not_called()
                     self.assertGreaterEqual(mock_emp_coords.call_count, 4)
 
+            # Verify LedEqualizerMatrix stores true 1% level without clamping to 8%
+            from faqih_downloader.ui.components.led_matrix import LedEqualizerMatrix
+            led_m = LedEqualizerMatrix(root, height=40)
+            led_m.pack(fill=tk.X)
+            root.update()
+            c_1pct = DownloadChunk(0, 0, 9999, downloaded_bytes=100, status="active")
+            with patch.object(led_m.canvas, "create_text", wraps=led_m.canvas.create_text) as mock_ct:
+                led_m.update_from_chunks([c_1pct], active_count=1, is_active=True, max_lanes=1)
+                self.assertAlmostEqual(led_m._levels[0], 0.01, places=4)
+                self.assertTrue(any(kw.get("text") == "1%" for _, kw in mock_ct.call_args_list))
+
             # Verify _on_resize_release restores empty state rounded card and neon progress bar crisp drawing
             with patch("faqih_downloader.ui.panels.kanban_card_graphics.draw_neon_progress_bar", wraps=draw_neon_progress_bar) as mock_prog_rel:
                 rd._on_resize_release()
                 self.assertFalse(root._is_resizing_window)
                 self.assertIsNone(empty_cv._fast_rect)
                 mock_prog_rel.assert_called_with(cv_prog, 0.5)
+
+            # Verify engine_workers preserves lowercase 'user-agent' without injecting Chrome UA
+            with tempfile.TemporaryDirectory() as td_ua:
+                eng_ua = TurboDownloadEngine(
+                    "https://rr1.googlevideo.com/videoplayback?id=ua",
+                    os.path.join(td_ua, "ua.bin"), max_connections=1,
+                    headers={"user-agent": "com.google.android.apps.youtube.vr.oculus/1.56"},
+                )
+                eng_ua.total_size = 5
+                eng_ua.supports_ranges = True
+                eng_ua.chunks = [DownloadChunk(0, 0, 4, downloaded_bytes=0, status="pending")]
+                eng_ua.chunks[0].part_filepath = os.path.join(td_ua, "ua.part")
+                seen_hdrs = {}
+                fake_conn = MagicMock()
+                fake_resp = MagicMock()
+                fake_resp.status = 206
+                fake_resp.read.side_effect = [b"hello", b""]
+                fake_resp.isclosed.return_value = True
+                fake_conn.getresponse.return_value = fake_resp
+                def cap_req(method, path, headers=None):
+                    seen_hdrs.update(headers or {})
+                fake_conn.request.side_effect = cap_req
+                with patch.object(eng_ua, "_acquire_pooled_conn", return_value=fake_conn), \
+                     patch("faqih_downloader.core.engine_workers._is_urlopen_mocked", return_value=False):
+                    eng_ua.is_running = True
+                    eng_ua._chunk_worker(eng_ua.chunks[0])
+                self.assertNotIn("User-Agent", seen_hdrs)
+                self.assertEqual(seen_hdrs.get("user-agent"), "com.google.android.apps.youtube.vr.oculus/1.56")
         finally:
             try: root.destroy()
             except Exception: pass

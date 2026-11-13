@@ -92,7 +92,15 @@ class YouTubeFormatBuilderMixin:
         if not formats:
             return []
 
-        # Fix missing / zero heights by inferring from width or resolution string
+        # Fix missing / zero heights by inferring from width or resolution string; preserve yt-dlp order
+        ydl_idx_map = {id(f): idx for idx, f in enumerate(formats)}
+        def _client_tier(f: Dict[str, Any]) -> int:
+            m_c = re.search(r'[?&]c=([^&]+)', str(f.get("url") or ""), re.IGNORECASE)
+            if not m_c: return 1
+            cv = m_c.group(1).upper()
+            if cv.startswith("ANDROID") or cv == "IOS": return 2
+            return 0 if cv in ("WEB", "MWEB", "WEB_REMIX", "WEB_CREATOR") else 1
+
         for f in formats:
             h = int(f.get("height") or 0)
             w = int(f.get("width") or 0)
@@ -117,11 +125,11 @@ class YouTubeFormatBuilderMixin:
         ]
 
         def _audio_rank(f):
-            # Prioritize original / default language audio tracks over dubs
+            # Prioritize original / default language tracks and unthrottled clients over dubs/web
             lang_pref = float(f.get("language_preference") or 0.0)
             abr = float(f.get("abr") or f.get("tbr") or 0.0)
             is_m4a = 1 if (f.get("ext") or "").lower() in ("m4a", "mp4") else 0
-            return (lang_pref, is_m4a, abr)
+            return (lang_pref, _client_tier(f), is_m4a, abr, -ydl_idx_map.get(id(f), 0))
 
         sorted_audios = sorted(audio_only_formats, key=_audio_rank, reverse=True)
         best_audio = sorted_audios[0] if sorted_audios else None
@@ -198,12 +206,13 @@ class YouTubeFormatBuilderMixin:
                 base += f" {fps}fps"
             return base
 
-        # Helper to rank video-only streams for a given height
+        # Helper to rank video-only streams for a given height (unthrottled client > mp4 > fps > pref/size > yt-dlp order)
         def _video_rank(f):
             is_mp4 = 1 if (f.get("ext") or "").lower() == "mp4" else 0
             fps = int(f.get("fps") or 30)
+            pref = float(f.get("preference") or f.get("quality") or 0.0)
             size = _estimate_size(f)
-            return (is_mp4, fps, size)
+            return (_client_tier(f), is_mp4, fps, pref, size, -ydl_idx_map.get(id(f), 0))
 
         # Build options for each resolution height descending
         for h in sorted(all_heights, reverse=True):
@@ -244,7 +253,8 @@ class YouTubeFormatBuilderMixin:
             if p_matches:
                 def _prog_rank(f):
                     is_mp4 = 1 if (f.get("ext") or "").lower() == "mp4" else 0
-                    return (is_mp4, _estimate_size(f))
+                    pref = float(f.get("preference") or f.get("quality") or 0.0)
+                    return (_client_tier(f), is_mp4, pref, _estimate_size(f), -ydl_idx_map.get(id(f), 0))
 
                 best_p = sorted(p_matches, key=_prog_rank, reverse=True)[0]
                 p_size = _estimate_size(best_p)

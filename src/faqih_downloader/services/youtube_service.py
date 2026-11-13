@@ -51,7 +51,7 @@ class YouTubeResolver(YouTubeFormatBuilderMixin):
             "nocheckcertificate": True, "noplaylist": True, "extract_flat": False,
             "socket_timeout": min(self.socket_timeout, 8),
             "youtube_include_dash_manifest": True, "youtube_include_hls_manifest": False,
-            "check_formats": False,
+            "check_formats": False, "extractor_args": {"youtube": {"player_client": ["android_vr", "ios", "web"]}},
         }
         if cookiefile and os.path.isfile(cookiefile): opts["cookiefile"] = cookiefile
         if browser and browser.lower() not in ("none", "auto", "off", ""):
@@ -430,6 +430,7 @@ class YouTubeResolver(YouTubeFormatBuilderMixin):
             if platform == "TikTok": headers.setdefault("Referer", "https://www.tiktok.com/")
             if "Cookie" in headers or "cookie" in headers: continue
             fmt_url = f.get("url") or ""
+            if "googlevideo.com" in fmt_url.lower(): continue
             c_val = ""
             if cookiejar and fmt_url and hasattr(cookiejar, "get_cookie_header"):
                 try: c_val = cookiejar.get_cookie_header(fmt_url) or ""
