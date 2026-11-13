@@ -1,7 +1,7 @@
 """
 EngineWorkersMixin: Background worker thread pooling and dynamic chunk splitting.
 """
-import os, re, time
+import os, re, time, socket
 import http.client
 import urllib.request
 import urllib.error
@@ -14,18 +14,25 @@ from .engine_resumer import EngineResumerMixin, _build_window_url, _is_urlopen_m
 from ..utils.url_utils import parse_filename_from_cd_header
 
 
-GOOGLEVIDEO_WINDOW_BYTES = 1 * 1024 * 1024  # 1 MB Initial Burst window with &range= query param + keep-alive reuse
+GOOGLEVIDEO_WINDOW_BYTES = 4 * 1024 * 1024  # 4 MB fast window with &range= query param + keep-alive reuse
+
+
+def _configure_fast_socket(conn: Any) -> None:
+    """Applies 1s timeout, TCP_NODELAY, SO_KEEPALIVE, and 1MB SO_RCVBUF for jitter resilience."""
+    sock = getattr(conn, "sock", None)
+    if sock is None: return
+    try: sock.settimeout(1.0)
+    except Exception: pass
+    for lvl, opt, val in ((socket.IPPROTO_TCP, socket.TCP_NODELAY, 1), (socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1), (socket.SOL_SOCKET, socket.SO_RCVBUF, 1048576)):
+        try: sock.setsockopt(lvl, opt, val)
+        except Exception: pass
 
 
 class _KeepAliveResponseWrapper:
-    """Wraps an http.client.HTTPResponse for fast read1() TLS batching and safe pause exit."""
+    """Wraps an http.client.HTTPResponse for jitter-resilient read1() streaming and safe pause exit."""
     def __init__(self, raw_resp: Any, conn: Any, pause_event: Any = None, cancel_event: Any = None):
-        self._resp = raw_resp
-        self._conn = conn
-        self._pause_event = pause_event
-        self._cancel_event = cancel_event
-        self._owner_tid = threading.get_ident()
-        self._reading = False
+        self._resp, self._conn, self._pause_event, self._cancel_event = raw_resp, conn, pause_event, cancel_event
+        self._owner_tid, self._reading = threading.get_ident(), False
         self.status = getattr(raw_resp, "status", 200)
         self.headers = getattr(raw_resp, "headers", {})
         self.will_close = getattr(raw_resp, "will_close", False)
@@ -33,27 +40,29 @@ class _KeepAliveResponseWrapper:
     def getcode(self) -> int:
         return self.status
 
-    def read(self, amt: int = -1) -> bytes:
+    def _aborted(self) -> bool:
+        return bool((self._pause_event is not None and self._pause_event.is_set()) or (self._cancel_event is not None and self._cancel_event.is_set()))
+
+    def read(self, amt: Optional[int] = None) -> bytes:
+        if self._aborted():
+            return b""
         self._reading = True
         self._owner_tid = threading.get_ident()
         try:
-            if amt > 0 and hasattr(type(self._resp), "read1") and not hasattr(self._resp, "_mock_name"):
-                chunks = []
-                got = 0
-                while got < amt:
-                    if (self._pause_event is not None and self._pause_event.is_set()) or (self._cancel_event is not None and self._cancel_event.is_set()):
-                        break
-                    piece = self._resp.read1(min(65536, amt - got))
-                    if not piece:
-                        break
-                    chunks.append(piece)
-                    got += len(piece)
-                    if getattr(self._resp, "length", None) == 0:
-                        break
-                if getattr(self._resp, "length", None) == 0 and not self._resp.isclosed() and hasattr(self._resp, "_close_conn"):
-                    try: self._resp._close_conn()
-                    except Exception: pass
-                return b"".join(chunks) if len(chunks) != 1 else chunks[0]
+            if amt is not None and hasattr(self._resp, "read1") and not hasattr(self._resp, "_mock_name"):
+                read_sz = min(65536, amt) if amt > 0 else 65536
+                for _ in range(15):
+                    if self._aborted(): return b""
+                    try:
+                        piece = self._resp.read1(read_sz)
+                        if getattr(self._resp, "length", None) == 0 and not self._resp.isclosed() and hasattr(self._resp, "_close_conn"):
+                            try: self._resp._close_conn()
+                            except Exception: pass
+                        return piece
+                    except (socket.timeout, TimeoutError):
+                        if hasattr(self._resp, "_mock_name") or _is_urlopen_mocked(): raise
+                        continue
+                raise socket.timeout("Socket read timed out after 15s")
             return self._resp.read(amt)
         finally:
             self._reading = False
@@ -130,7 +139,7 @@ class EngineWorkersMixin(EngineResumerMixin):
 
     def _chunk_worker(self, chunk: DownloadChunk):
         """Worker thread with persistent Keep-Alive connection, fast burst windows, and file streaming."""
-        max_retries = 8
+        max_retries = 15
         retry_count = 0
         win_rn = 0
         is_gv = getattr(self, "is_googlevideo", False)
@@ -191,41 +200,29 @@ class EngineWorkersMixin(EngineResumerMixin):
                         if self.supports_ranges and self.total_size > 0 and req_end is not None and not is_gv:
                             hdrs["Range"] = f"bytes={cur_offset}-{req_end}"
 
-                        p = urllib.parse.urlsplit(win_url)
-                        scheme, host = p.scheme or "http", p.hostname or "localhost"
-                        port = p.port or (443 if scheme == "https" else 80)
-                        path_q = (p.path or "/") + (f"?{p.query}" if p.query else "")
+                        def _split_target(u: str):
+                            u_p = urllib.parse.urlsplit(u)
+                            sch, hst = u_p.scheme or "http", u_p.hostname or "localhost"
+                            return u_p, sch, hst, u_p.port or (443 if sch == "https" else 80), (u_p.path or "/") + (f"?{u_p.query}" if u_p.query else "")
 
+                        p, scheme, host, port, path_q = _split_target(win_url)
                         if conn is not None and conn_key != (scheme, host, port):
-                            self._close_conn_safely(conn)
-                            conn = None
+                            self._close_conn_safely(conn); conn = None
 
                         raw_resp = None
                         for send_attempt in range(2):
                             if conn is None:
-                                conn = self._acquire_pooled_conn((scheme, host, port))
-                                if conn is not None:
-                                    conn_key = (scheme, host, port)
-                            if conn is None:
-                                conn = http.client.HTTPSConnection(host, port, timeout=15, context=self.ssl_context) if scheme == "https" else http.client.HTTPConnection(host, port, timeout=15)
+                                conn = self._acquire_pooled_conn((scheme, host, port)) or (http.client.HTTPSConnection(host, port, timeout=15, context=self.ssl_context) if scheme == "https" else http.client.HTTPConnection(host, port, timeout=15))
                                 conn_key = (scheme, host, port)
                             with self._lock:
-                                if conn not in self._active_connections:
-                                    self._active_connections.append(conn)
-                            req_h = dict(hdrs, Host=p.netloc)
+                                if conn not in self._active_connections: self._active_connections.append(conn)
                             try:
-                                conn.request("GET", path_q, headers=req_h)
+                                conn.request("GET", path_q, headers=dict(hdrs, Host=p.netloc))
                                 raw_resp = conn.getresponse()
-                                if getattr(conn, "sock", None) is not None and hasattr(conn.sock, "settimeout"):
-                                    conn.sock.settimeout(2.0)
+                                _configure_fast_socket(conn)
                                 break
                             except (http.client.HTTPException, ConnectionError, OSError):
-                                with self._lock:
-                                    if conn in self._active_connections:
-                                        self._active_connections.remove(conn)
-                                try: conn.close()
-                                except Exception: pass
-                                conn = None
+                                self._cleanup_worker_conns(None, conn); conn = None
                                 if send_attempt == 1 or self._is_stopped() or self._pause_event.is_set(): raise
 
                         redir_count = 0
@@ -236,28 +233,17 @@ class EngineWorkersMixin(EngineResumerMixin):
                             try: raw_resp.read()
                             except Exception: pass
                             if conn:
-                                with self._lock:
-                                    if conn in self._active_connections:
-                                        self._active_connections.remove(conn)
-                                try: conn.close()
-                                except Exception: pass
-                                conn = None
+                                self._cleanup_worker_conns(None, conn); conn = None
                             current_url = urllib.parse.urljoin(current_url, loc)
                             is_gv = is_gv or self.is_googlevideo_url(current_url)
-                            win_url = _build_window_url(current_url, cur_offset, req_end, is_gv, req_num=(win_rn if is_gv else None))
-                            p = urllib.parse.urlsplit(win_url)
-                            scheme, host = p.scheme or "http", p.hostname or "localhost"
-                            port = p.port or (443 if scheme == "https" else 80)
-                            path_q = (p.path or "/") + (f"?{p.query}" if p.query else "")
+                            win_url = _build_window_url(current_url, cur_offset, req_end, is_gv, req_num=req_num)
+                            p, scheme, host, port, path_q = _split_target(win_url)
                             conn = http.client.HTTPSConnection(host, port, timeout=15, context=self.ssl_context) if scheme == "https" else http.client.HTTPConnection(host, port, timeout=15)
                             conn_key = (scheme, host, port)
-                            with self._lock:
-                                self._active_connections.append(conn)
-                            r_hdrs = {k: v for k, v in hdrs.items() if not (is_gv and k.lower() == "range")}
-                            conn.request("GET", path_q, headers=dict(r_hdrs, Host=p.netloc))
+                            with self._lock: self._active_connections.append(conn)
+                            conn.request("GET", path_q, headers=dict({k: v for k, v in hdrs.items() if not (is_gv and k.lower() == "range")}, Host=p.netloc))
                             raw_resp = conn.getresponse()
-                            if getattr(conn, "sock", None) is not None and hasattr(conn.sock, "settimeout"):
-                                conn.sock.settimeout(2.0)
+                            _configure_fast_socket(conn)
 
                         resp = _KeepAliveResponseWrapper(raw_resp, conn, self._pause_event, self._cancel_event)
 
@@ -403,7 +389,7 @@ class EngineWorkersMixin(EngineResumerMixin):
                 if self._error_abort_event.is_set(): break
                 retry_count = 0 if seg_bytes_read >= 65536 else (max(0, retry_count - 1) if seg_bytes_read > 0 else retry_count)
                 retry_count += 1; chunk.retry_count = retry_count
-                backoff = min(4.0, 0.8 * (1.4 ** min(retry_count, 5)))
+                backoff = min(1.5, 0.25 * (1.3 ** min(retry_count, 5)))
                 self.log(f"Connection #{chunk.chunk_id} error: {e}. Retry {retry_count}/{max_retries} in {backoff:.1f}s...")
                 t_end = time.time() + backoff
                 while time.time() < t_end and not self._is_stopped() and not self._pause_event.is_set():

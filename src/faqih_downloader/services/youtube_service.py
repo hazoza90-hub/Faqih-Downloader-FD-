@@ -312,14 +312,19 @@ class YouTubeResolver(YouTubeFormatBuilderMixin):
         except ImportError:
             raise RuntimeError("yt-dlp Python package is required. Install with 'pip install yt-dlp'.")
 
-        if self.cookies_file and os.path.isfile(self.cookies_file):
-            ydl_opts = self._build_ydl_opts(cookiefile=self.cookies_file)
-        elif self.cookies_from_browser and self.cookies_from_browser.lower() not in ("none", "auto", "off", ""):
-            ydl_opts = self._build_ydl_opts(browser=self.cookies_from_browser)
-        else:
-            ydl_opts = self._build_ydl_opts()
-
+        has_cfile = bool(self.cookies_file and os.path.isfile(self.cookies_file))
+        has_cbrowser = bool(self.cookies_from_browser and self.cookies_from_browser.lower() not in ("none", "auto", "off", ""))
+        is_yt = is_youtube_url(url)
+        cookie_opts = self._build_ydl_opts(cookiefile=self.cookies_file) if has_cfile else (self._build_ydl_opts(browser=self.cookies_from_browser) if has_cbrowser else None)
+        ydl_opts = self._build_ydl_opts() if (is_yt or cookie_opts is None) else cookie_opts
         info, ydl, tried_tiktok_direct = None, None, False
+        _auth_kws = (
+            "sign in", "confirm your age", "private", "login", "log in", "account",
+            "permission", "403", "401", "forbidden", "cookie", "restricted", "member",
+            "bot", "authenticate", "unauthorized", "unavailable", "checkpoint", "not available",
+            "unexpected response", "webpage request", "unable to extract", "status code",
+            "10204", "challenge", "captcha", "slardar"
+        )
 
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as active_ydl:
@@ -327,30 +332,24 @@ class YouTubeResolver(YouTubeFormatBuilderMixin):
                 ydl = active_ydl
         except Exception as e:
             err_str = str(e).lower()
-            is_auth_error = any(kw in err_str for kw in (
-                "sign in", "confirm your age", "private", "login", "log in", "account",
-                "permission", "403", "401", "forbidden", "cookie", "restricted", "member",
-                "bot", "authenticate", "unauthorized", "unavailable", "checkpoint", "not available",
-                "unexpected response", "webpage request", "unable to extract", "status code",
-                "10204", "challenge", "captcha", "slardar"
-            ))
+            is_auth_error = any(kw in err_str for kw in _auth_kws)
 
             if platform == "TikTok" and not tried_tiktok_direct:
                 self.log(f"[{tag}] yt-dlp extraction failed ({e}). Attempting direct TikTok extraction...")
                 info = self._extract_tiktok_direct(url)
                 tried_tiktok_direct = True
 
-            if not info and self.cookies_from_browser and self.cookies_from_browser.lower() not in ("none", "auto", "off", "") and not (self.cookies_file and os.path.isfile(self.cookies_file)):
-                self.log(f"[{tag}] Cookie extraction from browser '{self.cookies_from_browser}' failed ({e}). Falling back without cookies...")
+            retry_opts = cookie_opts if (is_yt and cookie_opts is not None) else (self._build_ydl_opts() if (not is_yt and has_cbrowser and not has_cfile) else None)
+            if not info and retry_opts is not None:
+                self.log(f"[{tag}] Initial extraction failed ({e}). Retrying {'with cookies' if is_yt else 'without cookies'}...")
                 try:
-                    fallback_opts = self._build_ydl_opts()
-                    with yt_dlp.YoutubeDL(fallback_opts) as fb_ydl:
+                    with yt_dlp.YoutubeDL(retry_opts) as fb_ydl:
                         info = fb_ydl.extract_info(url, download=False)
                         ydl = fb_ydl
                 except Exception as fb_err:
-                    self.log(f"[{tag}] Unauthenticated fallback also failed: {fb_err}")
+                    self.log(f"[{tag}] Fallback extraction failed: {fb_err}")
                     info = None
-                    if any(kw in str(fb_err).lower() for kw in ("sign in", "confirm your age", "private", "login", "log in", "account", "permission", "403", "401", "forbidden", "cookie", "restricted")):
+                    if any(kw in str(fb_err).lower() for kw in _auth_kws):
                         is_auth_error = True
 
             if not info and is_auth_error:

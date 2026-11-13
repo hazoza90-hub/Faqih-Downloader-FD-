@@ -674,7 +674,7 @@ class TestBrowserCookiesAndMP3Extraction(unittest.TestCase):
             with patch("youtube_resolver.detect_installed_cookie_browsers", return_value=["chrome", "edge"]):
                 info, options = resolver.extract_format_options("https://www.youtube.com/watch?v=GTNypvv2Nbg")
 
-                self.assertEqual(call_trace, ["chrome", "none", "edge"])
+                self.assertEqual(call_trace, ["none", "chrome", "edge"])
                 self.assertEqual(info["id"], "restricted_vid_explicit")
                 self.assertGreater(len(options), 0)
 

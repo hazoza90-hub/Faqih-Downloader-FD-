@@ -160,7 +160,9 @@ class WindowResizeMixin:
                 except Exception:
                     pass
             try:
+                self.root.update_idletasks()
                 self.root.update()
+                self.root.update_idletasks()
             except Exception:
                 pass
             if IS_WINDOWS and not is_test_environment():
@@ -169,13 +171,20 @@ class WindowResizeMixin:
                     hwnd = user32.GetParent(self.root.winfo_id()) or self.root.winfo_id()
                     if hwnd:
                         user32.RedrawWindow(hwnd, None, None, 0x0585)
-                        self.root.update_idletasks()
+                        self.root.update()
                 except Exception:
                     pass
             self._normal_geometry = geo
             self.width, self.height = w, h
         finally:
             self._in_resize_update = False
+            pending = getattr(self, "_pending_resize_geo", None)
+            if pending and pending != getattr(self, "_last_resize_geo", None) and getattr(self, "_resize_flush_job", None) is None:
+                if hasattr(self, "root") and self.root:
+                    try:
+                        self._resize_flush_job = self.root.after(14, self._flush_pending_resize)
+                    except Exception:
+                        pass
 
     def _flush_pending_resize(self):
         self._resize_flush_job = None
@@ -344,7 +353,7 @@ class WindowResizeMixin:
                 hwnd = user32.GetParent(self.root.winfo_id()) or self.root.winfo_id()
                 if hwnd:
                     user32.RedrawWindow(hwnd, None, None, 0x0585)
-                    self.root.update_idletasks()
+                    self.root.update()
             except Exception:
                 pass
 

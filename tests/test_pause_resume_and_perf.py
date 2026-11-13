@@ -1211,12 +1211,12 @@ class TestLivePauseResumeAndPerf(unittest.TestCase):
                  patch("ctypes.windll.user32.RedrawWindow", side_effect=lambda *a: order.append(f"rw_{a[3]:04x}")) as mock_rw:
                 rd._apply_resize_geometry(920, 680, 10, 10)
                 mock_geo.assert_called_once_with("920x680+10+10")
-                mock_upd.assert_called_once()
+                self.assertEqual(mock_upd.call_count, 2)
                 vcv.itemconfigure.assert_called_once_with(42, width=300)
-                self.assertEqual(mock_uit.call_count, 2)
+                self.assertEqual(mock_uit.call_count, 3)
                 mock_rw.assert_called_once_with(777, None, None, 0x0585)
                 self.assertFalse(rd._in_resize_update)
-                self.assertEqual(order, ["geo", "uit", "vcv_w", "vcv_cfg", "upd", "rw_0585", "uit"])
+                self.assertEqual(order, ["geo", "uit", "vcv_w", "vcv_cfg", "uit", "upd", "uit", "rw_0585", "upd"])
 
             # Verify _on_resize_drag re-entrancy guard stores _pending_resize_geo and returns 'break'
             rd._resize_state = {"mode": "se", "x_root": 100, "y_root": 100, "win_x": 10, "win_y": 10, "win_w": 920, "win_h": 680}
@@ -1269,6 +1269,25 @@ class TestLivePauseResumeAndPerf(unittest.TestCase):
                 self.assertGreaterEqual(len(mock_rw_rel.call_args_list), 1)
                 self.assertEqual(mock_rw_rel.call_args_list[-1].args, (777, None, None, 0x0585))
                 self.assertGreaterEqual(mock_upd_rel.call_count, 1)
+
+            # Verify _KeepAliveResponseWrapper.read survives transient socket.timeout and streams single read1 chunks immediately
+            import socket, faqih_downloader.core.engine_workers as ew
+            class FakeRawResp:
+                status, headers, will_close, length = 200, {}, False, 5
+                def __init__(self): self.calls, self.seq = [], [socket.timeout("jitter1"), TimeoutError("jitter2"), b"hello"]
+                def read1(self, n):
+                    self.calls.append(n)
+                    nxt = self.seq.pop(0)
+                    if isinstance(nxt, BaseException): raise nxt
+                    return nxt
+                def isclosed(self): return False
+                def _close_conn(self): pass
+            raw_r = FakeRawResp()
+            with patch("faqih_downloader.core.engine_workers._is_urlopen_mocked", return_value=False):
+                wrapper = ew._KeepAliveResponseWrapper(raw_r, None, threading.Event(), threading.Event())
+                out = wrapper.read(262144)
+                self.assertEqual(out, b"hello")
+                self.assertEqual(raw_r.calls, [65536, 65536, 65536])
 
             # Verify engine_workers preserves lowercase 'user-agent' without injecting Chrome UA
             with tempfile.TemporaryDirectory() as td_ua:

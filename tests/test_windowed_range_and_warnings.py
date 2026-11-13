@@ -1176,10 +1176,10 @@ class TestWindowedRangeAndWarnings(unittest.TestCase):
         self.assertTrue(res_op)
 
     def test_googlevideo_window_bytes_constant(self):
-        """Verifies GOOGLEVIDEO_WINDOW_BYTES is 1 MB Initial Burst window and _build_window_url sets range= and rn=."""
+        """Verifies GOOGLEVIDEO_WINDOW_BYTES is 4 MB window and _build_window_url sets range= and rn=."""
         from faqih_downloader.core.engine_workers import GOOGLEVIDEO_WINDOW_BYTES
         from faqih_downloader.core.engine_resumer import _build_window_url
-        self.assertEqual(GOOGLEVIDEO_WINDOW_BYTES, 1 * 1024 * 1024)
+        self.assertEqual(GOOGLEVIDEO_WINDOW_BYTES, 4 * 1024 * 1024)
         self.assertEqual(
             _build_window_url("https://rr1.googlevideo.com/videoplayback?id=1&range=0-1023", 0, 1023, True, req_num=2),
             "https://rr1.googlevideo.com/videoplayback?id=1&range=0-1023&rn=2",
