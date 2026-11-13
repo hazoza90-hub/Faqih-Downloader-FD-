@@ -3,12 +3,16 @@ WindowResizeMixin: 8-edge & corner resizing grips and border drag handlers for f
 """
 from __future__ import annotations
 
+import ctypes
 from typing import Any
 
 try:
     import tkinter as tk
 except Exception:
     tk = None  # type: ignore
+
+from faqih_downloader.config import is_test_environment
+from faqih_downloader.services import IS_WINDOWS
 
 
 class WindowResizeMixin:
@@ -159,6 +163,15 @@ class WindowResizeMixin:
                 self.root.update_idletasks()
             except Exception:
                 pass
+            if IS_WINDOWS and not is_test_environment():
+                try:
+                    user32 = ctypes.windll.user32
+                    hwnd = user32.GetParent(self.root.winfo_id()) or self.root.winfo_id()
+                    if hwnd:
+                        user32.RedrawWindow(hwnd, None, None, 0x0185)
+                        self.root.update()
+                except Exception:
+                    pass
             self._normal_geometry = geo
             self.width, self.height = w, h
         finally:
@@ -322,6 +335,16 @@ class WindowResizeMixin:
                 self.vault_cards_canvas.configure(scrollregion=self.vault_cards_canvas.bbox("all"))
         except Exception:
             pass
+
+        if IS_WINDOWS and not is_test_environment():
+            try:
+                user32 = ctypes.windll.user32
+                hwnd = user32.GetParent(self.root.winfo_id()) or self.root.winfo_id()
+                if hwnd:
+                    user32.RedrawWindow(hwnd, None, None, 0x0585)
+                    self.root.update()
+            except Exception:
+                pass
 
         if hasattr(self, "_resize_state"):
             self._resize_state.clear()

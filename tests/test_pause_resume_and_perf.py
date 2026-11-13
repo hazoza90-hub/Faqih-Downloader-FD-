@@ -489,6 +489,7 @@ class TestLivePauseResumeAndPerf(unittest.TestCase):
         expected_sha = hashlib.sha256(payload).hexdigest()
         counts = {"accepts": 0, "reqs": 0}
         paths = []
+        range_headers = []
         cnt_lock = threading.Lock()
 
         class CountingSrv(socketserver.ThreadingMixIn, http.server.HTTPServer):
@@ -511,11 +512,16 @@ class TestLivePauseResumeAndPerf(unittest.TestCase):
                 self.send_header("Accept-Ranges", "bytes")
                 self.end_headers()
             def do_GET(self):
+                rng_hdr = self.headers.get("Range")
                 with cnt_lock:
                     counts["reqs"] += 1
                     paths.append(self.path)
+                    range_headers.append(rng_hdr)
                 s, e = 0, len(payload) - 1
-                if "range=" in self.path:
+                if rng_hdr and rng_hdr.startswith("bytes="):
+                    s_s, e_s = rng_hdr.replace("bytes=", "").split("-", 1)
+                    s, e = int(s_s), int(e_s)
+                elif "range=" in self.path:
                     r = self.path.split("range=")[1].split("&")[0]
                     s_s, e_s = r.split("-")
                     s, e = int(s_s), int(e_s)
@@ -536,7 +542,7 @@ class TestLivePauseResumeAndPerf(unittest.TestCase):
                 done = threading.Event()
                 errs = []
                 eng = TurboDownloadEngine(
-                    f"http://127.0.0.1:{srv.server_address[1]}/videoplayback?id=ka",
+                    f"http://127.0.0.1:{srv.server_address[1]}/videoplayback?id=ka&range=0-100",
                     dest, max_connections=1,
                     on_complete=lambda *a: done.set(),
                     on_error=lambda e: (errs.append(e), done.set()),
@@ -544,11 +550,11 @@ class TestLivePauseResumeAndPerf(unittest.TestCase):
                 eng.start()
                 self.assertTrue(done.wait(timeout=10.0))
                 self.assertEqual(errs, [])
-                self.assertGreaterEqual(counts["reqs"], 9)
-                self.assertLessEqual(counts["reqs"], 10)
-                self.assertEqual(counts["accepts"], counts["reqs"])
-                self.assertEqual(len(eng._conn_pool), 0)
-                self.assertTrue(all(f"rn={i}" in p for i, p in enumerate(paths, 1)))
+                self.assertEqual(counts["reqs"], 9)
+                self.assertEqual(counts["accepts"], 2)
+                self.assertEqual(len(range_headers), 8)
+                self.assertTrue(all(h and h.startswith("bytes=") for h in range_headers))
+                self.assertTrue(all("range=" not in p and "rn=" not in p for p in paths))
                 with open(dest, "rb") as f:
                     self.assertEqual(hashlib.sha256(f.read()).hexdigest(), expected_sha)
         finally:
@@ -1198,14 +1204,19 @@ class TestLivePauseResumeAndPerf(unittest.TestCase):
             rd = AtomicResizeDummy(root, vcv)
             with patch.object(root, "geometry", side_effect=lambda g: order.append("geo")) as mock_geo, \
                  patch.object(root, "update", side_effect=lambda: order.append("upd")) as mock_upd, \
-                 patch.object(root, "update_idletasks", side_effect=lambda: order.append("uit")) as mock_uit:
+                 patch.object(root, "update_idletasks", side_effect=lambda: order.append("uit")) as mock_uit, \
+                 patch("faqih_downloader.ui.controllers.window_resize_mixin.IS_WINDOWS", True), \
+                 patch("faqih_downloader.ui.controllers.window_resize_mixin.is_test_environment", return_value=False), \
+                 patch("ctypes.windll.user32.GetParent", return_value=777), \
+                 patch("ctypes.windll.user32.RedrawWindow", side_effect=lambda *a: order.append(f"rw_{a[3]:04x}")) as mock_rw:
                 rd._apply_resize_geometry(920, 680, 10, 10)
                 mock_geo.assert_called_once_with("920x680+10+10")
-                mock_upd.assert_called_once()
+                self.assertEqual(mock_upd.call_count, 2)
                 vcv.itemconfigure.assert_called_once_with(42, width=300)
                 mock_uit.assert_called_once()
+                mock_rw.assert_called_once_with(777, None, None, 0x0185)
                 self.assertFalse(rd._in_resize_update)
-                self.assertEqual(order, ["geo", "upd", "vcv_w", "vcv_cfg", "uit"])
+                self.assertEqual(order, ["geo", "upd", "vcv_w", "vcv_cfg", "uit", "rw_0185", "upd"])
 
             # Verify _on_resize_drag re-entrancy guard stores _pending_resize_geo and returns 'break'
             rd._resize_state = {"mode": "se", "x_root": 100, "y_root": 100, "win_x": 10, "win_y": 10, "win_w": 920, "win_h": 680}
@@ -1244,12 +1255,20 @@ class TestLivePauseResumeAndPerf(unittest.TestCase):
                 self.assertAlmostEqual(led_m._levels[0], 0.01, places=4)
                 self.assertTrue(any(kw.get("text") == "1%" for _, kw in mock_ct.call_args_list))
 
-            # Verify _on_resize_release restores empty state rounded card and neon progress bar crisp drawing
-            with patch("faqih_downloader.ui.panels.kanban_card_graphics.draw_neon_progress_bar", wraps=draw_neon_progress_bar) as mock_prog_rel:
+            # Verify _on_resize_release restores empty state rounded card, neon progress bar, and Win32 0x0585 flush
+            with patch("faqih_downloader.ui.panels.kanban_card_graphics.draw_neon_progress_bar", wraps=draw_neon_progress_bar) as mock_prog_rel, \
+                 patch("faqih_downloader.ui.controllers.window_resize_mixin.IS_WINDOWS", True), \
+                 patch("faqih_downloader.ui.controllers.window_resize_mixin.is_test_environment", return_value=False), \
+                 patch("ctypes.windll.user32.GetParent", return_value=777), \
+                 patch("ctypes.windll.user32.RedrawWindow") as mock_rw_rel, \
+                 patch.object(root, "update", wraps=root.update) as mock_upd_rel:
                 rd._on_resize_release()
                 self.assertFalse(root._is_resizing_window)
                 self.assertIsNone(empty_cv._fast_rect)
                 mock_prog_rel.assert_called_with(cv_prog, 0.5)
+                self.assertGreaterEqual(len(mock_rw_rel.call_args_list), 1)
+                self.assertEqual(mock_rw_rel.call_args_list[-1].args, (777, None, None, 0x0585))
+                self.assertGreaterEqual(mock_upd_rel.call_count, 1)
 
             # Verify engine_workers preserves lowercase 'user-agent' without injecting Chrome UA
             with tempfile.TemporaryDirectory() as td_ua:

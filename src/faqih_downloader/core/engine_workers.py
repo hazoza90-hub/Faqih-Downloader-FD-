@@ -1,7 +1,7 @@
 """
 EngineWorkersMixin: Background worker thread pooling and dynamic chunk splitting.
 """
-import os, re, time, random
+import os, re, time
 import http.client
 import urllib.request
 import urllib.error
@@ -14,7 +14,7 @@ from .engine_resumer import EngineResumerMixin, _build_window_url, _is_urlopen_m
 from ..utils.url_utils import parse_filename_from_cd_header
 
 
-GOOGLEVIDEO_WINDOW_BYTES = 4 * 1024 * 1024  # 4 MB window inside per-socket CDN initial burst quota
+GOOGLEVIDEO_WINDOW_BYTES = 2 * 1024 * 1024  # 2 MB fast burst window with HTTP Range headers + keep-alive reuse
 
 
 class _KeepAliveResponseWrapper:
@@ -159,18 +159,15 @@ class EngineWorkersMixin(EngineResumerMixin):
                         return
 
                     if self.supports_ranges and self.total_size > 0:
-                        if is_gv and (target_end - cur_offset + 1) > GOOGLEVIDEO_WINDOW_BYTES:
-                            win_sz = random.randint(int(GOOGLEVIDEO_WINDOW_BYTES * 0.95), GOOGLEVIDEO_WINDOW_BYTES)
-                            req_end = min(target_end, cur_offset + win_sz - 1)
-                        else: req_end = target_end
-                    else: req_end = None
+                        req_end = min(target_end, cur_offset + GOOGLEVIDEO_WINDOW_BYTES - 1) if (is_gv and (target_end - cur_offset + 1) > GOOGLEVIDEO_WINDOW_BYTES) else target_end
+                    else:
+                        req_end = None
 
                     end_str = f"{req_end:,}" if req_end is not None else "end"
                     self.log(f"Connection #{chunk.chunk_id} (Attempt {retry_count+1}): Byte range [{cur_offset:,} - {end_str}]")
                     if self.on_chunk_update: self.on_chunk_update()
 
-                    rn_val = self._next_gv_rn() if is_gv else None
-                    win_url = _build_window_url(current_url, cur_offset, req_end, is_gv, req_num=rn_val)
+                    win_url = _build_window_url(current_url, cur_offset, req_end, is_gv)
                     expected_seg_bytes = (req_end - cur_offset + 1) if (req_end is not None) else None
                     seg_bytes_read = 0
 
@@ -185,9 +182,9 @@ class EngineWorkersMixin(EngineResumerMixin):
                         if not has_ua:
                             hdrs["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0.0.0"
                         for hk, hv in self.headers.items():
-                            if not (is_gv and hk.lower() == "range"):
+                            if hk.lower() != "range":
                                 hdrs[hk] = hv
-                        if self.supports_ranges and self.total_size > 0 and req_end is not None and not is_gv:
+                        if self.supports_ranges and self.total_size > 0 and req_end is not None:
                             hdrs["Range"] = f"bytes={cur_offset}-{req_end}"
 
                         p = urllib.parse.urlsplit(win_url)
@@ -243,7 +240,7 @@ class EngineWorkersMixin(EngineResumerMixin):
                                 conn = None
                             current_url = urllib.parse.urljoin(current_url, loc)
                             is_gv = is_gv or self.is_googlevideo_url(current_url)
-                            win_url = _build_window_url(current_url, cur_offset, req_end, is_gv, req_num=(rn_val if rn_val is not None else (self._next_gv_rn() if is_gv else None)))
+                            win_url = _build_window_url(current_url, cur_offset, req_end, is_gv)
                             p = urllib.parse.urlsplit(win_url)
                             scheme, host = p.scheme or "http", p.hostname or "localhost"
                             port = p.port or (443 if scheme == "https" else 80)
@@ -351,9 +348,8 @@ class EngineWorkersMixin(EngineResumerMixin):
                             chunk_done = True
 
                     if chunk_done:
-                        if is_gv or _is_urlopen_mocked():
-                            self._cleanup_worker_conns(resp, conn if is_gv else None)
-                            resp = None; conn = None if is_gv else conn
+                        if _is_urlopen_mocked():
+                            self._cleanup_worker_conns(resp, None); resp = None
                         else:
                             seg_bytes_read = self._drain_small_tail(resp, raw_resp, seg_bytes_read, expected_seg_bytes, req_end, cur_chunk_end)
                             self._release_or_close_conn(conn, resp, raw_resp, conn_key, seg_bytes_read, expected_seg_bytes)
@@ -363,15 +359,12 @@ class EngineWorkersMixin(EngineResumerMixin):
                         return
 
                     if expected_seg_bytes is not None and seg_bytes_read >= expected_seg_bytes:
-                        if is_gv:
-                            self._cleanup_worker_conns(resp, conn); resp = conn = None
-                        else:
-                            with self._lock:
-                                if resp in self._active_connections: self._active_connections.remove(resp)
-                            if hasattr(resp, "_mock_name"): self._close_conn_safely(resp)
-                            resp = None
-                            if _is_urlopen_mocked() or not self._is_conn_reusable(conn, raw_resp, seg_bytes_read, expected_seg_bytes):
-                                self._cleanup_worker_conns(None, conn); conn = None
+                        with self._lock:
+                            if resp in self._active_connections: self._active_connections.remove(resp)
+                        if hasattr(resp, "_mock_name"): self._close_conn_safely(resp)
+                        resp = None
+                        if _is_urlopen_mocked() or not self._is_conn_reusable(conn, raw_resp, seg_bytes_read, expected_seg_bytes):
+                            self._cleanup_worker_conns(None, conn); conn = None
                         retry_count = 0; continue
 
                     if not _is_urlopen_mocked():

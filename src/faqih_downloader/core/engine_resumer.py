@@ -14,16 +14,13 @@ from typing import Optional, Dict, Tuple, Any
 from .html_resolver import validate_refresh_url
 
 
-def _build_window_url(url: str, start_byte: int, end_byte: Optional[int], is_gv: bool, req_num: Optional[int] = None) -> str:
-    """Appends or updates &range=start-end (and &rn=req_num when provided) on googlevideo URLs."""
-    if not is_gv or end_byte is None:
+def _build_window_url(url: str, start_byte: int, end_byte: Optional[int], is_gv: bool) -> str:
+    """Strips any pre-existing range= query param on googlevideo URLs so HTTP Range headers control pacing."""
+    if not is_gv or not url or "range=" not in url.lower():
         return url
-    rng = f"range={start_byte}-{end_byte}"
-    out = re.sub(r"([?&])range=[^&]*", rf"\g<1>{rng}", url) if re.search(r"([?&])range=[^&]*", url) else (f"{url}&{rng}" if "?" in url else f"{url}?{rng}")
-    if req_num is not None:
-        rn_p = f"rn={int(req_num)}"
-        out = re.sub(r"([?&])rn=[^&]*", rf"\g<1>{rn_p}", out) if re.search(r"([?&])rn=[^&]*", out) else f"{out}&{rn_p}"
-    return out
+    cleaned = re.sub(r"&range=[^&]*", "", url, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\?range=[^&]*&", "?", cleaned, flags=re.IGNORECASE)
+    return re.sub(r"\?range=[^&]*$", "", cleaned, flags=re.IGNORECASE)
 
 
 def _is_urlopen_mocked() -> bool:
@@ -40,13 +37,6 @@ def _is_ssl_socket(conn: Any) -> bool:
 
 class EngineResumerMixin:
     """Provides methods for updating download URLs, validating refreshed links, and resuming transfers."""
-
-    def _next_gv_rn(self) -> int:
-        """Returns monotonically increasing googlevideo request sequence number (&rn=N)."""
-        with self._lock:
-            n = getattr(self, "_gv_rn_counter", 0) + 1
-            self._gv_rn_counter = n
-            return n
 
     @staticmethod
     def _close_conn_safely(conn: Any):
