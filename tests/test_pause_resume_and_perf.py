@@ -224,7 +224,7 @@ class TestLivePauseResumeAndPerf(unittest.TestCase):
             mock_raw.read.assert_not_called()
             self.assertIs(eng._acquire_pooled_conn(("http", "example.com", 80)), mock_conn)
 
-            # Speed EMA calculation test over 2.0s sliding window (0.35 instant + 0.65 previous) and dt >= 0.20 gate
+            # Speed EMA calculation test over 2.5s sliding window (0.40 up / 0.22 down) and dt >= 0.20 gate
             eng.chunks = [DownloadChunk(0, 0, 9_999_999, downloaded_bytes=0, status="active")]
             emitted = []
             eng.on_progress = lambda *a: emitted.append(a)
@@ -239,7 +239,7 @@ class TestLivePauseResumeAndPerf(unittest.TestCase):
                 eng._update_progress_metrics()
 
             first_instant = 2_500_000 / 2.2
-            expected_first = 0.35 * first_instant + 0.65 * 1_000_000.0
+            expected_first = 0.40 * first_instant + 0.60 * 1_000_000.0
             self.assertAlmostEqual(eng.current_speed, expected_first, places=2)
             self.assertEqual(len(emitted), 1)
 
@@ -249,15 +249,24 @@ class TestLivePauseResumeAndPerf(unittest.TestCase):
             self.assertAlmostEqual(eng.current_speed, expected_first, places=2)
             self.assertEqual(len(emitted), 1)
 
-            # Next >= 0.20s sample (99.0 stays since 100.25 - 99.0 = 1.25 < 2.0)
+            # Next >= 0.20s sample (99.0 stays since 100.25 - 99.0 = 1.25 < 2.5)
             now2 = 100.25
             eng.chunks[0].downloaded_bytes = 2_900_000
             with patch("faqih_downloader.core.engine_workers.time.monotonic", return_value=now2):
                 eng._update_progress_metrics()
             second_instant = 2_900_000 / (100.25 - 97.8)
-            expected_second = 0.35 * second_instant + 0.65 * expected_first
+            expected_second = 0.40 * second_instant + 0.60 * expected_first
             self.assertAlmostEqual(eng.current_speed, expected_second, places=2)
             self.assertEqual(len(emitted), 2)
+
+            # Lower instant speed uses slower decay alpha=0.22 so readout stays resilient
+            now3 = 100.60
+            with patch("faqih_downloader.core.engine_workers.time.monotonic", return_value=now3):
+                eng._update_progress_metrics()
+            third_instant = 2_900_000 / (100.60 - 97.8)
+            expected_third = 0.22 * third_instant + 0.78 * expected_second
+            self.assertAlmostEqual(eng.current_speed, expected_third, places=2)
+            self.assertEqual(len(emitted), 3)
 
     def test_stream_coordinator_pause_and_resume_emit_progress(self):
         """Verifies StreamDownloadCoordinator.pause()/resume() update state and emit Paused/Downloading callbacks."""
@@ -1287,7 +1296,7 @@ class TestLivePauseResumeAndPerf(unittest.TestCase):
                 wrapper = ew._KeepAliveResponseWrapper(raw_r, None, threading.Event(), threading.Event())
                 out = wrapper.read(262144)
                 self.assertEqual(out, b"hello")
-                self.assertEqual(raw_r.calls, [65536, 65536, 65536])
+                self.assertEqual(raw_r.calls, [262144, 262144, 262144])
 
             # Verify engine_workers preserves lowercase 'user-agent' without injecting Chrome UA
             with tempfile.TemporaryDirectory() as td_ua:

@@ -50,7 +50,7 @@ class _KeepAliveResponseWrapper:
         self._owner_tid = threading.get_ident()
         try:
             if amt is not None and hasattr(self._resp, "read1") and not hasattr(self._resp, "_mock_name"):
-                read_sz = min(65536, amt) if amt > 0 else 65536
+                read_sz = min(262144, amt) if amt > 0 else 65536
                 for _ in range(15):
                     if self._aborted(): return b""
                     try:
@@ -142,6 +142,7 @@ class EngineWorkersMixin(EngineResumerMixin):
         max_retries = 15
         retry_count = 0
         win_rn = 0
+        adaptive_gv_win = 2 * 1024 * 1024
         is_gv = getattr(self, "is_googlevideo", False)
 
         while retry_count < max_retries and not self._is_stopped():
@@ -168,21 +169,24 @@ class EngineWorkersMixin(EngineResumerMixin):
                         except Exception: pass
                         return
 
+                    is_mocked = _is_urlopen_mocked()
+                    cur_gv_win = GOOGLEVIDEO_WINDOW_BYTES if (is_mocked or GOOGLEVIDEO_WINDOW_BYTES < 1024 * 1024) else adaptive_gv_win
                     if self.supports_ranges and self.total_size > 0:
-                        req_end = min(target_end, cur_offset + GOOGLEVIDEO_WINDOW_BYTES - 1) if (is_gv and (target_end - cur_offset + 1) > GOOGLEVIDEO_WINDOW_BYTES) else target_end
+                        req_end = min(target_end, cur_offset + cur_gv_win - 1) if (is_gv and (target_end - cur_offset + 1) > cur_gv_win) else target_end
                     else:
                         req_end = None
 
-                    end_str = f"{req_end:,}" if req_end is not None else "end"
-                    self.log(f"Connection #{chunk.chunk_id} (Attempt {retry_count+1}): Byte range [{cur_offset:,} - {end_str}]")
-                    if self.on_chunk_update: self.on_chunk_update()
+                    if win_rn <= 1 or retry_count > 0 or is_mocked:
+                        end_str = f"{req_end:,}" if req_end is not None else "end"
+                        self.log(f"Connection #{chunk.chunk_id} (Attempt {retry_count+1}): Byte range [{cur_offset:,} - {end_str}]")
+                        if self.on_chunk_update: self.on_chunk_update()
 
-                    is_mocked = _is_urlopen_mocked()
                     req_num = win_rn if (is_gv and not is_mocked and req_end is not None) else None
                     if req_num is not None: win_rn += 1
                     win_url = _build_window_url(current_url, cur_offset, req_end, is_gv, req_num=req_num)
                     expected_seg_bytes = (req_end - cur_offset + 1) if (req_end is not None) else None
                     seg_bytes_read = 0
+                    seg_start_mono = time.monotonic()
 
                     if is_mocked:
                         req = self._create_request(url=win_url)
@@ -350,11 +354,20 @@ class EngineWorkersMixin(EngineResumerMixin):
                         return
 
                     if expected_seg_bytes is not None and seg_bytes_read >= expected_seg_bytes:
+                        seg_dt = max(0.001, time.monotonic() - seg_start_mono)
+                        seg_speed = seg_bytes_read / seg_dt
+                        throttled_gv = False
+                        if is_gv and not is_mocked and GOOGLEVIDEO_WINDOW_BYTES >= 1024 * 1024:
+                            if seg_speed >= 450 * 1024:
+                                adaptive_gv_win = min(8 * 1024 * 1024, int(adaptive_gv_win * 1.5))
+                            elif seg_speed < 160 * 1024:
+                                adaptive_gv_win = 1572864
+                                throttled_gv = True
                         with self._lock:
                             if resp in self._active_connections: self._active_connections.remove(resp)
                         if hasattr(resp, "_mock_name"): self._close_conn_safely(resp)
                         resp = None
-                        if _is_urlopen_mocked() or not self._is_conn_reusable(conn, raw_resp, seg_bytes_read, expected_seg_bytes):
+                        if is_mocked or throttled_gv or not self._is_conn_reusable(conn, raw_resp, seg_bytes_read, expected_seg_bytes):
                             self._cleanup_worker_conns(None, conn); conn = None
                         retry_count = 0; continue
 
@@ -492,12 +505,13 @@ class EngineWorkersMixin(EngineResumerMixin):
         should_emit = (dt >= 0.20) or (self.total_size > 0 and total_downloaded >= self.total_size) or self._is_stopped()
         if dt >= 0.20:
             samples.append((now, total_downloaded))
-            while len(samples) > 2 and (now - samples[1][0]) >= 2.0:
+            while len(samples) > 2 and (now - samples[1][0]) >= 2.5:
                 samples.popleft()
             win_dt = now - samples[0][0]
             win_bytes = max(0, total_downloaded - samples[0][1])
             instant_speed = (win_bytes / win_dt) if win_dt > 0 else 0.0
-            self.current_speed = instant_speed if self.current_speed <= 0.0 else (0.35 * instant_speed + 0.65 * self.current_speed)
+            alpha = 0.40 if instant_speed >= self.current_speed else 0.22
+            self.current_speed = instant_speed if self.current_speed <= 0.0 else (alpha * instant_speed + (1.0 - alpha) * self.current_speed)
             self.last_downloaded_bytes = self._last_speed_bytes = total_downloaded
             self.last_speed_check_time = self._last_speed_time = now
 

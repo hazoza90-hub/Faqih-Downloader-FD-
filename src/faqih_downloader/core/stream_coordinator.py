@@ -454,12 +454,14 @@ class StreamDownloadCoordinator:
                 self.stream_info.video_headers, _on_v_progress, _on_v_complete, _on_v_error,
                 getattr(self.stream_info, "video_size", 0),
             )
-            a_conn = min(4, max(2, self.max_connections // 2)) if self.max_connections >= 4 else 1  # Wi-Fi safe: a_conn = 1 on single-stream
+            a_conn = min(2, max(1, self.max_connections // 2)) if self.max_connections >= 4 else 1  # Wi-Fi safe: a_conn = 1 on single-stream
             a_engine = self._make_engine(
                 self.stream_info.audio_url, audio_tmp, a_conn, (a_conn > 1),  # Wi-Fi safe: allow_dynamic_split=False when a_conn <= 1
                 self.stream_info.audio_headers, _on_a_progress, _on_a_complete, _on_a_error,
                 getattr(self.stream_info, "audio_size", 0),
             )
+            if self.rate_limit > 0:
+                a_engine.rate_limiter = v_engine.rate_limiter
 
             with self._lock:
                 self.current_engine = v_engine; self._active_engines = [v_engine, a_engine]

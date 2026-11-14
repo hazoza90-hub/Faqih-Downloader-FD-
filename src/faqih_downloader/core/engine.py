@@ -36,7 +36,7 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
         url: str,
         destination_path: str,
         max_connections: int = 8,
-        min_split_threshold: int = 256 * 1024,  # 256 KB minimum remaining to allow split
+        min_split_threshold: int = 128 * 1024,  # 128 KB minimum remaining to allow split
         rate_limit_bytes_per_sec: float = 0.0,
         ssl_context: Optional[ssl.SSLContext] = None,
         opener: Optional[urllib.request.OpenerDirector] = None,
