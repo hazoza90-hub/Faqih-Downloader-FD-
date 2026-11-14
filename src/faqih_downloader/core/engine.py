@@ -68,8 +68,8 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
         self.on_complete = on_complete
         self.on_error = on_error
 
-        self.total_size = 0
-        self.supports_ranges = False
+        self.total_size, self.supports_ranges = 0, False
+        self.expected_sha256: Optional[str] = None; self.expected_crc32: Optional[str] = None
         self.content_type: str = ""
         self.filename = os.path.basename(destination_path)
         self.temp_dir = destination_path + ".sd_parts"

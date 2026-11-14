@@ -14,7 +14,7 @@ from typing import Optional, Callable, Dict, Any, List
 from .engine import TurboDownloadEngine
 from .chunk import DownloadChunk
 from ..config import IS_WINDOWS
-from ..services.subtitle_processor import run_cancellable_ffmpeg
+from ..services.subtitle_processor import run_cancellable_ffmpeg, start_subtitle_prefetch
 from ..services.youtube_models import YouTubeStreamInfo, MediaStreamInfo, is_youtube_url
 from ..services.media_env_helpers import has_ffmpeg, find_ffmpeg_bin, run_ffmpeg_with_progress
 from ..services.media_clipper_engine import estimate_clip_total_bytes, download_clipped_stream_direct
@@ -264,11 +264,25 @@ class StreamDownloadCoordinator:
         with self._lock:
             return getattr(self.current_engine, "last_http_status", 0) if self.current_engine else 0
 
+    def _safe_remove_paths(self, *paths: str, include_part_dirs: bool = False):
+        for p in paths:
+            if p and os.path.exists(p):
+                try: os.remove(p)
+                except Exception: pass
+            if include_part_dirs and p:
+                for ext in (".sd_parts", ".tdm_parts"):
+                    if os.path.isdir(p + ext): shutil.rmtree(p + ext, ignore_errors=True)
+
+    def _start_subtitle_prefetch(self):
+        try: return start_subtitle_prefetch(self.stream_info, self.destination_path)
+        except Exception: return None
+
     def _run_coordinator(self):
         video_tmp, audio_tmp, actual_dest = "", "", ""
         is_mp3_request, has_error = False, False
         v_error, a_error = [], []
         try:
+            self._start_subtitle_prefetch()
             if float(getattr(self.stream_info, "clip_end_sec", 0.0) or 0.0) > float(getattr(self.stream_info, "clip_start_sec", 0.0) or 0.0) >= 0.0:
                 if download_clipped_stream_direct(self):
                     return
@@ -304,18 +318,13 @@ class StreamDownloadCoordinator:
                             v_dur = float(getattr(self.stream_info, "duration", 0.0) or 0.0)
                             rc, err = run_ffmpeg_with_progress(cmd, cancel_event=self._cancel_event, creationflags=cflags, total_duration=v_dur, on_progress_pct=_mp3_prog, subprocess_mod=subprocess)
                             if rc != 0: raise RuntimeError(f"FFmpeg MP3 transcoding failed: {err.strip()}")
-                            if os.path.exists(actual_dest):
-                                try: os.remove(actual_dest)
-                                except Exception: pass
+                            self._safe_remove_paths(actual_dest)
                             final_sz = os.path.getsize(self.destination_path)
                             self.log(f"[SUCCESS] Audio converted to MP3 successfully ({final_sz:,} bytes)!")
                             with self._lock: self._is_running = False
                             if self.on_complete: self.on_complete(self.destination_path, final_sz, elapsed)
                         except Exception as ex:
-                            for p in (actual_dest, self.destination_path):
-                                if os.path.exists(p):
-                                    try: os.remove(p)
-                                    except Exception: pass
+                            self._safe_remove_paths(actual_dest, self.destination_path)
                             with self._lock: self._is_running = False
                             if self.on_error: self.on_error(f"MP3 transcoding error: {ex}")
                     else:
@@ -454,7 +463,7 @@ class StreamDownloadCoordinator:
                 self.stream_info.video_headers, _on_v_progress, _on_v_complete, _on_v_error,
                 getattr(self.stream_info, "video_size", 0),
             )
-            a_conn = min(2, max(1, self.max_connections // 2)) if self.max_connections >= 4 else 1  # Wi-Fi safe: a_conn = 1 on single-stream
+            a_conn = min(2, max(1, self.max_connections))  # Wi-Fi safe: a_conn = 1 on single-stream
             a_engine = self._make_engine(
                 self.stream_info.audio_url, audio_tmp, a_conn, (a_conn > 1),  # Wi-Fi safe: allow_dynamic_split=False when a_conn <= 1
                 self.stream_info.audio_headers, _on_a_progress, _on_a_complete, _on_a_error,
@@ -524,24 +533,14 @@ class StreamDownloadCoordinator:
             with self._lock: self._is_running = False
             # Cleanly remove temporary part files on cancel or error
             if self._cancel_event.is_set() or has_error or v_error or a_error:
-                clean_targets = [p for p in (video_tmp, audio_tmp, actual_dest if is_mp3_request else "") if p]
-                for p in clean_targets:
-                    if os.path.exists(p):
-                        try: os.remove(p)
-                        except Exception: pass
-                    for ext in (".sd_parts", ".tdm_parts"):
-                        if os.path.isdir(p + ext):
-                            try: shutil.rmtree(p + ext, ignore_errors=True)
-                            except Exception: pass
+                self._safe_remove_paths(video_tmp, audio_tmp, (actual_dest if is_mp3_request else ""), include_part_dirs=True)
 
     def _process_subtitles(self, target_path: str):
         try:
             from ..services.media_clipper_engine import process_post_download_clip_and_subtitles
-            def _stage_prog(stage_name: str, pct: float, eta_str: str):
-                self._emit_stage_progress(stage_name, pct, eta_str)
             f_path = process_post_download_clip_and_subtitles(
-                self.stream_info, target_path, on_log=self.log,
-                cancel_event=self._cancel_event, on_stage_progress=_stage_prog
+                self.stream_info, target_path, on_log=self.log, cancel_event=self._cancel_event,
+                on_stage_progress=lambda st, p, eta: self._emit_stage_progress(st, p, eta),
             )
             if f_path and os.path.isfile(f_path): self.destination_path = f_path
         except Exception as e:

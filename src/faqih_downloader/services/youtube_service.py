@@ -501,26 +501,27 @@ class YouTubeResolver(YouTubeFormatBuilderMixin):
             return rc, err
 
         def _build_cmd(extra_args):
-            c = [ffmpeg_bin, "-y", "-i", video_path, "-i", audio_path, "-map", "0:v:0", "-map", "1:a:0"] + extra_args
-            if output_path.lower().endswith((".mp4", ".m4v", ".mov")): c.extend(["-movflags", "+faststart"])
-            c.append(output_path)
-            return c
+            return [ffmpeg_bin, "-y", "-i", video_path, "-i", audio_path, "-map", "0:v:0", "-map", "1:a:0"] + extra_args + [output_path]
 
         af_resync = "aresample=async=1:first_pts=0"
+        boost_af = ""
         if audio_boost:
             try:
                 from .audio_and_chapters_engine import get_studio_audio_boost_filter
-                af_resync = f"{get_studio_audio_boost_filter()},{af_resync}"
+                boost_af = get_studio_audio_boost_filter()
+                af_resync = f"{boost_af},{af_resync}"
             except Exception: pass
 
+        aac_args = ["-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-threads", "0"]
         audio_incompatible = any(e in audio_path.lower() for e in (".webm", ".opus", ".ogg")) and output_path.lower().endswith((".mp4", ".m4v"))
-        rc, primary_err = _run_proc(_build_cmd(["-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-af", af_resync])) if audio_boost else ((-1, "Incompatible container") if audio_incompatible else _run_proc(_build_cmd(["-c", "copy"])))
+        first_args = (aac_args + (["-af", boost_af] if boost_af else [])) if audio_boost else (aac_args if audio_incompatible else ["-c", "copy"])
+        rc, primary_err = _run_proc(_build_cmd(first_args))
         if cancel_event and cancel_event.is_set(): return False
 
         if rc != 0:
             for enc_args, desc in [
-                (["-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-af", af_resync], "audio transcode to AAC with timestamp resync"),
-                (["-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-b:a", "192k", "-af", af_resync], "container transcode (libx264+aac)"),
+                (aac_args + ["-af", af_resync], "audio transcode to AAC with timestamp resync"),
+                (["-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-b:a", "192k", "-threads", "0", "-af", af_resync], "container transcode (libx264+aac)"),
             ]:
                 if on_log: on_log(f"[FFMPEG] Direct copy inapplicable/failed ({rc}). Retrying with {desc}...")
                 rc, primary_err = _run_proc(_build_cmd(enc_args))

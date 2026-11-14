@@ -8,6 +8,7 @@ import sys
 import time
 import html
 import json
+import concurrent.futures
 import urllib.request
 import urllib.parse
 from typing import Dict, List, Optional, Tuple, Any
@@ -232,7 +233,7 @@ def _translate_srt_cues_via_gtx(
     for cue in cues:
         cue_text = str(cue[2] if len(cue) >= 3 else "")
         added_len = len(cue_text) + len(sep)
-        if cur_batch and (cur_len + added_len > 1500 or len(cur_batch) >= 25):
+        if cur_batch and (cur_len + added_len > 2500 or len(cur_batch) >= 40):
             batches.append(cur_batch)
             cur_batch = [cue]
             cur_len = added_len
@@ -283,7 +284,6 @@ def _translate_srt_cues_via_gtx(
     def _translate_sub_batch(sub_items: List[Tuple[float, float, str]]) -> List[Tuple[float, float, str]]:
         if not sub_items:
             return []
-        time.sleep(0.15)
         chunk = sep.join(str(c[2]) for c in sub_items)
         try:
             full_trans = _query_gtx(chunk)
@@ -302,13 +302,17 @@ def _translate_srt_cues_via_gtx(
 
         res = []
         for c in sub_items:
-            time.sleep(0.15)
             single_trans = _query_gtx(str(c[2]))
             res.append((c[0], c[1], single_trans.strip() if single_trans else c[2]))
         return res
 
-    for batch in batches:
-        translated_cues.extend(_translate_sub_batch(batch))
+    if len(batches) <= 1:
+        for batch in batches:
+            translated_cues.extend(_translate_sub_batch(batch))
+    else:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+            for batch_res in pool.map(_translate_sub_batch, batches):
+                translated_cues.extend(batch_res)
 
     return translated_cues
 
@@ -376,8 +380,10 @@ def download_subtitle_as_srt(sub_track: Dict[str, Any], video_filepath: str) -> 
         srt_content = _convert(_fetch_url_direct(u, headers))
         if srt_content: break
 
-    # Phase 2: Try browser cookies if available
-    if not srt_content:
+    has_tlang = any("tlang=" in u for u in cand_urls) or bool(sub_track.get("base_url") and sub_track.get("base_url") != primary_url)
+
+    # Phase 2: Try browser cookies if available (skip for &tlang= to jump straight to Phase 4 GTX)
+    if not srt_content and not has_tlang:
         try:
             import yt_dlp.cookies
             for b in detect_installed_cookie_browsers():
@@ -406,8 +412,8 @@ def download_subtitle_as_srt(sub_track: Dict[str, Any], video_filepath: str) -> 
                 if srt_content: break
         except Exception: pass
 
-    # Phase 3: Try yt_dlp subprocess/temporary directory if webpage_url exists
-    if not srt_content and sub_track.get("webpage_url"):
+    # Phase 3: Try yt_dlp subprocess/temporary directory if webpage_url exists (skip for &tlang=)
+    if not srt_content and not has_tlang and sub_track.get("webpage_url"):
         try:
             import tempfile, yt_dlp
             lang = sub_track.get("language") or "en"

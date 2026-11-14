@@ -8,6 +8,7 @@ import sys
 import time
 import subprocess
 import shutil
+import threading
 from typing import Dict, List, Optional, Tuple, Callable, Any
 
 from .subtitle_downloader import (
@@ -346,6 +347,34 @@ def burn_subtitle_into_video(
             except Exception: pass
 
 
+def start_subtitle_prefetch(stream_info: Any, output_path: str) -> Optional[threading.Thread]:
+    """Starts background subtitle prefetch & translation while video streams download."""
+    if not stream_info or not output_path or hasattr(stream_info, "_mock_name"):
+        return None
+    sub = getattr(stream_info, "subtitle_track", None) or getattr(stream_info, "selected_subtitle_track", None)
+    if not isinstance(sub, dict) or sub.get("sub_id") in (None, "none") or (not sub.get("url") and not sub.get("base_url")):
+        return None
+
+    def _bg():
+        try:
+            srt_p = download_subtitle_as_srt(sub, output_path)
+            if isinstance(srt_p, str) and srt_p and os.path.isfile(srt_p):
+                setattr(stream_info, "_prefetched_srt_path", srt_p)
+            sec_trk = getattr(stream_info, "secondary_subtitle_track", None)
+            if getattr(stream_info, "dual_subtitle_enabled", False) and isinstance(sec_trk, dict) and (sec_trk.get("url") or sec_trk.get("base_url")):
+                sec_target = f"{os.path.splitext(output_path)[0]}.sec.srt"
+                sec_p = download_subtitle_as_srt(sec_trk, sec_target)
+                if isinstance(sec_p, str) and sec_p and os.path.isfile(sec_p):
+                    setattr(stream_info, "_prefetched_sec_srt_path", sec_p)
+        except Exception:
+            pass
+
+    t = threading.Thread(target=_bg, daemon=True)
+    setattr(stream_info, "_subtitle_prefetch_thread", t)
+    t.start()
+    return t
+
+
 def handle_subtitles_post_download(
     stream_info: Any, output_path: str, on_log: Optional[Callable[[str], None]] = None,
     cancel_event: Optional[Any] = None,
@@ -357,9 +386,21 @@ def handle_subtitles_post_download(
     if not sub or sub.get("sub_id") in (None, "none") or (not sub.get("url") and not sub.get("base_url")) or (cancel_event and cancel_event.is_set()):
         return output_path
     try:
-        if on_log:
-            on_log(f"[SUBTITLES] Downloading subtitle track: {sub.get('label', sub.get('language', 'sub'))}...")
-        srt_path = download_subtitle_as_srt(sub, output_path)
+        if on_progress_pct is not None:
+            try: on_progress_pct(0.0, "--:--")
+            except Exception: pass
+        pf_thread = getattr(stream_info, "_subtitle_prefetch_thread", None)
+        if isinstance(pf_thread, threading.Thread) and pf_thread.is_alive():
+            pf_thread.join(timeout=15.0)
+        prefetched = getattr(stream_info, "_prefetched_srt_path", None)
+        if isinstance(prefetched, str) and prefetched and os.path.isfile(prefetched):
+            srt_path = prefetched
+            if on_log:
+                on_log(f"[SUBTITLES] Using prefetched subtitle track: {os.path.basename(srt_path)}")
+        else:
+            if on_log:
+                on_log(f"[SUBTITLES] Downloading subtitle track: {sub.get('label', sub.get('language', 'sub'))}...")
+            srt_path = download_subtitle_as_srt(sub, output_path)
         mode = getattr(stream_info, "subtitle_embed_mode", "hard_burn")
 
         if not srt_path or not os.path.isfile(srt_path) or (cancel_event and cancel_event.is_set()):
@@ -439,7 +480,11 @@ def handle_subtitles_post_download(
                 sec_trk = getattr(stream_info, "secondary_subtitle_track", None) or sc.get("secondary_track")
                 if getattr(stream_info, "dual_subtitle_enabled", False) and sec_trk and isinstance(sec_trk, dict) and (sec_trk.get("url") or sec_trk.get("base_url")):
                     sec_f = f"{orig_stem}.sec.srt"
-                    sec_srt = sec_f if os.path.isfile(sec_f) else download_subtitle_as_srt(sec_trk, sec_f)
+                    pf_sec = getattr(stream_info, "_prefetched_sec_srt_path", None)
+                    if isinstance(pf_sec, str) and pf_sec and os.path.isfile(pf_sec):
+                        sec_srt = pf_sec
+                    else:
+                        sec_srt = sec_f if os.path.isfile(sec_f) else download_subtitle_as_srt(sec_trk, sec_f)
                     if sec_srt and os.path.isfile(sec_srt): sc["secondary_srt_source"] = sec_srt
                 burn_kwargs["style_config"] = sc
             ok = burn_subtitle_into_video(output_path, srt_path, ffmpeg_bin, on_log=on_log, **burn_kwargs)

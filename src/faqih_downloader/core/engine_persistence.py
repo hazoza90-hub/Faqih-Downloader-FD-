@@ -98,10 +98,13 @@ class EnginePersistenceMixin:
                         f"Chunk #{c.chunk_id} size mismatch: disk {actual_size:,} bytes != expected {expected_size:,} bytes."
                     )
 
-        # Streamlined 256KB streaming assembly with on-the-fly zero-extra-read hashing
-        STREAM_BUFFER_SIZE = 256 * 1024
+        # High-throughput 8MB streaming assembly with conditional hashing and single-chunk zero-copy move
+        STREAM_BUFFER_SIZE = 8 * 1024 * 1024
+        has_expected_hash = bool(getattr(self, "expected_sha256", None) or getattr(self, "expected_crc32", None))
+        is_temp_file = self.destination_path.lower().endswith(".tmp")
+        need_hash = has_expected_hash or (not is_temp_file and len(sorted_chunks) > 1)
         total_written = 0
-        sha256_hash = hashlib.sha256()
+        sha256_hash = hashlib.sha256() if need_hash else None
         crc_val = 0
 
         # Ensure target directory exists
@@ -119,47 +122,57 @@ class EnginePersistenceMixin:
                         raise
                     time.sleep(0.15)
 
-        tmp_assembled = f"{self.destination_path}.assembling_{os.getpid()}_{threading.get_ident()}.tmp"
-        try:
-            with _open_with_retry(tmp_assembled, "wb") as out_f:
+        if len(sorted_chunks) == 1 and not need_hash and os.path.exists(sorted_chunks[0].part_filepath):
+            part_0 = sorted_chunks[0].part_filepath
+            total_written = os.path.getsize(part_0)
+            if self.total_size > 0 and total_written != self.total_size:
+                raise AssertionError(
+                    f"Assembly size mismatch: Written {total_written:,} bytes != expected {self.total_size:,} bytes."
+                )
+            atomic_replace_with_retry(part_0, self.destination_path)
+        else:
+            tmp_assembled = f"{self.destination_path}.assembling_{os.getpid()}_{threading.get_ident()}.tmp"
+            try:
+                with _open_with_retry(tmp_assembled, "wb") as out_f:
+                    if self.total_size > 0:
+                        try:
+                            out_f.truncate(self.total_size)
+                        except Exception:
+                            pass
+                    for c in sorted_chunks:
+                        if not os.path.exists(c.part_filepath):
+                            continue
+                        with _open_with_retry(c.part_filepath, "rb") as in_f:
+                            while True:
+                                buf = in_f.read(STREAM_BUFFER_SIZE)
+                                if not buf:
+                                    break
+                                out_f.write(buf)
+                                if need_hash:
+                                    sha256_hash.update(buf)
+                                    crc_val = zlib.crc32(buf, crc_val)
+                                total_written += len(buf)
+                    out_f.flush()
+
                 if self.total_size > 0:
+                    if not (total_written == self.total_size):
+                        raise AssertionError(
+                            f"Assembly size mismatch: Written {total_written:,} bytes != expected {self.total_size:,} bytes."
+                        )
+                atomic_replace_with_retry(tmp_assembled, self.destination_path)
+            finally:
+                if os.path.exists(tmp_assembled):
                     try:
-                        out_f.truncate(self.total_size)
+                        os.remove(tmp_assembled)
                     except Exception:
                         pass
-                for c in sorted_chunks:
-                    if not os.path.exists(c.part_filepath):
-                        continue
-                    with _open_with_retry(c.part_filepath, "rb") as in_f:
-                        while True:
-                            buf = in_f.read(STREAM_BUFFER_SIZE)
-                            if not buf:
-                                break
-                            out_f.write(buf)
-                            sha256_hash.update(buf)
-                            crc_val = zlib.crc32(buf, crc_val)
-                            total_written += len(buf)
-                out_f.flush()
-
-            if self.total_size > 0:
-                if not (total_written == self.total_size):
-                    raise AssertionError(
-                        f"Assembly size mismatch: Written {total_written:,} bytes != expected {self.total_size:,} bytes."
-                    )
-            atomic_replace_with_retry(tmp_assembled, self.destination_path)
-        finally:
-            if os.path.exists(tmp_assembled):
-                try:
-                    os.remove(tmp_assembled)
-                except Exception:
-                    pass
 
         self.log(f"Assembled and verified {total_written:,} bytes with zero corruption.")
 
-        # Post-download integrity verification (CRC-32 & SHA-256) computed on the fly without extra disk read
-        crc32_str = f"{crc_val & 0xFFFFFFFF:08x}"
-        sha256_str = sha256_hash.hexdigest()
-        self.log(f"[INTEGRITY] SHA-256: {sha256_str} | CRC-32: {crc32_str}")
+        if need_hash and sha256_hash is not None:
+            crc32_str = f"{crc_val & 0xFFFFFFFF:08x}"
+            sha256_str = sha256_hash.hexdigest()
+            self.log(f"[INTEGRITY] SHA-256: {sha256_str} | CRC-32: {crc32_str}")
 
         # Optional auto-unpack for archive files
         if get_setting("auto_unpack_archives", False):

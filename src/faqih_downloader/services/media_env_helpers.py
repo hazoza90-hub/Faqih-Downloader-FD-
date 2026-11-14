@@ -267,6 +267,8 @@ def ensure_complete_audio_file(
     cur_sz = os.path.getsize(audio_tmp) if os.path.isfile(audio_tmp) else 0
     exp_dur = float(getattr(stream_info, "duration", 0) or 0)
     exp_sz = int(getattr(stream_info, "audio_size", 0) or 0)
+    if not has_prior_error and cur_sz >= 1024 and exp_sz > 0 and cur_sz >= int(0.90 * exp_sz):
+        return True
     a_dur = probe_media_file_duration(audio_tmp) if cur_sz > 0 else 0.0
 
     is_trunc = has_prior_error or (cur_sz < 1024)
@@ -311,6 +313,7 @@ def recover_audio_stream_fallback(stream_info: Any, audio_tmp: str, on_log: Opti
             "overwrites": True,
             "quiet": True,
             "no_warnings": True,
+            "extractor_args": {"youtube": {"player_client": ["android_vr", "tv", "web"]}},
         }
         if cb:
             ydl_opts["cookiesfrombrowser"] = (cb,)
