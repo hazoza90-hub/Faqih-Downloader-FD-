@@ -92,11 +92,21 @@ class MediaOptionsActionsMixin:
             self._start_youtube_download(url, dest, max_conn=max_conn)
 
     def _resolve_final_dest(self, preferred_dest: str = "", title: str = "", opt: Any = None) -> str:
+        from faqih_downloader.utils.file_ops import resolve_categorized_path
         clean_title = sanitize_filename(title or "Video")
         first_ext = getattr(opt, "ext", "mp4") or "mp4"
         first_lbl = getattr(opt, "resolution_label", "") or ""
+        auto_cat = getattr(self, "auto_categorize_folders", True)
         base_dl = self._get_base_downloads_dir() if hasattr(self, "_get_base_downloads_dir") else get_base_downloads_dir()
-        target_dest = preferred_dest if (preferred_dest and clean_title.lower() in os.path.basename(preferred_dest).lower()) else os.path.join(base_dl, f"{clean_title}.{first_ext}")
+        if preferred_dest and clean_title.lower() in os.path.basename(preferred_dest).lower():
+            pref_dir = os.path.normcase(os.path.abspath(os.path.dirname(preferred_dest)))
+            base_norm = os.path.normcase(os.path.abspath(base_dl))
+            if auto_cat and pref_dir == base_norm:
+                target_dest = resolve_categorized_path(base_dl, os.path.basename(preferred_dest), auto_categorize=True, create_dir=False)
+            else:
+                target_dest = preferred_dest
+        else:
+            target_dest = resolve_categorized_path(base_dl, f"{clean_title}.{first_ext}", auto_categorize=auto_cat, create_dir=False)
         initial_dest = apply_media_filename_tags(target_dest, quality_label=first_lbl, is_sub_burned=False, ext=first_ext)
         reserved = self.history_manager.get_active_or_queued_paths() if getattr(self, "history_manager", None) else None
         return generate_unique_destination_path(initial_dest, reserved_paths=reserved)
@@ -110,22 +120,63 @@ class MediaOptionsActionsMixin:
         raw_title, duration = info.get("title") or "Video", int(info.get("duration") or 0)
         theme_dict = self._theme_dict() if hasattr(self, "_theme_dict") else {}
         from ...services.media_clipper_engine import clone_clean_subtitle_track
+        prev_opts = list(ctx.get("options", []) or [])
+        prev_sel = ctx.get("selected_option") or ctx.get("selected_opt")
+        sel_idx = None
+        if prev_sel is not None:
+            for idx, orig in enumerate(prev_opts):
+                if orig is prev_sel:
+                    sel_idx = idx
+                    break
+            if sel_idx is None:
+                pk = (getattr(prev_sel, "format_id", ""), getattr(prev_sel, "resolution_label", ""), getattr(prev_sel, "ext", ""))
+                for idx, orig in enumerate(prev_opts):
+                    if (getattr(orig, "format_id", ""), getattr(orig, "resolution_label", ""), getattr(orig, "ext", "")) == pk:
+                        sel_idx = idx
+                        break
+        ext_tracks = []
+        for src in (
+            ctx.get("external_subtitle_tracks"),
+            getattr(prev_sel, "external_subtitle_tracks", None) if prev_sel is not None else None,
+            next((getattr(o, "external_subtitle_tracks", None) for o in prev_opts if getattr(o, "external_subtitle_tracks", None)), None),
+            getattr(self, "_main_external_subtitle_tracks", None),
+        ):
+            if isinstance(src, list) and src:
+                ext_tracks = [dict(t) for t in src if isinstance(t, dict)]
+                break
+
         options = []
-        for o in ctx.get("options", []):
+        for o in prev_opts:
             opt = copy.copy(o)
             opt.clip_start_sec, opt.clip_end_sec = 0.0, 0.0
             opt.selected_chapter_title, opt.dual_subtitle_enabled = "", False
             opt.subtitle_custom_edits, opt.audio_boost_enabled = {}, False
             opt.audio_volume_percent = 100
+            opt.external_subtitle_tracks = [dict(t) for t in ext_tracks]
+            if prev_sel is not None:
+                if getattr(opt, "selected_audio_track", None) is None:
+                    opt.selected_audio_track = getattr(prev_sel, "selected_audio_track", None)
+                if getattr(opt, "selected_subtitle_track", None) is None:
+                    opt.selected_subtitle_track = getattr(prev_sel, "selected_subtitle_track", None)
+                if getattr(prev_sel, "subtitle_embed_mode", None):
+                    opt.subtitle_embed_mode = getattr(prev_sel, "subtitle_embed_mode", opt.subtitle_embed_mode)
+                if getattr(prev_sel, "subtitle_position", None):
+                    opt.subtitle_position = getattr(prev_sel, "subtitle_position", opt.subtitle_position)
+                if getattr(prev_sel, "concurrent_fragments", None):
+                    opt.concurrent_fragments = getattr(prev_sel, "concurrent_fragments", opt.concurrent_fragments)
             options.append(opt)
         clean_subs = [clone_clean_subtitle_track(t) for t in ctx.get("subtitle_tracks", []) if isinstance(t, dict)]
-        first_opt = options[0] if options else None
-        dest = self._resolve_final_dest(preferred_dest or ctx.get("preferred_dest", ""), raw_title, first_opt)
+        sel_opt = options[sel_idx] if (sel_idx is not None and 0 <= sel_idx < len(options)) else (options[0] if options else None)
+        pref_arg = preferred_dest or ctx.get("final_dest", "") or ctx.get("preferred_dest", "")
+        dest = self._resolve_final_dest(pref_arg, raw_title, sel_opt)
 
         ctx["options"] = options
         ctx["subtitle_tracks"] = clean_subs
         ctx["final_dest"] = dest
-        if options: ctx["selected_option"] = options[0]
+        ctx["external_subtitle_tracks"] = [dict(t) for t in ext_tracks]
+        if sel_opt is not None:
+            ctx["selected_option"] = sel_opt
+            ctx["selected_opt"] = sel_opt
         self._pending_media_context = ctx
         resolver = ctx.get("resolver") or (YouTubeResolver(on_log=self.log, cookies_from_browser=getattr(self, "cookies_browser", "auto"), cookies_file=getattr(self, "cookies_file", "")) if hasattr(self, "log") else None)
 
@@ -191,7 +242,8 @@ class MediaOptionsActionsMixin:
             parent=self.root, video_title=raw_title, duration=duration, options=options, default_dest_path=dest,
             theme=theme_dict, on_confirm=_on_confirm, on_cancel=_on_cancel,
             on_open_in_main=_on_open_in_main, parent_app=self, audio_tracks=ctx.get("audio_tracks", []),
-            subtitle_tracks=ctx.get("subtitle_tracks", []), video_url=ctx.get("url", ""), raw_info=info
+            subtitle_tracks=ctx.get("subtitle_tracks", []), video_url=ctx.get("url", ""), raw_info=info,
+            initial_option=sel_opt
         )
         try:
             self._quality_modal.lift()

@@ -121,6 +121,7 @@ class MediaOptionsBarMixin(MediaOptionsActionsMixin):
         if not hasattr(self, "media_options_frame"):
             return
 
+        ctx_dict = {}
         if isinstance(info, dict) and ("options" in info or "selected_opt" in info or "selected_option" in info):
             ctx_dict = info
             info = ctx_dict.get("info") or ctx_dict.get("stream_info") or {}
@@ -147,6 +148,18 @@ class MediaOptionsBarMixin(MediaOptionsActionsMixin):
 
         media_url = url or (self.entry_url.get().strip() if hasattr(self, "entry_url") else "")
         final_dest = dest or (self.entry_dest.get().strip() if hasattr(self, "entry_dest") else "")
+        old_ctx = getattr(self, "_pending_media_context", None)
+        ext_src = kwargs.get("external_subtitle_tracks")
+        if ext_src is None:
+            ext_src = ctx_dict.get("external_subtitle_tracks") or getattr(sel_opt, "external_subtitle_tracks", None)
+        if not ext_src:
+            ext_src = next((getattr(o, "external_subtitle_tracks", None) for o in (self._main_media_options or []) if getattr(o, "external_subtitle_tracks", None)), None)
+        if not ext_src and isinstance(old_ctx, dict) and (not media_url or old_ctx.get("url") == media_url):
+            ext_src = old_ctx.get("external_subtitle_tracks") or getattr(self, "_main_external_subtitle_tracks", None)
+        prev_ext = [dict(t) for t in (ext_src or []) if isinstance(t, dict)]
+        for o in ((self._main_media_options or []) + ([sel_opt] if sel_opt is not None else [])):
+            try: o.external_subtitle_tracks = [dict(t) for t in prev_ext]
+            except Exception: pass
         self._pending_media_context = {
             "url": media_url,
             "info": info or {},
@@ -155,6 +168,7 @@ class MediaOptionsBarMixin(MediaOptionsActionsMixin):
             "subtitle_tracks": self._main_subtitle_tracks,
             "selected_option": sel_opt,
             "selected_opt": sel_opt,
+            "external_subtitle_tracks": prev_ext,
             "resolver": resolver,
             "final_dest": final_dest
         }
@@ -324,7 +338,9 @@ class MediaOptionsBarMixin(MediaOptionsActionsMixin):
         ctx["selected_option"] = opt
         ctx["selected_opt"] = opt
         ext_sel = [dict(t) for t in (getattr(self, "_main_external_subtitle_tracks", []) or []) if isinstance(t, dict)]
-        if opt: opt.external_subtitle_tracks = ext_sel
+        for o in (list(ctx.get("options") or []) + list(getattr(self, "_main_media_options", []) or []) + ([opt] if opt else [])):
+            try: o.external_subtitle_tracks = [dict(t) for t in ext_sel]
+            except Exception: pass
         ctx["external_subtitle_tracks"] = ext_sel
         if opts and hasattr(self, "cb_main_quality"):
             from faqih_downloader.services.media_clipper_engine import estimate_clip_total_bytes
@@ -356,6 +372,7 @@ class MediaOptionsBarMixin(MediaOptionsActionsMixin):
         for it in staged:
             if it.get("url") == u:
                 it["selected_opt"] = opt
+                it["external_subtitle_tracks"] = [dict(t) for t in ext_sel]
                 it["final_dest"] = ctx.get("final_dest", "") or cur_dest
                 if isinstance(it.get("media_context"), dict):
                     it["media_context"]["selected_option"] = opt
@@ -363,7 +380,10 @@ class MediaOptionsBarMixin(MediaOptionsActionsMixin):
                     it["media_context"]["selected_audio_track"] = getattr(opt, "selected_audio_track", None)
                     it["media_context"]["selected_subtitle_track"] = getattr(opt, "selected_subtitle_track", None)
                     it["media_context"]["subtitle_embed_mode"] = sub_mode
-                    it["media_context"]["external_subtitle_tracks"] = ext_sel
+                    it["media_context"]["external_subtitle_tracks"] = [dict(t) for t in ext_sel]
+                    for mo in (it["media_context"].get("options") or []):
+                        try: mo.external_subtitle_tracks = [dict(t) for t in ext_sel]
+                        except Exception: pass
         try:
             from faqih_downloader.ui.panels.kanban_staged_prober import stage_media_option_in_col1
             raw_title = ctx.get("raw_title") or (ctx.get("info", {}).get("title") if isinstance(ctx.get("info"), dict) else "")

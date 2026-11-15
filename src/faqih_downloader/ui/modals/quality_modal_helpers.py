@@ -13,7 +13,7 @@ from typing import Optional, Dict, Any, List
 
 from ...config import get_base_downloads_dir, get_resource_path
 from ...locales.i18n import tr
-from ...utils.file_ops import apply_media_filename_tags, generate_unique_destination_path
+from ...utils.file_ops import apply_media_filename_tags, generate_unique_destination_path, resolve_categorized_path
 from ...services.youtube_models import extract_media_platform, sanitize_filename
 
 
@@ -22,7 +22,8 @@ def attach_selected_tracks_to_option(
     audio_tracks: List[Dict[str, Any]],
     cb_audio: Optional[Any],
     subtitle_tracks: List[Dict[str, Any]],
-    cb_sub: Optional[Any]
+    cb_sub: Optional[Any],
+    all_options: Optional[List[Any]] = None
 ) -> None:
     """Attaches active audio dubbing track, subtitle track, and delivery mode to the selected option."""
     if not selected_option:
@@ -68,7 +69,13 @@ def attach_selected_tracks_to_option(
         ext_fn = getattr(cb_sub, "get_external_subtitle_tracks", None)
         ext_list = ext_fn() if callable(ext_fn) else getattr(cb_sub, "_external_subtitle_tracks", None)
         if ext_list is not None:
-            selected_option.external_subtitle_tracks = [dict(t) for t in ext_list if isinstance(t, dict)]
+            ext_copy = [dict(t) for t in ext_list if isinstance(t, dict)]
+            selected_option.external_subtitle_tracks = list(ext_copy)
+            for opt_item in (all_options or []):
+                try:
+                    opt_item.external_subtitle_tracks = [dict(t) for t in ext_copy]
+                except Exception:
+                    pass
 
 
 def sync_modal_selection_to_staged(modal: Any) -> None:
@@ -80,7 +87,8 @@ def sync_modal_selection_to_staged(modal: Any) -> None:
         getattr(modal, "audio_tracks", []),
         getattr(modal, "cb_audio", None),
         getattr(modal, "subtitle_tracks", []),
-        getattr(modal, "cb_sub", None)
+        getattr(modal, "cb_sub", None),
+        all_options=getattr(modal, "options", None)
     )
     target = getattr(modal, "parent_app", None) or getattr(modal, "master", None)
     if not target:
@@ -92,16 +100,18 @@ def sync_modal_selection_to_staged(modal: Any) -> None:
 
     ext_subs = [dict(t) for t in (getattr(opt, "external_subtitle_tracks", None) or []) if isinstance(t, dict)]
     ctx = getattr(target, "_pending_media_context", None)
-    if isinstance(ctx, dict):
+    if isinstance(ctx, dict) and (not u or ctx.get("url") == u):
         ctx["selected_option"] = opt
         ctx["selected_opt"] = opt
         ctx["external_subtitle_tracks"] = ext_subs
         if cur_dest: ctx["final_dest"] = cur_dest
+        target._main_external_subtitle_tracks = [dict(t) for t in ext_subs]
 
     staged = getattr(target, "_staged_links", [])
     for it in staged:
         if it.get("url") == u:
             it["selected_opt"] = opt
+            it["external_subtitle_tracks"] = [dict(t) for t in ext_subs]
             if cur_dest: it["final_dest"] = cur_dest
             if isinstance(it.get("media_context"), dict):
                 it["media_context"]["selected_option"] = opt
@@ -201,7 +211,8 @@ def resolve_final_dest(
             downloads_dir = getattr(parent_app, "_get_base_downloads_dir", get_base_downloads_dir)()
             clean_title = sanitize_filename(video_title)
             ext = getattr(selected_option, "ext", "mp4") if selected_option else "mp4"
-            final_dest = os.path.join(downloads_dir, f"{clean_title}.{ext}")
+            auto_cat = getattr(parent_app, "auto_categorize_folders", True) if parent_app else True
+            final_dest = resolve_categorized_path(downloads_dir, f"{clean_title}.{ext}", auto_categorize=auto_cat, create_dir=False)
 
     if selected_option:
         has_sub = bool(getattr(selected_option, "selected_subtitle_track", None))

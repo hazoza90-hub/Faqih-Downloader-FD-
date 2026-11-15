@@ -418,6 +418,238 @@ class TestPreviewExtSrtAndSubtitleDedup(unittest.TestCase):
         self.assertEqual(len(en_tracks), 1)
         self.assertEqual(en_tracks[0]["language"], "en")
 
+    def test_external_subtitle_service_annotations_valid(self):
+        import typing
+        from faqih_downloader.services import external_subtitle_service as ess
+        hints = typing.get_type_hints(ess.process_external_subtitle_tracks)
+        self.assertIn("defer_prepare_langs", hints)
+        hints_sync = typing.get_type_hints(ess.sync_preview_external_subtitles)
+        self.assertIn("target_opts", hints_sync)
+
+    def test_staged_card_height_and_start_button_visible_with_6_ext_srts(self):
+        import tkinter as tk
+        from faqih_downloader.ui.panels.kanban_staged_helpers import build_staged_link_card
+
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            container = tk.Frame(root, width=320, height=500, bg="#0b0e14")
+            container.pack(fill=tk.BOTH, expand=True)
+            ext_tracks = [
+                {"sub_id": c, "language": c, "label": c.upper(), "url": f"https://example.com/{c}.vtt"}
+                for c in ("ar", "en", "de", "es", "fr", "hi")
+            ]
+            info = {
+                "url": "https://youtu.be/cR4T9MDrlqE",
+                "file_name": "Sample Long Arabic And English Video Title For Card Wrapping",
+                "file_size": 120 * 1024 * 1024,
+                "badge": "1080p • 🎬 MP4",
+                "category": "Video",
+                "icon": "🎬",
+                "duration": 620,
+                "platform": "YouTube",
+                "external_subtitle_tracks": ext_tracks,
+                "selected_opt": VideoFormatOption(
+                    format_id="137+140", resolution_label="1080p", height=1080, ext="mp4",
+                    filesize_approx=120 * 1024 * 1024, fps=30, vcodec="avc1", acodec="mp4a", note="",
+                    external_subtitle_tracks=ext_tracks,
+                ),
+            }
+            card = build_staged_link_card(
+                container, info,
+                callbacks={"start": lambda i: None, "info": lambda i: None, "remove": lambda i: None, "quality": lambda i: None}
+            )
+            root.update_idletasks()
+            card_h = int(float(card.cget("height")))
+            self.assertGreaterEqual(card_h, 228)
+            self.assertGreaterEqual(card_h, card.inner.winfo_reqheight() + 20)
+
+            buttons = []
+            def _walk(w):
+                if isinstance(w, tk.Button):
+                    buttons.append(w)
+                for ch in w.winfo_children():
+                    _walk(ch)
+            _walk(card.inner)
+            btn_texts = [str(b.cget("text")) for b in buttons]
+            self.assertTrue(any("▶" in t for t in btn_texts), f"Start button missing in {btn_texts}")
+            self.assertTrue(any("⚙" in t for t in btn_texts), f"Quality button missing in {btn_texts}")
+            for b in buttons:
+                self.assertGreater(b.winfo_reqheight(), 0)
+        finally:
+            root.destroy()
+
+    def test_ext_subs_and_video_folder_preserved_across_bar_card_modal_and_tree_switch(self):
+        import tkinter as tk
+        from unittest.mock import MagicMock
+        from faqih_downloader.ui.panels.media_options_bar import MediaOptionsBarMixin
+        from faqih_downloader.ui.panels.media_options_actions import MediaOptionsActionsMixin
+        from faqih_downloader.ui.panels.kanban_staged_prober import stage_media_option_in_col1
+
+        class _HarnessApp(MediaOptionsBarMixin, MediaOptionsActionsMixin):
+            def __init__(self, tk_root, dl_dir):
+                self.root = tk_root
+                self._dl_dir = dl_dir
+                self.auto_categorize_folders = True
+                self.history_manager = None
+                self._staged_links = []
+                self._pending_media_context = None
+                self.entry_url = tk.Entry(tk_root)
+                self.entry_dest = tk.Entry(tk_root)
+                self.entry_url.insert(0, "https://youtu.be/cR4T9MDrlqE")
+                self.entry_dest.insert(0, os.path.join(dl_dir, "Video"))
+                self._current_theme = "dark"
+                self.current_lang = "ar"
+                self.is_downloading = False
+                self._launch_stream_coordinator = MagicMock()
+                for k, v in self._theme_dict().items():
+                    setattr(self, k, v)
+                bar_host = tk.Frame(tk_root)
+                self._build_media_options_bar(bar_host)
+
+            def _get_base_downloads_dir(self):
+                return self._dl_dir
+
+            def _theme_dict(self):
+                return {
+                    "c_bg": "#0b0e14", "c_panel": "#151a24", "c_panel_light": "#1e293b",
+                    "c_accent": "#38bdf8", "c_accent_dark": "#0284c7", "c_text": "#94a3b8",
+                    "c_text_bright": "#f8fafc", "c_text_muted": "#64748b", "c_border": "#283548",
+                    "c_input_bg": "#0f172a", "c_success": "#10b981", "c_card": "#151a24",
+                    "c_danger": "#ef4444", "c_warning": "#f59e0b",
+                }
+
+            def _refresh_staged_links_ui(self):
+                pass
+
+            def _sync_staged_links_ui(self):
+                pass
+
+            def stage_probed_link_in_col1(self, info_dict):
+                self._staged_links.append(info_dict)
+
+            def set_status_text(self, *_args, **_kwargs):
+                pass
+
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                dl_dir = os.path.join(tmp, "Downloads")
+                os.makedirs(os.path.join(dl_dir, "Video"), exist_ok=True)
+                app = _HarnessApp(root, dl_dir)
+                opts = [
+                    VideoFormatOption(format_id="137+140", resolution_label="1080p", height=1080, ext="mp4",
+                                      filesize_approx=50 * 1024 * 1024, fps=30, vcodec="avc1", acodec="mp4a", note=""),
+                    VideoFormatOption(format_id="136+140", resolution_label="720p", height=720, ext="mp4",
+                                      filesize_approx=30 * 1024 * 1024, fps=30, vcodec="avc1", acodec="mp4a", note=""),
+                    VideoFormatOption(format_id="135+140", resolution_label="480p", height=480, ext="mp4",
+                                      filesize_approx=15 * 1024 * 1024, fps=30, vcodec="avc1", acodec="mp4a", note=""),
+                ]
+                subs = [
+                    {"sub_id": "none", "language": "none", "label": "No Subtitles", "url": ""},
+                ] + [
+                    {"sub_id": c, "language": c, "label": c.upper(), "url": f"https://example.com/{c}.vtt"}
+                    for c in ("ar", "en", "de", "es", "fr", "hi")
+                ]
+                import types
+                ext6 = [dict(t) for t in subs[1:]]
+                url = "https://youtu.be/cR4T9MDrlqE"
+                mock_resolver = MagicMock()
+                mock_resolver.build_stream_info.side_effect = lambda _info, sel_o: types.SimpleNamespace(
+                    opt=sel_o, external_subtitle_tracks=list(getattr(sel_o, "external_subtitle_tracks", []) or [])
+                )
+                app.populate_main_media_bar(
+                    info={"title": "Test Video Clip", "duration": 120},
+                    options=opts, audio_tracks=[], subtitle_tracks=subs,
+                    url=url, dest=os.path.join(dl_dir, "Video"),
+                    resolver=mock_resolver,
+                )
+                app._main_external_subtitle_tracks = [dict(t) for t in ext6]
+                app._sync_media_bar_state()
+
+                for o in app._main_media_options:
+                    self.assertEqual([t["sub_id"] for t in o.external_subtitle_tracks], ["ar", "en", "de", "es", "fr", "hi"])
+                self.assertEqual(len(app._pending_media_context["external_subtitle_tracks"]), 6)
+
+                # Stage into Col 1 (simulates Kanban staged card)
+                stage_media_option_in_col1(app, url, "Test Video Clip", opts[0], app._pending_media_context["final_dest"], duration=120)
+                self.assertTrue(app._staged_links, "Expected staged item in Column 1")
+                info_dict = app._staged_links[0]
+                self.assertEqual(len(info_dict["external_subtitle_tracks"]), 6)
+
+                # Reopen QualitySelectionModal from cached context (as Column 1 Quality btn does)
+                app._show_cached_quality_modal(app._pending_media_context)
+                modal = app._quality_modal
+                self.assertTrue(callable(getattr(modal.cb_sub, "open_external_subtitles_menu", None)))
+                self.assertEqual(len(modal.cb_sub.get_external_subtitle_tracks()), 6)
+                self.assertEqual(os.path.basename(os.path.dirname(modal.dest_path)).lower(), "video")
+                self.assertEqual(os.path.dirname(os.path.dirname(modal.dest_path)), dl_dir)
+
+                # Switch quality row in Treeview (720p -> 480p)
+                modal.tree.selection_set("opt_2")
+                modal._on_tree_select(None)
+                self.assertEqual(modal.selected_option.resolution_label, "480p")
+                self.assertEqual([t["sub_id"] for t in modal.selected_option.external_subtitle_tracks], ["ar", "en", "de", "es", "fr", "hi"])
+                self.assertEqual(len(modal.cb_sub.get_external_subtitle_tracks()), 6)
+                self.assertEqual(len(app._pending_media_context["external_subtitle_tracks"]), 6)
+
+                # Start download from modal
+                modal._on_download()
+                app._launch_stream_coordinator.assert_called_once()
+                stream_info_arg = app._launch_stream_coordinator.call_args[0][0]
+                confirmed_dest = app._launch_stream_coordinator.call_args[0][1]
+                self.assertEqual([t["sub_id"] for t in stream_info_arg.external_subtitle_tracks], ["ar", "en", "de", "es", "fr", "hi"])
+                self.assertEqual(os.path.basename(os.path.dirname(confirmed_dest)).lower(), "video")
+                self.assertEqual(os.path.dirname(os.path.dirname(confirmed_dest)), dl_dir)
+        finally:
+            root.destroy()
+
+    def test_probe_and_stage_pasted_url_preserves_folder_entry_dest(self):
+        import types
+        from unittest.mock import MagicMock
+        from faqih_downloader.ui.panels.kanban_staged_prober import probe_and_stage_pasted_url
+        from faqih_downloader.services.youtube_models import YouTubeStreamInfo
+
+        with tempfile.TemporaryDirectory() as tmp:
+            dl_dir = os.path.join(tmp, "Downloads")
+            video_dir = os.path.join(dl_dir, "Video")
+            os.makedirs(video_dir, exist_ok=True)
+            for dest_val in (dl_dir, video_dir):
+                gui = types.SimpleNamespace(
+                    entry_dest=MagicMock(get=MagicMock(return_value=dest_val)),
+                    auto_categorize_folders=True,
+                    history_manager=None,
+                    _staged_links=[],
+                    dispatch_to_main_thread=lambda fn: fn(),
+                    _get_active_download_cookies=lambda: None,
+                    stage_probed_link_in_col1=MagicMock(),
+                    _get_base_downloads_dir=lambda: dl_dir,
+                )
+                opt = VideoFormatOption(
+                    format_id="22", resolution_label="720p", height=720, ext="mp4",
+                    filesize_approx=10 * 1024 * 1024, fps=30, vcodec="avc1", acodec="mp4a", note=""
+                )
+                raw_info = {"title": "Category Check", "duration": 60, "extractor_key": "Youtube"}
+
+                class _InlineThread:
+                    def __init__(self, target=None, daemon=False):
+                        self._target = target
+                    def start(self):
+                        self._target()
+
+                with patch("faqih_downloader.ui.panels.kanban_staged_prober.threading.Thread", _InlineThread), \
+                     patch("faqih_downloader.services.youtube_service.YouTubeResolver.extract_format_options", return_value=(raw_info, [opt])), \
+                     patch("faqih_downloader.services.youtube_models.is_ytdlp_extractor_supported", return_value=True):
+                    probe_and_stage_pasted_url(gui, "https://youtu.be/cR4T9MDrlqE")
+
+                gui.stage_probed_link_in_col1.assert_called()
+                info_dict = gui.stage_probed_link_in_col1.call_args[0][0]
+                final_dest = info_dict["final_dest"]
+                self.assertEqual(os.path.basename(os.path.dirname(final_dest)).lower(), "video", f"Lost Video folder for entry_dest={dest_val}: {final_dest}")
+                self.assertEqual(os.path.dirname(os.path.dirname(final_dest)), dl_dir, f"Parent Downloads truncated for entry_dest={dest_val}: {final_dest}")
+
+
 
 if __name__ == "__main__":
     unittest.main()

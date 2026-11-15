@@ -60,6 +60,27 @@ def stage_media_option_in_col1(
     old_info = next((it for it in staged if it.get("url") == url), None)
     conn_count = old_info.get("conn_count", 8) if old_info else 8
     speed_limit = old_info.get("speed_limit", 0.0) if old_info else 0.0
+    ext_tracks = []
+    for src in (
+        getattr(selected_opt, "external_subtitle_tracks", None),
+        media_ctx.get("external_subtitle_tracks") if isinstance(media_ctx, dict) else None,
+        getattr(target, "_main_external_subtitle_tracks", None),
+    ):
+        if isinstance(src, list) and src:
+            ext_tracks = [dict(t) for t in src if isinstance(t, dict)]
+            break
+    if isinstance(media_ctx, dict):
+        media_ctx = dict(media_ctx)
+        if ext_tracks and not media_ctx.get("external_subtitle_tracks"):
+            media_ctx["external_subtitle_tracks"] = [dict(t) for t in ext_tracks]
+        if ext_tracks:
+            for o in (media_ctx.get("options") or []):
+                try:
+                    if not getattr(o, "external_subtitle_tracks", None):
+                        o.external_subtitle_tracks = [dict(t) for t in ext_tracks]
+                except Exception:
+                    pass
+
     info_dict = {
         "url": url,
         "file_name": file_name,
@@ -74,8 +95,9 @@ def stage_media_option_in_col1(
         "conn_count": conn_count,
         "speed_limit": speed_limit,
         "selected_opt": selected_opt,
+        "external_subtitle_tracks": [dict(t) for t in ext_tracks],
         "stream_info": media_ctx.get("info") if isinstance(media_ctx, dict) else None,
-        "media_context": dict(media_ctx) if isinstance(media_ctx, dict) else None,
+        "media_context": media_ctx if isinstance(media_ctx, dict) else None,
     }
     if old_info:
         old_info.update(info_dict)
@@ -114,7 +136,8 @@ def _start_staged_download(gui: Any, item_or_url: Any) -> None:
 
         # Ensure latest choices from main media bar are read if this is the active media URL
         cur_ctx = getattr(gui, "_pending_media_context", None)
-        if isinstance(cur_ctx, dict) and cur_ctx.get("url") == url:
+        is_active_url = isinstance(cur_ctx, dict) and cur_ctx.get("url") == url
+        if is_active_url:
             if info.get("selected_opt") is None and hasattr(gui, "_sync_media_bar_state"):
                 try: gui._sync_media_bar_state()
                 except Exception: pass
@@ -128,9 +151,36 @@ def _start_staged_download(gui: Any, item_or_url: Any) -> None:
                 "selected_opt": info.get("selected_opt"),
                 "final_dest": dest
             }
-        if info.get("selected_opt") is not None and isinstance(getattr(gui, "_pending_media_context", None), dict):
-            gui._pending_media_context["selected_opt"] = info.get("selected_opt")
-            gui._pending_media_context["selected_option"] = info.get("selected_opt")
+        ctx = getattr(gui, "_pending_media_context", None)
+        ext_tracks = []
+        for src in (
+            info.get("external_subtitle_tracks"),
+            getattr(info.get("selected_opt"), "external_subtitle_tracks", None),
+            info["media_context"].get("external_subtitle_tracks") if isinstance(info.get("media_context"), dict) else None,
+            ctx.get("external_subtitle_tracks") if isinstance(ctx, dict) else None,
+            getattr(gui, "_main_external_subtitle_tracks", None) if is_active_url else None,
+        ):
+            if isinstance(src, list) and src:
+                ext_tracks = [dict(t) for t in src if isinstance(t, dict)]
+                break
+        if isinstance(ctx, dict):
+            if info.get("selected_opt") is not None:
+                ctx["selected_opt"] = info.get("selected_opt")
+                ctx["selected_option"] = info.get("selected_opt")
+            ctx["external_subtitle_tracks"] = [dict(t) for t in ext_tracks]
+            for opt_item in (ctx.get("options") or []):
+                try:
+                    opt_item.external_subtitle_tracks = [dict(t) for t in ext_tracks]
+                except Exception:
+                    pass
+            sel_item = ctx.get("selected_option") or ctx.get("selected_opt")
+            if sel_item is not None:
+                try:
+                    sel_item.external_subtitle_tracks = [dict(t) for t in ext_tracks]
+                except Exception:
+                    pass
+        if ext_tracks or is_active_url:
+            gui._main_external_subtitle_tracks = [dict(t) for t in ext_tracks]
 
         if hasattr(gui, "remove_staged_link"):
             gui.remove_staged_link(url)
@@ -352,8 +402,13 @@ def probe_and_stage_pasted_url(gui: Any, url: str) -> None:
         try:
             base_dir = ""
             try:
-                if hasattr(gui, "entry_dest") and gui.entry_dest.get().strip():
-                    base_dir = os.path.dirname(gui.entry_dest.get().strip())
+                if hasattr(gui, "entry_dest"):
+                    ed = gui.entry_dest.get().strip()
+                    if ed:
+                        if os.path.isdir(ed) or not os.path.splitext(ed)[1]:
+                            base_dir = ed
+                        else:
+                            base_dir = os.path.dirname(ed)
             except Exception:
                 pass
             if not base_dir or not os.path.isdir(base_dir):

@@ -33,30 +33,27 @@ class QualitySelectionModal(_BaseToplevel):
         on_open_in_main: Optional[Callable[[VideoFormatOption, str], None]] = None,
         parent_app: Optional[Any] = None, audio_tracks: Optional[List[Dict[str, Any]]] = None,
         subtitle_tracks: Optional[List[Dict[str, Any]]] = None, video_url: str = "",
-        raw_info: Optional[Dict[str, Any]] = None
+        raw_info: Optional[Dict[str, Any]] = None, initial_option: Optional[VideoFormatOption] = None
     ):
         super().__init__(parent)
         self.video_title, self.duration = str(video_title or "YouTube Video"), int(duration or 0)
         self.options, self.dest_path, self.theme = options or [], str(default_dest_path or ""), theme
         self.on_confirm, self.on_cancel, self.on_open_in_main = on_confirm, on_cancel, on_open_in_main
         self.parent_app, self.video_url, self.raw_info = parent_app, str(video_url or ""), raw_info or {}
+        self._initial_option = initial_option
         self.audio_tracks, self.subtitle_tracks = audio_tracks or [], subtitle_tracks or []
         self.cb_audio = self.cb_sub = None
-        init_idx = resolve_preferred_option_index(self.options)
+        init_idx = self._resolve_initial_index()
         self.selected_option: Optional[VideoFormatOption] = self.options[init_idx] if (self.options and 0 <= init_idx < len(self.options)) else (self.options[0] if self.options else None)
         self._confirmed = False
 
         self.title(tr("modal_quality_title", "Select Video Quality — Smart Download"))
         self.configure(bg=self.theme["c_bg"])
-        try:
-            self.overrideredirect(True)
-        except Exception:
-            pass
+        try: self.overrideredirect(True)
+        except Exception: pass
 
-        try:
-            dpi = float(parent.winfo_fpixels('1i')) if parent and parent.winfo_exists() else 96.0
-        except Exception:
-            dpi = 96.0
+        try: dpi = float(parent.winfo_fpixels('1i')) if parent and parent.winfo_exists() else 96.0
+        except Exception: dpi = 96.0
         dpi_scale = max(1.0, dpi / 96.0)
         sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
         dlg_w, dlg_h = min(int(800 * dpi_scale), max(640, int(sw * 0.92))), min(int(655 * dpi_scale), max(550, int(sh * 0.90)))
@@ -167,7 +164,7 @@ class QualitySelectionModal(_BaseToplevel):
             self.tree.insert("", tk.END, iid=iid, values=vals)
 
         if self.options:
-            init_idx = resolve_preferred_option_index(self.options)
+            init_idx = self._resolve_initial_index()
             first_iid = f"opt_{init_idx}"
             self.tree.selection_set(first_iid)
             self.tree.focus(first_iid)
@@ -179,6 +176,12 @@ class QualitySelectionModal(_BaseToplevel):
         self.tree.bind("<<TreeviewSelect>>", self._on_tree_select)
         self.tree.bind("<Double-Button-1>", self._on_tree_double_click)
 
+        init_ext = self._resolve_initial_ext_subs()
+        for o in (self.options or []):
+            if init_ext and not getattr(o, "external_subtitle_tracks", None):
+                try: o.external_subtitle_tracks = [dict(t) for t in init_ext]
+                except Exception: pass
+
         # Audio & Subtitle selection row
         if self.audio_tracks or self.subtitle_tracks:
             from ...services.youtube_tracks import build_audio_subtitle_row
@@ -188,7 +191,6 @@ class QualitySelectionModal(_BaseToplevel):
             if self.cb_audio:
                 self.cb_audio.bind("<<ComboboxSelected>>", lambda e: sync_modal_selection_to_staged(self), add="+")
             if self.cb_sub:
-                init_ext = getattr(self.selected_option, "external_subtitle_tracks", None) or []
                 if init_ext and hasattr(self.cb_sub, "set_external_subtitle_tracks"):
                     self.cb_sub.set_external_subtitle_tracks(init_ext, notify=False)
                 self.cb_sub._on_ext_srt_changed = lambda _: sync_modal_selection_to_staged(self)
@@ -225,70 +227,36 @@ class QualitySelectionModal(_BaseToplevel):
                 except Exception: pass
 
         btn_browse = tk.Button(
-            card_dest,
-            text=tr("modal_btn_browse", "⋯ Browse..."),
-            font=("Segoe UI", 8),
-            bg=c_panel_light,
-            fg=c_text_bright,
-            relief="flat",
-            activebackground=c_accent_dark,
-            cursor="hand2",
-            command=self._on_browse
+            card_dest, text=tr("modal_btn_browse", "⋯ Browse..."), font=("Segoe UI", 8),
+            bg=c_panel_light, fg=c_text_bright, relief="flat", activebackground=c_accent_dark,
+            cursor="hand2", command=self._on_browse
         )
         btn_browse.pack(side=tk.RIGHT)
         if getattr(self, "options", None) and (first_iid != "opt_0" or (self.selected_option and f"[{self.selected_option.resolution_label}]" not in self.dest_path and "[" in self.dest_path)):
             self._on_tree_select(None)
 
-        # Bottom Buttons
         btn_row = tk.Frame(body, bg=c_bg)
         btn_row.pack(fill=tk.X)
-
         self.btn_download = tk.Button(
-            btn_row,
-            text=tr("modal_btn_start_quality", "⚡ Download Selected Quality"),
-            font=("Segoe UI", 9, "bold"),
-            bg=c_success,
-            fg="white",
-            relief="flat",
-            activebackground="#059669",
-            cursor="hand2",
-            padx=12,
-            pady=6,
-            command=self._on_download
+            btn_row, text=tr("modal_btn_start_quality", "⚡ Download Selected Quality"), font=("Segoe UI", 9, "bold"),
+            bg=c_success, fg="white", relief="flat", activebackground="#059669", cursor="hand2",
+            padx=12, pady=6, command=self._on_download
         )
         self.btn_download.pack(side=tk.LEFT)
 
         self.btn_download_mp3: Optional[tk.Button] = None
-        has_audio = any(opt.is_audio_only for opt in self.options)
-        if has_audio:
+        if any(opt.is_audio_only for opt in self.options):
             self.btn_download_mp3 = tk.Button(
-                btn_row,
-                text=tr("modal_download_mp3", "♪ Download MP3"),
-                font=("Segoe UI", 9, "bold"),
-                bg=c_accent_dark,
-                fg="white",
-                relief="flat",
-                activebackground=c_accent,
-                cursor="hand2",
-                padx=12,
-                pady=6,
-                command=self._on_download_mp3
+                btn_row, text=tr("modal_download_mp3", "♪ Download MP3"), font=("Segoe UI", 9, "bold"),
+                bg=c_accent_dark, fg="white", relief="flat", activebackground=c_accent, cursor="hand2",
+                padx=12, pady=6, command=self._on_download_mp3
             )
             self.btn_download_mp3.pack(side=tk.LEFT, padx=(6, 0))
 
         self.btn_preview_video = tk.Button(
-            btn_row,
-            text=tr("btn_preview_video", "▶ Preview Video"),
-            font=("Segoe UI", 9, "bold"),
-            bg=c_panel_light,
-            fg=c_accent,
-            relief="flat",
-            activebackground=c_accent_dark,
-            activeforeground="white",
-            cursor="hand2",
-            padx=12,
-            pady=6,
-            command=self._on_preview_video
+            btn_row, text=tr("btn_preview_video", "▶ Preview Video"), font=("Segoe UI", 9, "bold"),
+            bg=c_panel_light, fg=c_accent, relief="flat", activebackground=c_accent_dark, activeforeground="white",
+            cursor="hand2", padx=12, pady=6, command=self._on_preview_video
         )
         self.btn_preview_video.pack(side=tk.LEFT, padx=(6, 0))
 
@@ -405,8 +373,35 @@ class QualitySelectionModal(_BaseToplevel):
                 set_setting("last_download_dir", cd)
             except Exception: pass
 
+    def _resolve_initial_index(self) -> int:
+        if getattr(self, "_initial_option", None) is not None and self.options:
+            for idx, opt in enumerate(self.options):
+                if opt is self._initial_option: return idx
+            pk = (getattr(self._initial_option, "format_id", ""), getattr(self._initial_option, "resolution_label", ""), getattr(self._initial_option, "ext", ""))
+            for idx, opt in enumerate(self.options):
+                if (getattr(opt, "format_id", ""), getattr(opt, "resolution_label", ""), getattr(opt, "ext", "")) == pk:
+                    return idx
+        return resolve_preferred_option_index(self.options)
+
+    def _resolve_initial_ext_subs(self) -> List[Dict[str, Any]]:
+        sources = [getattr(self.selected_option, "external_subtitle_tracks", None)]
+        for o in (self.options or []):
+            sources.append(getattr(o, "external_subtitle_tracks", None))
+        p_app = self.parent_app
+        if p_app is not None:
+            p_ctx = getattr(p_app, "_pending_media_context", None)
+            if p_ctx is None or not self.video_url or (isinstance(p_ctx, dict) and p_ctx.get("url") == self.video_url):
+                if isinstance(p_ctx, dict): sources.append(p_ctx.get("external_subtitle_tracks"))
+                sources.append(getattr(p_app, "_main_external_subtitle_tracks", None))
+        for src in sources:
+            if isinstance(src, list) and src:
+                return [dict(t) for t in src if isinstance(t, dict)]
+        return []
+
     def _attach_selected_tracks(self):
-        attach_selected_tracks_to_option(self.selected_option, self.audio_tracks, self.cb_audio, self.subtitle_tracks, self.cb_sub)
+        attach_selected_tracks_to_option(
+            self.selected_option, self.audio_tracks, self.cb_audio, self.subtitle_tracks, self.cb_sub, all_options=self.options
+        )
 
     def _resolve_final_dest(self) -> str:
         return resolve_final_dest(self.entry_dest, self.dest_path, self.video_title, self.selected_option, self.parent_app, self.master)

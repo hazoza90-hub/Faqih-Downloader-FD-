@@ -80,7 +80,7 @@ def build_staged_link_card(parent: Any, info: Dict[str, Any], callbacks: Dict[st
     opp_side = tk.LEFT if is_ar else tk.RIGHT
     is_media = bool(info.get("media_context") or str(category).lower() in ("video", "audio") or info.get("selected_opt"))
 
-    card_h = 194 if is_media else 150
+    card_h = 228 if is_media else 156
     card = RoundedGlassCard(
         parent, radius=12, bg="#0b0e14", card_bg="#151a24", border_color="#283548",
         height=card_h, inner_padx=12, inner_pady=10
@@ -177,9 +177,10 @@ def build_staged_link_card(parent: Any, info: Dict[str, Any], callbacks: Dict[st
     path_row = tk.Frame(card.inner, bg="#151a24"); path_row.pack(fill=tk.X, pady=(2, 0))
     tk.Label(path_row, text=f"📁 {_truncate_title(final_dest, 34) if final_dest else '—'}", font=("Segoe UI", 7), bg="#151a24", fg="#64748b", anchor="e" if is_ar else "w").pack(fill=tk.X)
 
-    # Fourth Row: Dedicated Quality & Dubbing Button (for Media)
+    # Fourth Row: Dedicated Quality & Dubbing Button (for Media) - packed above btn_row
+    q_row = None
     if is_media and "quality" in callbacks:
-        q_row = tk.Frame(card.inner, bg="#151a24"); q_row.pack(fill=tk.X, pady=(5, 0))
+        q_row = tk.Frame(card.inner, bg="#151a24")
         tk.Button(
             q_row, text=tr("staged_btn_quality", "⚙ الجودة والدبلجة والترجمة" if is_ar else "⚙ Quality, Dubbing & Subtitles"),
             font=("Segoe UI", 8, "bold"),
@@ -188,8 +189,8 @@ def build_staged_link_card(parent: Any, info: Dict[str, Any], callbacks: Dict[st
             command=lambda: callbacks.get("quality", lambda i: None)(info)
         ).pack(fill=tk.X)
 
-    # Fifth Row: Action Buttons
-    btn_row = tk.Frame(card.inner, bg="#151a24"); btn_row.pack(fill=tk.X, pady=(5, 0))
+    # Fifth Row: Action Buttons (packed with side=BOTTOM first so multi-line text never clips them)
+    btn_row = tk.Frame(card.inner, bg="#151a24"); btn_row.pack(side=tk.BOTTOM, fill=tk.X, pady=(6, 0))
     tk.Button(
         btn_row, text=tr("staged_btn_start", "▶ Start Download"), font=("Segoe UI", 8, "bold"),
         bg="#059669", fg="#ffffff", activebackground="#047857", activeforeground="#ffffff",
@@ -216,6 +217,21 @@ def build_staged_link_card(parent: Any, info: Dict[str, Any], callbacks: Dict[st
         activebackground="#ef4444", activeforeground="#ffffff", relief="flat", bd=0, cursor="hand2",
         padx=8, pady=4, command=lambda: callbacks.get("remove", lambda i: None)(info)
     ).pack(side=opp_side)
+
+    if q_row is not None:
+        q_row.pack(side=tk.BOTTOM, fill=tk.X, pady=(4, 0))
+
+    try:
+        card.inner.update_idletasks()
+        req_h = max(card_h, int(card.inner.winfo_reqheight() or 0) + 22)
+        if req_h != card_h:
+            card.configure(height=req_h)
+            if hasattr(card, "_last_size"):
+                card._last_size = None
+            if hasattr(card, "_on_resize"):
+                card._on_resize()
+    except Exception:
+        pass
 
     # Context Menu Binding
     def _popup(e): show_staged_context_menu(e, info, parent.winfo_toplevel(), callbacks)
@@ -253,6 +269,22 @@ def render_col1_staged_cards(
             gui.entry_url.delete(0, end_val); gui.entry_url.insert(0, url)
         if hasattr(gui, "entry_dest") and gui.entry_dest and dest:
             gui.entry_dest.delete(0, end_val); gui.entry_dest.insert(0, dest)
+        ext_tracks = None
+        for src in (
+            info.get("external_subtitle_tracks"),
+            info["media_context"].get("external_subtitle_tracks") if isinstance(info.get("media_context"), dict) else None,
+            getattr(info.get("selected_opt"), "external_subtitle_tracks", None),
+        ):
+            if src is not None:
+                ext_tracks = [dict(t) for t in src if isinstance(t, dict)]
+                if ext_tracks:
+                    break
+        if not ext_tracks and isinstance(getattr(gui, "_pending_media_context", None), dict) and gui._pending_media_context.get("url") == url:
+            cur_ext = gui._pending_media_context.get("external_subtitle_tracks")
+            if isinstance(cur_ext, list) and cur_ext:
+                ext_tracks = [dict(t) for t in cur_ext if isinstance(t, dict)]
+        if ext_tracks is None:
+            ext_tracks = []
         if info.get("media_context"):
             gui._pending_media_context = dict(info["media_context"])
         elif info.get("selected_opt") is not None:
@@ -264,11 +296,28 @@ def render_col1_staged_cards(
                 "final_dest": dest,
             }
         ctx = getattr(gui, "_pending_media_context", None)
+        if isinstance(ctx, dict):
+            if info.get("selected_opt") is not None:
+                ctx["selected_option"] = info.get("selected_opt")
+                ctx["selected_opt"] = info.get("selected_opt")
+            ctx["external_subtitle_tracks"] = [dict(t) for t in ext_tracks]
+            for opt_item in (ctx.get("options") or []):
+                try:
+                    opt_item.external_subtitle_tracks = [dict(t) for t in ext_tracks]
+                except Exception:
+                    pass
+            sel_item = ctx.get("selected_option") or ctx.get("selected_opt")
+            if sel_item is not None:
+                try:
+                    sel_item.external_subtitle_tracks = [dict(t) for t in ext_tracks]
+                except Exception:
+                    pass
+        gui._main_external_subtitle_tracks = [dict(t) for t in ext_tracks]
         if hasattr(gui, "populate_main_media_bar") and ctx and ctx.get("options"):
             gui.populate_main_media_bar(
                 ctx.get("info"), ctx.get("options"), ctx.get("audio_tracks", []),
                 ctx.get("subtitle_tracks", []), selected_option=ctx.get("selected_option"),
-                url=url, dest=dest
+                url=url, dest=dest, external_subtitle_tracks=ext_tracks
             )
         if hasattr(gui, "_reopen_media_quality_modal"):
             gui._reopen_media_quality_modal()

@@ -3,7 +3,7 @@ Independent multi-language external .SRT subtitle helpers for Faqih Downloader (
 """
 
 import os
-from typing import Any, Callable, Dict, List, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 
 def get_valid_ext_tracks(stream_info: Any) -> List[Dict[str, Any]]:

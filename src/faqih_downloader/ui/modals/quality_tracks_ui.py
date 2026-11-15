@@ -209,16 +209,18 @@ def build_audio_subtitle_row(
                 if callable(cb_fn):
                     cb_fn(clean)
 
-        btn_ext_srt.configure(
-            command=lambda: open_ext_srt_popup_menu(
+        def _open_ext_menu():
+            open_ext_srt_popup_menu(
                 btn_ext_srt, subtitle_tracks, getattr(cb_sub, "_external_subtitle_tracks", []),
                 lambda picked: _set_ext_tracks(picked, notify=True), theme=theme
             )
-        )
+
+        btn_ext_srt.configure(command=_open_ext_menu)
         cb_sub._ext_srt_label = lbl_ext_srt
         cb_sub._ext_srt_button = btn_ext_srt
         cb_sub.get_external_subtitle_tracks = lambda: list(getattr(cb_sub, "_external_subtitle_tracks", []) or [])
         cb_sub.set_external_subtitle_tracks = _set_ext_tracks
+        cb_sub.open_external_subtitles_menu = _open_ext_menu
 
         def _on_mode_var_changed(*_):
             val = mode_var.get()
