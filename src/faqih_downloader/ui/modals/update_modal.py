@@ -21,6 +21,7 @@ except ImportError:
 from ...config import get_resource_path, APP_VERSION
 from ...locales.i18n import tr
 from ..components.base_modal import SafeModalDialog
+from ...utils.window_effects import enable_dark_titlebar
 from ...services.updater_service import AppAutoUpdater
 from ...services.youtube_service import format_filesize
 from ...utils.tk_helpers import _detach_photo_tk
@@ -104,6 +105,7 @@ class AppUpdateModal(_BaseToplevel):
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self._build_ui()
+        enable_dark_titlebar(self)
 
         try:
             self.lift()

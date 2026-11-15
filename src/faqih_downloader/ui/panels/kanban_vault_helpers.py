@@ -79,16 +79,16 @@ def build_vault_filter_pills(
         pill = tk.Label(
             row,
             text=lbl_text,
-            font=("Segoe UI", 8, "bold" if is_active else "normal"),
+            font=("Segoe UI", 7, "bold" if is_active else "normal"),
             bg=bg_col,
             fg=fg_col,
-            padx=4,
-            pady=1,
+            padx=3,
+            pady=2,
             cursor="hand2",
             highlightthickness=1,
             highlightbackground="#19f3ee" if is_active else "#263043",
         )
-        pill.pack(side=tk.LEFT, padx=(0, 3), pady=(0, 6))
+        pill.pack(side=tk.LEFT, padx=(0, 2), pady=(0, 6))
 
         def _make_handler(cid: str):
             return lambda e: on_select(cid)

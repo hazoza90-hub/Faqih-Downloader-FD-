@@ -162,33 +162,41 @@ class ConfirmModalWidgetsMixin:
         )
         self._update_threads_warning()
 
-        # Bottom Buttons Row
+        # Bottom Buttons Row (pack action buttons first so hint label never clips Start button in EN)
         btn_row = tk.Frame(self.frame_confirmation, bg=self.c_bg)
         btn_row.pack(fill=tk.X)
-
-        lbl_hint = tk.Label(btn_row, text=tr("modal_confirm_hint", "⏎ Press Enter to start, Esc to cancel"), font=("Segoe UI", 8), bg=self.c_bg, fg=self.c_text_muted)
-        lbl_hint.pack(side=tk.LEFT)
 
         self.btn_cancel = tk.Button(
             btn_row, text=tr("modal_btn_cancel", "✕ Cancel"), font=("Segoe UI", 9, "bold"),
             bg=self.c_panel_light, fg=self.c_text_muted, relief="flat", activebackground=self.c_border,
-            cursor="hand2", padx=14, pady=6, command=self._on_close
+            cursor="hand2", padx=12, pady=6, command=self._on_close
         )
-        self.btn_cancel.pack(side=tk.RIGHT, padx=(8, 0))
+        self.btn_cancel.pack(side=tk.RIGHT, padx=(6, 0))
 
         self.btn_open_app = tk.Button(
             btn_row, text=tr("modal_btn_open_in_main", "❐ Open in Main App"), font=("Segoe UI", 9),
             bg=self.c_panel_light, fg=self.c_text_bright, relief="flat", activebackground=self.c_border,
-            cursor="hand2", padx=14, pady=6, command=self._on_open_in_main
+            cursor="hand2", padx=12, pady=6, command=self._on_open_in_main
         )
-        self.btn_open_app.pack(side=tk.RIGHT, padx=(8, 0))
+        self.btn_open_app.pack(side=tk.RIGHT, padx=(6, 0))
 
         self.btn_start = tk.Button(
             btn_row, text=tr("modal_btn_start", "▶ Start Download"), font=("Segoe UI", 9, "bold"),
             bg=self.c_success, fg="white", relief="flat", activebackground="#059669",
-            cursor="hand2", padx=16, pady=6, command=self._on_start_in_window
+            cursor="hand2", padx=12, pady=6, command=self._on_start_in_window
         )
         self.btn_start.pack(side=tk.RIGHT)
+
+        lbl_hint = tk.Label(
+            btn_row,
+            text=tr("modal_confirm_hint", "⏎ Press Enter to start, Esc to cancel"),
+            font=("Segoe UI", 8),
+            bg=self.c_bg,
+            fg=self.c_text_muted,
+            wraplength=175,
+            justify="left",
+        )
+        lbl_hint.pack(side=tk.LEFT, padx=(0, 6))
 
     def _build_progress_view(self):
         """View 2: Compact Download Progress View (Transitions on start)."""

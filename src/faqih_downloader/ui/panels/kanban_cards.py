@@ -137,7 +137,7 @@ def build_queued_card(
     parent: Any,
     url: str,
     badge: str = "PARSING",
-    badge_bg: str = "#d4a12a",
+    badge_bg: str = "#b45309",
     status_text: str = "",
     is_active: bool = True,
     title: str = "",
@@ -161,24 +161,33 @@ def build_queued_card(
     top_row = tk.Frame(card.inner, bg="#151a24")
     top_row.pack(fill=tk.X)
 
-    if title:
-        clean_title = title if len(title) <= 28 else (title[:25] + "...")
-        lbl_head = tk.Label(top_row, text=clean_title, font=("Segoe UI", 8, "bold"), bg="#151a24", fg="#f8fafc")
-    else:
-        clean_url = url if len(url) <= 30 else (url[:27] + "...")
-        lbl_head = tk.Label(top_row, text=clean_url, font=("Segoe UI", 8), bg="#151a24", fg="#94a3b8")
-    lbl_head.pack(side=tk.LEFT)
-
+    disp_badge = tr("badge_parsing", "PARSING") if badge == "PARSING" else badge
     lbl_badge = tk.Label(
         top_row,
-        text=badge,
+        text=disp_badge,
         font=("Segoe UI", 8, "bold"),
         bg=badge_bg,
         fg="#ffffff",
         padx=6,
         pady=1
     )
-    lbl_badge.pack(side=tk.RIGHT)
+    lbl_badge.pack(side=tk.RIGHT, padx=(6, 0))
+
+    if title:
+        is_rtl_t = any('\u0600' <= ch <= '\u06FF' or '\u0750' <= ch <= '\u077F' or '\u08A0' <= ch <= '\u08FF' for ch in title)
+        clean_title = _truncate_title(title, max_len=24 if is_rtl_t else 28)
+        lbl_head = tk.Label(
+            top_row,
+            text=clean_title,
+            font=("Segoe UI", 8, "bold"),
+            bg="#151a24",
+            fg="#f8fafc",
+            anchor="e" if is_rtl_t else "w",
+        )
+    else:
+        clean_url = url if len(url) <= 28 else (url[:25] + "...")
+        lbl_head = tk.Label(top_row, text=clean_url, font=("Segoe UI", 8), bg="#151a24", fg="#94a3b8", anchor="w")
+    lbl_head.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
     if title:
         clean_sub = url if len(url) <= 34 else (url[:31] + "...")
@@ -266,20 +275,21 @@ def build_vault_card(
     info = tk.Frame(top, bg="#151a24")
     info.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
-    clean_title = _truncate_title(filename, max_len=38)
+    is_rtl_fn = any('\u0600' <= ch <= '\u06FF' or '\u0750' <= ch <= '\u077F' or '\u08A0' <= ch <= '\u08FF' for ch in str(filename))
+    clean_title = _truncate_title(filename, max_len=24 if is_rtl_fn else 30)
     lbl_fn = tk.Label(
         info,
         text=clean_title,
         font=("Segoe UI", 9, "bold"),
         bg="#151a24",
         fg="#f8fafc",
-        anchor="w"
+        anchor="e" if is_rtl_fn else "w"
     )
-    lbl_fn.pack(anchor="w")
+    lbl_fn.pack(fill=tk.X, anchor="e" if is_rtl_fn else "w")
 
     if sz_str:
-        lbl_sz = tk.Label(info, text=sz_str, font=("Segoe UI", 8), bg="#151a24", fg="#64748b", anchor="w")
-        lbl_sz.pack(anchor="w")
+        lbl_sz = tk.Label(info, text=sz_str, font=("Segoe UI", 8), bg="#151a24", fg="#64748b", anchor="e" if is_rtl_fn else "w")
+        lbl_sz.pack(fill=tk.X, anchor="e" if is_rtl_fn else "w")
 
     # Bottom row / visual row
     bot = tk.Frame(card.inner, bg="#151a24")
@@ -332,10 +342,10 @@ def build_vault_card(
         bd=0,
         cursor="hand2",
         padx=10,
-        pady=3,
+        pady=5,
         command=lambda: on_open_folder(target_ref)
     )
-    btn_open.pack(side=tk.RIGHT, pady=(10 if ext in (".mp4", ".mkv", ".webm", ".avi", ".mov", ".flv") else 2))
+    btn_open.pack(side=tk.RIGHT, pady=(8 if ext in (".mp4", ".mkv", ".webm", ".avi", ".mov", ".flv") else 2))
 
     if on_context_menu:
         def _bind_ctx(w):
@@ -353,9 +363,6 @@ def build_active_card_shell(card: Any, parent_app: Any) -> Dict[str, Any]:
     """Constructs the active stream card inner widgets and returns widget dict."""
     row1 = tk.Frame(card, bg="#151a24")
     row1.pack(fill=tk.X, pady=(0, 4))
-
-    lbl_fn = tk.Label(row1, text="", font=("Segoe UI", 9, "bold"), bg="#151a24", fg="#f8fafc")
-    lbl_fn.pack(side=tk.LEFT)
 
     btn_menu = tk.Label(row1, text="•••", font=("Segoe UI", 10, "bold"), bg="#151a24", fg="#94a3b8", cursor="hand2")
     btn_menu.pack(side=tk.RIGHT)
@@ -375,6 +382,9 @@ def build_active_card_shell(card: Any, parent_app: Any) -> Dict[str, Any]:
     btn_pause.bind("<Button-1>", lambda e: getattr(parent_app, "_on_pause_resume", lambda: None)())
     btn_pause.bind("<Enter>", lambda e: btn_pause.configure(bg="#263346"))
     btn_pause.bind("<Leave>", lambda e: btn_pause.configure(bg="#1c2533"))
+
+    lbl_fn = tk.Label(row1, text="", font=("Segoe UI", 9, "bold"), bg="#151a24", fg="#f8fafc", anchor="w")
+    lbl_fn.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
     row2 = tk.Frame(card, bg="#151a24")
     row2.pack(fill=tk.X, pady=(0, 6))

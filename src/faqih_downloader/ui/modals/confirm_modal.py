@@ -23,6 +23,7 @@ except ImportError:
 from ...config import get_resource_path, get_setting, set_setting
 from ...locales.i18n import tr
 from ..components.base_modal import SafeModalDialog
+from ...utils.window_effects import enable_dark_titlebar
 from ..components.tooltip import ToolTip
 from ...utils.url_utils import derive_download_filename, is_potential_html_url, parse_speed_limit
 from ...utils.file_ops import (
@@ -151,6 +152,7 @@ class DownloadConfirmationModal(ConfirmModalLogicMixin, ConfirmModalWidgetsMixin
                 pass
 
         self._build_ui()
+        enable_dark_titlebar(self)
 
         # Elevate and focus to ensure modal stays above parent window
         try:

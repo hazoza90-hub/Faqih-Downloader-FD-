@@ -143,11 +143,13 @@ def build_audio_subtitle_row(
             except Exception:
                 pass
 
-        # Connections / Threads Combobox (replaces legacy subtitle position combobox)
+        # Connections / Threads Combobox (on dedicated row3 so Arabic labels/controls never clip on row2)
+        row3 = tk.Frame(card, bg=c_panel)
+        row3.pack(fill=tk.X, pady=(4, 0))
         is_ar = (tr("locale_lang", "") == "ar" or tr("app_title", "").startswith("فقيه"))
-        tk.Label(row2, text=tr("lbl_modal_threads", "⚡ المسارات:" if is_ar else "⚡ Threads:"), font=("Segoe UI", 9, "bold"), bg=c_panel, fg=c_text_bright).pack(side=tk.LEFT, padx=(10, 4))
+        tk.Label(row3, text=tr("lbl_modal_threads", "⚡ المسارات:" if is_ar else "⚡ Threads:"), font=("Segoe UI", 9, "bold"), bg=c_panel, fg=c_text_bright).pack(side=tk.LEFT, padx=(0, 6))
         conn_vals = ["1", "2", "4", "8", "16", "32"]
-        cb_conn = ttk.Combobox(row2, values=conn_vals, state="readonly", font=("Segoe UI", 8), width=8)
+        cb_conn = ttk.Combobox(row3, values=conn_vals, state="readonly", font=("Segoe UI", 8), width=8)
         saved_conn = str(get_setting("max_connections", 8))
         if saved_conn not in conn_vals: saved_conn = "8"
         cb_conn.set(saved_conn)

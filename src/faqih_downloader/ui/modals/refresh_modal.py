@@ -22,6 +22,7 @@ except ImportError:
 from ...config import get_resource_path
 from ...locales.i18n import tr
 from ..components.base_modal import SafeModalDialog
+from ...utils.window_effects import enable_dark_titlebar
 from ...core.html_resolver import validate_refresh_url
 from ...core.chunk import get_permissive_ssl_context
 from ...utils.url_utils import derive_download_filename
@@ -150,6 +151,7 @@ class RefreshLinkModal(_BaseToplevel):
         self._pending_ui_action = None
 
         self._build_ui(dlg_w)
+        enable_dark_titlebar(self)
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.bind("<Escape>", lambda e: self._on_close())

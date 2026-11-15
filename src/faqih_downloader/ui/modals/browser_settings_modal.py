@@ -19,6 +19,7 @@ except Exception:
 from ...config import get_resource_path, get_setting, set_setting
 from ...locales.i18n import tr
 from ...utils.tk_helpers import _detach_photo_tk
+from ...utils.window_effects import enable_dark_titlebar
 from ...services.startup_service import IS_WINDOWS, is_startup_enabled
 from ...services.browser.bridge_server import BrowserBridgeServer, DEFAULT_BRIDGE_PORT
 from ...services.browser.registry import (
@@ -67,7 +68,7 @@ class BrowserSettingsModalMixin(BrowserControllerMixin):
         sw = self.root.winfo_screenwidth()
         sh = self.root.winfo_screenheight()
         dlg_w = min(int(680 * dpi_scale), max(600, int(sw * 0.92)))
-        dlg_h = min(int(740 * dpi_scale), max(640, int(sh * 0.90)))
+        dlg_h = min(int(800 * dpi_scale), max(680, int(sh * 0.92)))
         try:
             px = self.root.winfo_x()
             py = self.root.winfo_y()
@@ -105,7 +106,7 @@ class BrowserSettingsModalMixin(BrowserControllerMixin):
                 pass
 
         # Header
-        header = tk.Frame(dlg, bg=self.c_panel, height=44, padx=16)
+        header = tk.Frame(dlg, bg=self.c_panel, height=40, padx=16)
         header.pack(fill=tk.X)
         header.pack_propagate(False)
 
@@ -135,12 +136,12 @@ class BrowserSettingsModalMixin(BrowserControllerMixin):
         btn_dlg_updates.pack(side=tk.RIGHT, pady=8)
 
         # Main Body
-        body = tk.Frame(dlg, bg=self.c_bg, padx=16, pady=12)
+        body = tk.Frame(dlg, bg=self.c_bg, padx=14, pady=8)
         body.pack(fill=tk.BOTH, expand=True)
 
         # 0. Zero-Install Universal Clipboard Sniffer Card (TDM Style)
-        card_sniff = tk.Frame(body, bg=self.c_panel, padx=12, pady=10, highlightbackground=self.c_border, highlightthickness=1)
-        card_sniff.pack(fill=tk.X, pady=(0, 10))
+        card_sniff = tk.Frame(body, bg=self.c_panel, padx=12, pady=6, highlightbackground=self.c_border, highlightthickness=1)
+        card_sniff.pack(fill=tk.X, pady=(0, 5))
 
         lbl_sniff_t = tk.Label(card_sniff, text=tr("browser_card_sniffer_title", "❐ ZERO-INSTALL CLIPBOARD MONITOR (SD SMART CAPTURE — ALL BROWSERS)"), font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_success)
         lbl_sniff_t.pack(anchor="w")
@@ -181,8 +182,8 @@ class BrowserSettingsModalMixin(BrowserControllerMixin):
         _update_dlg_sniff_btn()
 
         # 1. Server Status Card
-        card_server = tk.Frame(body, bg=self.c_panel, padx=12, pady=10, highlightbackground=self.c_border, highlightthickness=1)
-        card_server.pack(fill=tk.X, pady=(0, 10))
+        card_server = tk.Frame(body, bg=self.c_panel, padx=12, pady=6, highlightbackground=self.c_border, highlightthickness=1)
+        card_server.pack(fill=tk.X, pady=(0, 5))
 
         lbl_s_title = tk.Label(card_server, text=tr("browser_card_server_title", "LOCAL IPC LOOPBACK LISTENER"), font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_text_muted)
         lbl_s_title.pack(anchor="w")
@@ -252,8 +253,8 @@ class BrowserSettingsModalMixin(BrowserControllerMixin):
         _update_server_status_label()
 
         # 2. Windows Registry Native Messaging Integration Card
-        card_reg = tk.Frame(body, bg=self.c_panel, padx=12, pady=10, highlightbackground=self.c_border, highlightthickness=1)
-        card_reg.pack(fill=tk.X, pady=(0, 10))
+        card_reg = tk.Frame(body, bg=self.c_panel, padx=12, pady=6, highlightbackground=self.c_border, highlightthickness=1)
+        card_reg.pack(fill=tk.X, pady=(0, 5))
 
         lbl_reg_title = tk.Label(card_reg, text=tr("browser_card_reg_title", "WINDOWS REGISTRY DIRECT BROWSER LINK (NATIVE MESSAGING)"), font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_accent)
         lbl_reg_title.pack(anchor="w")
@@ -320,8 +321,8 @@ class BrowserSettingsModalMixin(BrowserControllerMixin):
         _update_reg_status_label()
 
         # 3. Windows Startup Auto-Boot Card (Silent Background Mode)
-        card_boot = tk.Frame(body, bg=self.c_panel, padx=12, pady=10, highlightbackground=self.c_border, highlightthickness=1)
-        card_boot.pack(fill=tk.X, pady=(0, 10))
+        card_boot = tk.Frame(body, bg=self.c_panel, padx=12, pady=6, highlightbackground=self.c_border, highlightthickness=1)
+        card_boot.pack(fill=tk.X, pady=(0, 5))
 
         lbl_boot_title = tk.Label(card_boot, text=tr("browser_card_boot_title", "⚡ WINDOWS STARTUP AUTO-BOOT (SILENT BACKGROUND MODE)"), font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_accent)
         lbl_boot_title.pack(anchor="w")
@@ -369,8 +370,8 @@ class BrowserSettingsModalMixin(BrowserControllerMixin):
         _update_dlg_boot_status()
 
         # 3b. Windows System Tray & Background Minimization Card
-        card_tray = tk.Frame(body, bg=self.c_panel, padx=12, pady=10, highlightbackground=self.c_border, highlightthickness=1)
-        card_tray.pack(fill=tk.X, pady=(0, 10))
+        card_tray = tk.Frame(body, bg=self.c_panel, padx=12, pady=6, highlightbackground=self.c_border, highlightthickness=1)
+        card_tray.pack(fill=tk.X, pady=(0, 5))
 
         lbl_tray_title = tk.Label(card_tray, text=tr("browser_card_tray_title", "❖ WINDOWS SYSTEM TRAY & BACKGROUND MINIMIZATION"), font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_accent)
         lbl_tray_title.pack(anchor="w")
@@ -418,8 +419,8 @@ class BrowserSettingsModalMixin(BrowserControllerMixin):
         _update_dlg_tray_status()
 
         # 3c. Auto-Unpack Archives Card (AeroArchive Engine)
-        card_unpack = tk.Frame(body, bg=self.c_panel, padx=12, pady=10, highlightbackground=self.c_border, highlightthickness=1)
-        card_unpack.pack(fill=tk.X, pady=(0, 10))
+        card_unpack = tk.Frame(body, bg=self.c_panel, padx=12, pady=6, highlightbackground=self.c_border, highlightthickness=1)
+        card_unpack.pack(fill=tk.X, pady=(0, 5))
 
         lbl_unpack_title = tk.Label(card_unpack, text=tr("browser_card_unpack_title", "▣ AUTOMATIC ARCHIVE EXTRACTION (AEROARCHIVE ENGINE)"), font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_accent)
         lbl_unpack_title.pack(anchor="w")
@@ -477,8 +478,8 @@ class BrowserSettingsModalMixin(BrowserControllerMixin):
             base_app_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
             ext_dir = os.path.join(base_app_dir, "extension")
 
-        card_ext = tk.Frame(body, bg=self.c_panel, padx=12, pady=10, highlightbackground=self.c_border, highlightthickness=1)
-        card_ext.pack(fill=tk.X, pady=(0, 10))
+        card_ext = tk.Frame(body, bg=self.c_panel, padx=12, pady=6, highlightbackground=self.c_border, highlightthickness=1)
+        card_ext.pack(fill=tk.X, pady=(0, 5))
 
         lbl_e_title = tk.Label(card_ext, text=tr("browser_card_ext_title", "WEBEXTENSION ARTIFACT (MANIFEST V3)"), font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_text_muted)
         lbl_e_title.pack(anchor="w")
@@ -509,10 +510,15 @@ class BrowserSettingsModalMixin(BrowserControllerMixin):
         )
         btn_open.pack(side=tk.RIGHT)
 
+        # Close button (packed at bottom first so never clipped by guide notebook)
+        btn_close = tk.Button(body, text=tr("browser_btn_close", "Close"), font=("Segoe UI", 9, "bold"), bg=self.c_panel_light, fg=self.c_text_bright, relief="flat", cursor="hand2", padx=18, pady=5, command=dlg.destroy)
+        btn_close.pack(side=tk.BOTTOM, anchor="e", pady=(6, 0))
+
         # 3. Installation Guide Notebook
         nb = ttk.Notebook(body, style="Custom.TNotebook")
-        nb.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+        nb.pack(fill=tk.BOTH, expand=True, pady=(0, 4))
 
+        is_ar = tr("app_title", "").startswith("فقيه")
         tabs_data = [
             ("browser_tab_chrome", " Chrome & Brave ", "browser_guide_chrome",
              "1. Open Chrome or Brave and type chrome://extensions in the address bar.\n2. Turn ON 'Developer mode' using the toggle in the top-right corner.\n3. Click the 'Load unpacked' button at the top-left.\n4. Select the extension directory displayed above.\n5. The ⚡ Faqih Downloader icon will appear in your extensions bar!"),
@@ -522,23 +528,10 @@ class BrowserSettingsModalMixin(BrowserControllerMixin):
              "1. Open Firefox and type about:debugging#/runtime/this-firefox in the address bar.\n2. Click the 'Load Temporary Add-on...' button.\n3. Select the 'manifest.json' file inside the extension folder.\n4. The extension is immediately loaded and connects to Faqih Downloader."),
         ]
         for tab_key, tab_def, guide_key, guide_def in tabs_data:
-            t_frame = tk.Frame(nb, bg=self.c_panel, padx=12, pady=10)
+            t_frame = tk.Frame(nb, bg=self.c_panel, padx=12, pady=8)
             nb.add(t_frame, text=tr(tab_key, tab_def))
-            tk.Label(t_frame, text=tr(guide_key, guide_def), font=("Segoe UI", 9), bg=self.c_panel, fg=self.c_text_bright, justify="left").pack(anchor="w")
+            tk.Label(t_frame, text=tr(guide_key, guide_def), font=("Segoe UI", 9), bg=self.c_panel, fg=self.c_text_bright, justify=("right" if is_ar else "left"), anchor=("ne" if is_ar else "nw"), wraplength=max(500, dlg_w - 76)).pack(fill=tk.BOTH, expand=True, anchor=("ne" if is_ar else "nw"))
 
-        # Close button
-        btn_close = tk.Button(
-            body,
-            text=tr("browser_btn_close", "Close"),
-            font=("Segoe UI", 9, "bold"),
-            bg=self.c_panel_light,
-            fg=self.c_text_bright,
-            relief="flat",
-            cursor="hand2",
-            padx=16,
-            pady=4,
-            command=dlg.destroy
-        )
-        btn_close.pack(side=tk.RIGHT)
+        enable_dark_titlebar(dlg)
 
     open_browser_integration_dialog = _open_browser_integration_dialog

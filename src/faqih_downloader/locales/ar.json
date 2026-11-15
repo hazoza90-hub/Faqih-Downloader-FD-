@@ -365,5 +365,8 @@
   "info_missing_on_disk": "✕ الملف غير موجود على القرص",
   "info_status_completed": "مكتمل",
   "info_status_staged": "جاهز للتنزيل",
-  "info_status_queued": "في قائمة الانتظار"
+  "info_status_queued": "في قائمة الانتظار",
+  "badge_parsing": "جاري الفحص...",
+  "settings_limiter_preset_lbl": "حدود سرعة جاهزة:",
+  "settings_limiter_slider_lbl": "مؤشر تحديد السرعة (ك.ب/ث):"
 }

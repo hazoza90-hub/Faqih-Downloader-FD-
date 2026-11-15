@@ -79,7 +79,7 @@ class TopHeaderBarMixin:
         self.title_lbl = tk.Label(
             left_box,
             text=default_title,
-            font=("Segoe UI", 11, "bold"),
+            font=("Segoe UI", 10, "bold"),
             bg="#0b0e14",
             fg="#f8fafc"
         )
@@ -157,8 +157,8 @@ class TopHeaderBarMixin:
             bg="#0b0e14",
             card_bg="#151a24",
             border_color="#283548",
-            width=38,
-            height=34,
+            width=48,
+            height=38,
             inner_padx=2,
             inner_pady=2,
         )
@@ -166,7 +166,7 @@ class TopHeaderBarMixin:
         self.btn_settings = tk.Button(
             self._pill_settings.inner,
             text="⚙",
-            font=("Segoe UI", 11),
+            font=("Segoe UI", 12),
             bg="#151a24",
             fg="#94a3b8",
             activebackground="#242e42",
@@ -175,8 +175,8 @@ class TopHeaderBarMixin:
             bd=0,
             highlightthickness=0,
             cursor="hand2",
-            padx=8,
-            pady=2,
+            padx=6,
+            pady=3,
             command=self.open_settings_dialog
         )
         self.btn_settings._is_icon_only = True
@@ -191,8 +191,8 @@ class TopHeaderBarMixin:
             bg="#0b0e14",
             card_bg="#19f3ee",
             border_color="#14d4cf",
-            width=110,
-            height=34,
+            width=100,
+            height=38,
             inner_padx=2,
             inner_pady=2,
         )
@@ -225,8 +225,8 @@ class TopHeaderBarMixin:
             bg="#0b0e14",
             card_bg="#151a24",
             border_color="#283548",
-            width=135,
-            height=34,
+            width=124,
+            height=38,
             inner_padx=2,
             inner_pady=2,
         )
@@ -256,7 +256,7 @@ class TopHeaderBarMixin:
             bg="#0b0e14",
             card_bg="#0f1520",
             border_color="#283548",
-            height=34,
+            height=38,
             inner_padx=4,
             inner_pady=2,
         )
@@ -273,11 +273,11 @@ class TopHeaderBarMixin:
             relief="flat",
             bd=0,
             cursor="hand2",
-            padx=10,
-            pady=2,
+            padx=12,
+            pady=4,
             command=self._paste_url
         )
-        self.btn_paste.pack(side=tk.RIGHT, padx=(2, 4), pady=2)
+        self.btn_paste.pack(side=tk.RIGHT, fill=tk.Y, padx=(2, 4), pady=2)
 
         self.url_var = tk.StringVar(value="")
         self.entry_url = tk.Entry(

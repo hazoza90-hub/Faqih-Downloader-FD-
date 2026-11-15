@@ -31,26 +31,48 @@ class SettingsModalExtraMixin:
             font=("Segoe UI", 9, "bold"),
             bg=self.c_bg,
             fg=self.c_accent,
-        ).pack(anchor="w", pady=(0, 6))
+        ).pack(anchor="w", pady=(0, 10))
+
+        card = tk.Frame(
+            parent,
+            bg=self.c_panel,
+            padx=14,
+            pady=14,
+            highlightthickness=1,
+            highlightbackground=self.c_border,
+        )
+        card.pack(fill=tk.X, pady=(0, 12))
 
         # Preset Row
-        row_preset = tk.Frame(parent, bg=self.c_bg)
-        row_preset.pack(fill=tk.X, pady=(0, 8))
-        tk.Label(row_preset, text="Preset Limit:", font=("Segoe UI", 9), bg=self.c_bg, fg=self.c_text_bright).pack(side=tk.LEFT)
+        row_preset = tk.Frame(card, bg=self.c_panel)
+        row_preset.pack(fill=tk.X, pady=(0, 12))
+        tk.Label(
+            row_preset,
+            text=tr("settings_limiter_preset_lbl", "Preset Limit:"),
+            font=("Segoe UI", 9),
+            bg=self.c_panel,
+            fg=self.c_text_bright,
+        ).pack(side=tk.LEFT)
 
         unlimited_val = tr("lbl_unlimited", "Unlimited")
         presets = [unlimited_val, "512 KB/s", "1 MB/s", "2 MB/s", "5 MB/s", "10 MB/s", "20 MB/s"]
         cur_preset = getattr(self.parent_app, "speed_preset_var", None)
         init_preset = cur_preset.get() if cur_preset else unlimited_val
-        self.modal_combo_preset = ttk.Combobox(row_preset, values=presets, state="readonly", width=14)
+        self.modal_combo_preset = ttk.Combobox(row_preset, values=presets, state="readonly", width=16)
         self.modal_combo_preset.set(init_preset if init_preset in presets else unlimited_val)
         self.modal_combo_preset.pack(side=tk.RIGHT)
         self.modal_combo_preset.bind("<<ComboboxSelected>>", self._on_modal_preset_selected)
 
         # Scale Slider Row
-        row_slider = tk.Frame(parent, bg=self.c_bg)
-        row_slider.pack(fill=tk.X, pady=(0, 6))
-        tk.Label(row_slider, text="Throttling Slider (KB/s):", font=("Segoe UI", 9), bg=self.c_bg, fg=self.c_text_bright).pack(anchor="w")
+        row_slider = tk.Frame(card, bg=self.c_panel)
+        row_slider.pack(fill=tk.X, pady=(0, 12))
+        tk.Label(
+            row_slider,
+            text=tr("settings_limiter_slider_lbl", "Throttling Slider (KB/s):"),
+            font=("Segoe UI", 9),
+            bg=self.c_panel,
+            fg=self.c_text_bright,
+        ).pack(anchor="w", pady=(0, 4))
 
         slider_val = 0
         if self.parent_app and hasattr(self.parent_app, "slider_speed"):
@@ -63,10 +85,10 @@ class SettingsModalExtraMixin:
             row_slider,
             text=f"{unlimited_val} (0 KB/s)" if slider_val == 0 else f"{slider_val:,} KB/s ({slider_val/1024:.1f} MB/s)",
             font=("Segoe UI", 8, "bold"),
-            bg=self.c_bg,
+            bg=self.c_panel,
             fg=self.c_accent,
         )
-        self.modal_slider_val_lbl.pack(anchor="e")
+        self.modal_slider_val_lbl.pack(anchor="e", pady=(0, 2))
 
         self.modal_slider = tk.Scale(
             row_slider,
@@ -81,16 +103,20 @@ class SettingsModalExtraMixin:
             bd=0,
             relief="flat",
             sliderrelief="flat",
-            bg=self.c_panel,
-            troughcolor=self.c_input_bg,
+            width=14,
+            sliderlength=22,
+            bg=self.c_accent,
+            activebackground="#38bdf8",
+            troughcolor="#1e293b",
+            cursor="hand2",
         )
         self.modal_slider.set(slider_val)
-        self.modal_slider.pack(fill=tk.X, pady=(2, 8))
+        self.modal_slider.pack(fill=tk.X, pady=(2, 4))
 
         # Custom Input Row + Apply
-        row_custom = tk.Frame(parent, bg=self.c_bg)
-        row_custom.pack(fill=tk.X, pady=(0, 8))
-        tk.Label(row_custom, text=tr("lbl_custom_speed", "Custom Limit (KB/s):"), font=("Segoe UI", 9), bg=self.c_bg, fg=self.c_text_bright).pack(side=tk.LEFT)
+        row_custom = tk.Frame(card, bg=self.c_panel)
+        row_custom.pack(fill=tk.X, pady=(0, 10))
+        tk.Label(row_custom, text=tr("lbl_custom_speed", "Custom Limit (KB/s):"), font=("Segoe UI", 9), bg=self.c_panel, fg=self.c_text_bright).pack(side=tk.LEFT)
 
         self.modal_btn_apply = tk.Button(
             row_custom,
@@ -102,7 +128,7 @@ class SettingsModalExtraMixin:
             relief="flat",
             cursor="hand2",
             padx=12,
-            pady=2,
+            pady=4,
             command=self._apply_modal_speed_limit,
         )
         self.modal_btn_apply.pack(side=tk.RIGHT)
@@ -124,21 +150,21 @@ class SettingsModalExtraMixin:
             highlightbackground=self.c_border,
             width=10,
         )
-        self.modal_entry_custom.pack(side=tk.RIGHT, padx=(0, 8), ipady=2)
+        self.modal_entry_custom.pack(side=tk.RIGHT, padx=(0, 8), ipady=3)
         self.modal_entry_custom.insert(0, custom_val)
         self.modal_entry_custom.bind("<Return>", lambda e: self._apply_modal_speed_limit())
 
         # Live status
         cur_limit = getattr(self.parent_app, "speed_limit", 0.0) if self.parent_app else 0.0
-        limit_desc = tr("lbl_current_unlimited", "● Current: Unlimited") if cur_limit <= 0 else f"● Current: {format_speed(cur_limit)}"
+        limit_desc = tr("lbl_current_unlimited", "● Current: Unlimited") if cur_limit <= 0 else tr("lbl_current_limit", "● Current: {limit}").format(limit=format_speed(cur_limit))
         self.modal_lbl_active = tk.Label(
-            parent,
+            card,
             text=limit_desc,
             font=("Segoe UI", 9, "bold"),
-            bg=self.c_bg,
+            bg=self.c_panel,
             fg=self.c_success if cur_limit <= 0 else self.c_accent,
         )
-        self.modal_lbl_active.pack(anchor="w", pady=(4, 0))
+        self.modal_lbl_active.pack(anchor="w", pady=(6, 0))
 
     def _on_modal_preset_selected(self, event=None):
         val = self.modal_combo_preset.get()

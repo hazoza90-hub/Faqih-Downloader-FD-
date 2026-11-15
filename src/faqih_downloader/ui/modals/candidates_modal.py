@@ -24,6 +24,7 @@ from ...utils.file_ops import get_file_category_and_icon
 from ...utils.url_utils import derive_download_filename
 from ...services.youtube_service import format_filesize
 from ...utils.tk_helpers import _detach_photo_tk
+from ...utils.window_effects import enable_dark_titlebar
 
 _BaseToplevel = tk.Toplevel if tk is not None else object
 
@@ -136,6 +137,7 @@ class MultipleCandidatesModal(_BaseToplevel):
 
         self.candidate_vars: List[tk.BooleanVar] = []
         self._build_ui()
+        enable_dark_titlebar(self)
 
     def _build_ui(self):
         # Outer border

@@ -1584,7 +1584,7 @@ class TestPart1To4CriticalBugfixes(unittest.TestCase):
 
             set_current_language("ar")
             app._draw_chunk_segments([])
-            text_items_ar = [app.canvas_chunks.itemcget(i, "text") for i in app.canvas_chunks.find_all() if app.canvas_chunks.type(i) == "text"]
+            text_items_ar = [app.canvas_chunks.itemcget(i, "text").rstrip("\u200f") for i in app.canvas_chunks.find_all() if app.canvas_chunks.type(i) == "text"]
             self.assertIn("بانتظار بدء التحميل...", text_items_ar)
         finally:
             set_current_language("en")

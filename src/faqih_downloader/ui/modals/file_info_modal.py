@@ -18,6 +18,7 @@ from faqih_downloader.locales.i18n import tr
 from faqih_downloader.config import get_resource_path
 from faqih_downloader.utils.file_ops import open_containing_folder
 from faqih_downloader.utils.tk_helpers import _detach_photo_tk
+from faqih_downloader.utils.window_effects import enable_dark_titlebar
 
 
 def _format_size_with_bytes(size_bytes: int) -> str:
@@ -111,6 +112,7 @@ class FileInfoModal(tk.Toplevel if tk is not None else object):
         self.minsize(520, 420)
 
         self._build_ui()
+        enable_dark_titlebar(self)
 
     def grab_set(self):
         """No-op: Eliminates Win32 modal input locks."""
@@ -290,7 +292,7 @@ class FileInfoModal(tk.Toplevel if tk is not None else object):
 
                 btn_cp = tk.Button(
                     r_frame,
-                    text=f"⎘ {tr('menu_copy_url', 'Copy URL')}",
+                    text=tr('menu_copy_url', '⎘ Copy URL'),
                     font=("Segoe UI", 8, "bold"),
                     bg="#1e293b",
                     fg=self.c_accent_blue,
@@ -299,8 +301,8 @@ class FileInfoModal(tk.Toplevel if tk is not None else object):
                     relief="flat",
                     bd=0,
                     cursor="hand2",
-                    padx=8,
-                    pady=2,
+                    padx=10,
+                    pady=6,
                     command=_do_copy
                 )
                 btn_cp.pack(side=opp_side)
@@ -320,8 +322,8 @@ class FileInfoModal(tk.Toplevel if tk is not None else object):
                     relief="flat",
                     bd=0,
                     cursor="hand2",
-                    padx=8,
-                    pady=2,
+                    padx=10,
+                    pady=6,
                     command=_do_open
                 )
                 btn_op.pack(side=opp_side)
@@ -332,7 +334,7 @@ class FileInfoModal(tk.Toplevel if tk is not None else object):
 
         btn_dismiss = tk.Button(
             ftr,
-            text=tr("btn_close_settings", "Close"),
+            text=tr("settings_btn_save_close", "Close"),
             font=("Segoe UI", 9, "bold"),
             bg="#1e293b",
             fg=self.c_text_bright,

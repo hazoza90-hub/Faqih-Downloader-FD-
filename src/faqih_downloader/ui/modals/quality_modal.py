@@ -59,7 +59,7 @@ class QualitySelectionModal(_BaseToplevel):
             dpi = 96.0
         dpi_scale = max(1.0, dpi / 96.0)
         sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
-        dlg_w, dlg_h = min(int(740 * dpi_scale), max(640, int(sw * 0.92))), min(int(620 * dpi_scale), max(520, int(sh * 0.88)))
+        dlg_w, dlg_h = min(int(800 * dpi_scale), max(640, int(sw * 0.92))), min(int(655 * dpi_scale), max(550, int(sh * 0.90)))
         is_vis = False
         if parent is not None:
             try: is_vis = parent.winfo_exists() and parent.winfo_viewable() and parent.state() not in ("withdrawn", "iconic")
@@ -146,8 +146,8 @@ class QualitySelectionModal(_BaseToplevel):
             ("res", tr("modal_col_res", "Resolution / Quality"), "w", 170),
             ("ext", tr("modal_col_ext", "Format"), "center", 70),
             ("size", tr("modal_col_size", "Est. Size"), "e", 100),
-            ("fps", tr("modal_col_fps", "FPS"), "center", 55),
-            ("mode", tr("modal_col_type", "Stream Details"), "w", 250),
+            ("fps", tr("modal_col_fps", "FPS"), "center", 95),
+            ("mode", tr("modal_col_type", "Stream Details"), "w", 210),
         ):
             self.tree.heading(col, text=txt, anchor=anc)
             self.tree.column(col, width=w, anchor=anc)
@@ -248,7 +248,7 @@ class QualitySelectionModal(_BaseToplevel):
             relief="flat",
             activebackground="#059669",
             cursor="hand2",
-            padx=16,
+            padx=12,
             pady=6,
             command=self._on_download
         )
@@ -266,11 +266,11 @@ class QualitySelectionModal(_BaseToplevel):
                 relief="flat",
                 activebackground=c_accent,
                 cursor="hand2",
-                padx=16,
+                padx=12,
                 pady=6,
                 command=self._on_download_mp3
             )
-            self.btn_download_mp3.pack(side=tk.LEFT, padx=(8, 0))
+            self.btn_download_mp3.pack(side=tk.LEFT, padx=(6, 0))
 
         self.btn_preview_video = tk.Button(
             btn_row,
@@ -282,25 +282,25 @@ class QualitySelectionModal(_BaseToplevel):
             activebackground=c_accent_dark,
             activeforeground="white",
             cursor="hand2",
-            padx=14,
+            padx=12,
             pady=6,
             command=self._on_preview_video
         )
-        self.btn_preview_video.pack(side=tk.LEFT, padx=(8, 0))
+        self.btn_preview_video.pack(side=tk.LEFT, padx=(6, 0))
 
         self.btn_cancel = tk.Button(
             btn_row, text=tr("modal_btn_cancel", "✕ Cancel"), font=("Segoe UI", 9, "bold"),
             bg=c_panel_light, fg=c_text_muted, relief="flat", activebackground=c_border,
-            cursor="hand2", padx=16, pady=6, command=self._on_close
+            cursor="hand2", padx=12, pady=6, command=self._on_close
         )
         self.btn_cancel.pack(side=tk.RIGHT)
 
         self.btn_open_app = tk.Button(
             btn_row, text=tr("modal_btn_open_in_main", "❐ Open in Main App"),
             font=("Segoe UI", 9), bg=c_panel_light, fg=c_text_bright, relief="flat",
-            activebackground=c_border, cursor="hand2", padx=14, pady=6, command=self._on_open_in_main
+            activebackground=c_border, cursor="hand2", padx=12, pady=6, command=self._on_open_in_main
         )
-        self.btn_open_app.pack(side=tk.RIGHT, padx=(0, 8))
+        self.btn_open_app.pack(side=tk.RIGHT, padx=(0, 6))
 
     def _on_download_mp3(self):
         """One-click download as universal MP3 audio."""

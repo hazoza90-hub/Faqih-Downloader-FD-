@@ -14,6 +14,7 @@ from typing import Any, List, Dict, Optional, Tuple
 from faqih_downloader.locales.i18n import tr
 from faqih_downloader.config import get_resource_path
 from faqih_downloader.utils.tk_helpers import _detach_photo_tk
+from faqih_downloader.utils.window_effects import enable_dark_titlebar
 from faqih_downloader.ui.panels.kanban_vault_ops import scan_unregistered_disk_files
 
 
@@ -97,6 +98,7 @@ class VaultRestoreModal(tk.Toplevel if tk is not None else object):
             self._item_vars[f_info["file_path"]] = tk.BooleanVar(master=self, value=False)
 
         self._build_ui()
+        enable_dark_titlebar(self)
         self._display_files()
 
     def grab_set(self): pass  # Eliminates Win32 modal input locks

@@ -9,6 +9,12 @@ from faqih_downloader.utils import format_speed
 class LocaleControllerMixin:
     """Provides methods for managing UI localization dynamically in-place."""
 
+    def set_locale(self, lang: str) -> bool:
+        """Sets active language programmatically and refreshes all UI strings in-place."""
+        ok = LocalizationManager.get_instance().set_language(lang)
+        self._update_ui_language()
+        return ok
+
     def toggle_language(self):
         """Toggles active language between Arabic and English dynamically in-place."""
         new_lang = LocalizationManager.get_instance().toggle_language()
@@ -207,19 +213,24 @@ class LocaleControllerMixin:
                 self.lbl_slider_val.configure(text=f"{cur_val:,} KB/s ({cur_val/1024:.1f} MB/s)")
 
         # Media Options Bar
-        if hasattr(self, "lbl_main_quality") and self.lbl_main_quality.winfo_exists():
-            self.lbl_main_quality.configure(text=tr("lbl_main_quality", "⚙ Quality:"))
-        if hasattr(self, "lbl_main_audio") and self.lbl_main_audio.winfo_exists():
-            self.lbl_main_audio.configure(text=tr("lbl_main_audio", "♪ Audio:"))
-        if hasattr(self, "lbl_main_sub") and self.lbl_main_sub.winfo_exists():
-            self.lbl_main_sub.configure(text=tr("lbl_main_sub", "≡ Subtitles:"))
-        if hasattr(self, "lbl_main_sub_mode") and self.lbl_main_sub_mode.winfo_exists():
-            self.lbl_main_sub_mode.configure(text=tr("lbl_main_sub_mode", "⚙️ Mode:"))
-        if hasattr(self, "lbl_main_sub_pos") and self.lbl_main_sub_pos.winfo_exists():
-            is_ar = (cur_lang == "ar") or (getattr(self, "current_language", "en") == "ar") or (get_setting("language", "ar") == "ar")
-            self.lbl_main_sub_pos.configure(text=tr("lbl_main_threads", "⚡ المسارات:" if is_ar else "⚡ Threads:"))
-        if hasattr(self, "btn_reopen_quality") and self.btn_reopen_quality.winfo_exists():
-            self.btn_reopen_quality.configure(text=tr("btn_media_quality_options", "⚙ Options..."))
+        if hasattr(self, "refresh_media_options_locale") and callable(self.refresh_media_options_locale):
+            self.refresh_media_options_locale()
+        else:
+            if hasattr(self, "lbl_main_quality") and self.lbl_main_quality.winfo_exists():
+                self.lbl_main_quality.configure(text=tr("lbl_main_quality", "⚙ Quality:"))
+            if hasattr(self, "lbl_main_audio") and self.lbl_main_audio.winfo_exists():
+                self.lbl_main_audio.configure(text=tr("lbl_main_audio", "♪ Audio:"))
+            if hasattr(self, "lbl_main_sub") and self.lbl_main_sub.winfo_exists():
+                self.lbl_main_sub.configure(text=tr("lbl_main_sub", "≡ Subtitles:"))
+            if hasattr(self, "lbl_main_sub_mode") and self.lbl_main_sub_mode.winfo_exists():
+                self.lbl_main_sub_mode.configure(text=tr("lbl_main_sub_mode", "⚙️ Mode:"))
+            if hasattr(self, "lbl_main_sub_pos") and self.lbl_main_sub_pos.winfo_exists():
+                is_ar = (cur_lang == "ar") or (getattr(self, "current_language", "en") == "ar") or (get_setting("language", "ar") == "ar")
+                self.lbl_main_sub_pos.configure(text=tr("lbl_main_threads", "⚡ المسارات:" if is_ar else "⚡ Threads:"))
+            if hasattr(self, "btn_reopen_quality") and self.btn_reopen_quality.winfo_exists():
+                self.btn_reopen_quality.configure(text=tr("btn_media_quality_options", "⚙ Options..."))
+            if hasattr(self, "btn_main_preview") and self.btn_main_preview.winfo_exists():
+                self.btn_main_preview.configure(text=tr("btn_preview_short", "▶ Preview"))
 
         # Kanban Pipeline Dynamic Refreshes
         if hasattr(self, "refresh_kanban_col1") and callable(self.refresh_kanban_col1):
@@ -237,6 +248,7 @@ class LocaleControllerMixin:
                 pass
 
     _refresh_ui_texts = _update_ui_language
+    apply_locale = _update_ui_language
 
 
 __all__ = ["LocaleControllerMixin"]

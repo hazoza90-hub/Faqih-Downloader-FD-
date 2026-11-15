@@ -46,7 +46,7 @@ class MediaOptionsBarMixin(MediaOptionsActionsMixin):
         row1 = tk.Frame(self.media_options_frame, bg=self.c_panel)
         row1.pack(fill=tk.X, pady=(4, 2))
         self.lbl_main_quality = tk.Label(row1, text=tr("lbl_main_quality", "⚙ Quality:"), font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_text_bright, width=10, anchor="w")
-        self.cb_main_quality = ttk.Combobox(row1, state="readonly", font=("Segoe UI", 8), width=22)
+        self.cb_main_quality = ttk.Combobox(row1, state="readonly", font=("Segoe UI", 8), width=25)
         self.lbl_main_quality.pack(side=tk.LEFT); self.cb_main_quality.pack(side=tk.LEFT, padx=(4, 10))
         self.cb_main_quality.bind("<<ComboboxSelected>>", self._on_main_quality_changed)
 
@@ -55,9 +55,9 @@ class MediaOptionsBarMixin(MediaOptionsActionsMixin):
         self.lbl_main_audio.pack(side=tk.LEFT); self.cb_main_audio.pack(side=tk.LEFT, padx=(4, 8))
         self.cb_main_audio.bind("<<ComboboxSelected>>", self._on_main_audio_changed)
 
-        self.btn_main_preview = tk.Button(row1, text=tr("btn_preview_short", "▶ Preview"), font=("Segoe UI", 8, "bold"), bg=self.c_panel_light, fg=self.c_accent, relief="flat", activebackground=self.c_accent_dark, activeforeground="white", cursor="hand2", padx=8, pady=2, command=self._open_main_media_preview)
+        self.btn_main_preview = tk.Button(row1, text=tr("btn_preview_short", "▶ Preview"), font=("Segoe UI", 8, "bold"), bg=self.c_panel_light, fg=self.c_accent, relief="flat", activebackground=self.c_accent_dark, activeforeground="white", cursor="hand2", padx=10, pady=4, command=self._open_main_media_preview)
         self.btn_main_preview.pack(side=tk.RIGHT, padx=(4, 0))
-        self.btn_reopen_quality = tk.Button(row1, text=tr("btn_media_quality_options", "⚙ Options..."), font=("Segoe UI", 8, "bold"), bg=self.c_panel_light, fg=self.c_accent, relief="flat", activebackground=self.c_accent_dark, activeforeground="white", cursor="hand2", padx=8, pady=2, command=self._reopen_media_quality_modal)
+        self.btn_reopen_quality = tk.Button(row1, text=tr("btn_media_quality_options", "⚙ Options..."), font=("Segoe UI", 8, "bold"), bg=self.c_panel_light, fg=self.c_accent, relief="flat", activebackground=self.c_accent_dark, activeforeground="white", cursor="hand2", padx=10, pady=4, command=self._reopen_media_quality_modal)
         self.btn_reopen_quality.pack(side=tk.RIGHT, padx=(0, 4))
         self.btn_main_advanced = self.btn_reopen_quality
 
@@ -65,13 +65,13 @@ class MediaOptionsBarMixin(MediaOptionsActionsMixin):
         row2 = tk.Frame(self.media_options_frame, bg=self.c_panel)
         row2.pack(fill=tk.X, pady=(2, 2))
         self.lbl_main_sub = tk.Label(row2, text=tr("lbl_main_sub", "≡ Subtitles:"), font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_text_bright, width=10, anchor="w")
-        self.cb_main_sub = ttk.Combobox(row2, state="readonly", font=("Segoe UI", 8), width=22)
+        self.cb_main_sub = ttk.Combobox(row2, state="readonly", font=("Segoe UI", 8), width=24)
         self.lbl_main_sub.pack(side=tk.LEFT); self.cb_main_sub.pack(side=tk.LEFT, padx=(4, 10))
         self.cb_main_sub.bind("<<ComboboxSelected>>", self._on_main_sub_changed)
 
-        self.lbl_main_sub_mode = tk.Label(row2, text=tr("lbl_main_sub_mode", "⚙️ Mode:"), font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_text_bright, width=7, anchor="w")
+        self.lbl_main_sub_mode = tk.Label(row2, text=tr("lbl_main_sub_mode", "⚙️ Mode:"), font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_text_bright, width=8, anchor="w")
         sub_mode_labels = [tr("sub_mode_soft", "دمج ناعم"), tr("sub_mode_srt_only", "ملف ترجمة"), tr("sub_mode_burn", "حرق دائم (Burn-in)")]
-        self.cb_main_sub_mode = ttk.Combobox(row2, values=sub_mode_labels, state="disabled", font=("Segoe UI", 8), width=18)
+        self.cb_main_sub_mode = ttk.Combobox(row2, values=sub_mode_labels, state="disabled", font=("Segoe UI", 8), width=25)
         self.cb_main_sub_mode.current(0)
         self.lbl_main_sub_mode.pack(side=tk.LEFT); self.cb_main_sub_mode.pack(side=tk.LEFT, padx=(4, 8))
         self.cb_main_sub_mode.bind("<<ComboboxSelected>>", self._on_main_sub_mode_changed)
@@ -428,6 +428,53 @@ class MediaOptionsBarMixin(MediaOptionsActionsMixin):
                     try: set_setting("subtitle_position", pos)
                     except Exception: pass
         self._sync_media_bar_state(event)
+
+    def refresh_media_options_locale(self):
+        """Refreshes all Media Options Bar labels, buttons, and comboboxes on language switch."""
+        try:
+            from faqih_downloader.i18n import LocalizationManager
+            cur_lang = LocalizationManager.get_instance().get_language()
+        except Exception:
+            cur_lang = getattr(self, "current_language", "ar")
+        is_ar = (cur_lang == "ar")
+        if hasattr(self, "lbl_main_quality") and self.lbl_main_quality.winfo_exists():
+            self.lbl_main_quality.configure(text=tr("lbl_main_quality", "⚙ Quality:"))
+        if hasattr(self, "lbl_main_audio") and self.lbl_main_audio.winfo_exists():
+            self.lbl_main_audio.configure(text=tr("lbl_main_audio", "♪ Audio:"))
+        if hasattr(self, "lbl_main_sub") and self.lbl_main_sub.winfo_exists():
+            self.lbl_main_sub.configure(text=tr("lbl_main_sub", "≡ Subtitles:"))
+        if hasattr(self, "lbl_main_sub_mode") and self.lbl_main_sub_mode.winfo_exists():
+            self.lbl_main_sub_mode.configure(text=tr("lbl_main_sub_mode", "⚙️ Mode:"))
+        if hasattr(self, "lbl_main_sub_pos") and self.lbl_main_sub_pos.winfo_exists():
+            self.lbl_main_sub_pos.configure(text=tr("lbl_main_threads", "⚡ المسارات:" if is_ar else "⚡ Threads:"))
+        if hasattr(self, "btn_reopen_quality") and self.btn_reopen_quality.winfo_exists():
+            self.btn_reopen_quality.configure(text=tr("btn_media_quality_options", "⚙ Options..."))
+        if hasattr(self, "btn_main_preview") and self.btn_main_preview.winfo_exists():
+            self.btn_main_preview.configure(text=tr("btn_preview_short", "▶ Preview"))
+        if hasattr(self, "cb_main_sub_mode") and self.cb_main_sub_mode.winfo_exists():
+            try:
+                cur_idx = self.cb_main_sub_mode.current()
+            except Exception:
+                cur_idx = 0
+            sub_mode_labels = [
+                tr("sub_mode_soft", "دمج ناعم"),
+                tr("sub_mode_srt_only", "ملف ترجمة"),
+                tr("sub_mode_burn", "حرق دائم (Burn-in)"),
+            ]
+            self.cb_main_sub_mode.configure(values=sub_mode_labels)
+            if 0 <= cur_idx < len(sub_mode_labels):
+                self.cb_main_sub_mode.current(cur_idx)
+        if hasattr(self, "cb_main_sub") and self.cb_main_sub.winfo_exists():
+            try:
+                vals = list(self.cb_main_sub.cget("values") or [])
+                if vals and vals[0] in ("بدون ترجمة (None)", "None (No Subtitle)", "No Subtitle", tr("sub_none", "بدون ترجمة (None)")):
+                    cur_s = self.cb_main_sub.current()
+                    vals[0] = tr("sub_none", "بدون ترجمة (None)")
+                    self.cb_main_sub.configure(values=vals)
+                    if 0 <= cur_s < len(vals):
+                        self.cb_main_sub.current(cur_s)
+            except Exception:
+                pass
 
 
 __all__ = ["MediaOptionsBarMixin", "MediaOptionsActionsMixin"]

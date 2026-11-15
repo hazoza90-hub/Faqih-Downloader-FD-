@@ -80,22 +80,28 @@ def build_staged_link_card(parent: Any, info: Dict[str, Any], callbacks: Dict[st
     opp_side = tk.LEFT if is_ar else tk.RIGHT
     is_media = bool(info.get("media_context") or str(category).lower() in ("video", "audio") or info.get("selected_opt"))
 
-    card_h = 172 if is_media else 138
+    card_h = 194 if is_media else 150
     card = RoundedGlassCard(
         parent, radius=12, bg="#0b0e14", card_bg="#151a24", border_color="#283548",
         height=card_h, inner_padx=12, inner_pady=10
     )
     card.pack(fill=tk.X, pady=(0, 10))
 
-    # Top Row: Filename + Badge
+    # Top Row: Filename + Badge (pack badge first so filename never collides or clips)
     top_row = tk.Frame(card.inner, bg="#151a24"); top_row.pack(fill=tk.X)
-    tk.Label(top_row, text=_truncate_title(file_name, 28), font=("Segoe UI", 9, "bold"), bg="#151a24", fg="#f8fafc").pack(side=pad_side)
-    tk.Label(top_row, text=badge, font=("Segoe UI", 8, "bold"), bg="#0284c7", fg="#ffffff", padx=6, pady=1).pack(side=opp_side)
+    has_ar_fn = any('\u0600' <= ch <= '\u06FF' or '\u0750' <= ch <= '\u077F' or '\u08A0' <= ch <= '\u08FF' for ch in str(file_name))
+    tk.Label(top_row, text=badge, font=("Segoe UI", 8, "bold"), bg="#0284c7", fg="#ffffff", padx=6, pady=1).pack(side=opp_side, padx=(6, 0) if not is_ar else (0, 6))
+    tk.Label(
+        top_row,
+        text=_truncate_title(file_name, 24 if has_ar_fn else 28),
+        font=("Segoe UI", 9, "bold"),
+        bg="#151a24",
+        fg="#f8fafc",
+        anchor="e" if has_ar_fn else "w",
+    ).pack(side=pad_side, fill=tk.X, expand=True)
 
-    # Second Row: Size, Category, Audio/Sub Status, Resume
+    # Second Row: Format / Audio / Subtitle / Size Details (dedicated full-width row to avoid overlap)
     meta_row = tk.Frame(card.inner, bg="#151a24"); meta_row.pack(fill=tk.X, pady=(3, 0))
-    res_txt = tr("info_resumable", "✓ Resumable") if supports_resume else tr("info_not_resumable", "✕ Non-resumable")
-    tk.Label(meta_row, text=res_txt, font=("Segoe UI", 8), bg="#151a24", fg=("#22c55e" if supports_resume else "#ef4444")).pack(side=opp_side)
     if is_media:
         opt = info.get("selected_opt")
         if not opt and isinstance(info.get("media_context"), dict):
@@ -123,13 +129,41 @@ def build_staged_link_card(parent: Any, info: Dict[str, Any], callbacks: Dict[st
         if file_size > 0:
             parts.append(_format_size(file_size))
         desc_txt = " • ".join(parts)
-        tk.Label(meta_row, text=desc_txt, font=("Segoe UI", 8), bg="#151a24", fg="#38bdf8").pack(side=pad_side)
+        tk.Label(
+            meta_row,
+            text=desc_txt,
+            font=("Segoe UI", 8),
+            bg="#151a24",
+            fg="#38bdf8",
+            anchor="e" if is_ar else "w",
+            justify="right" if is_ar else "left",
+            wraplength=260,
+        ).pack(fill=tk.X)
     else:
-        tk.Label(meta_row, text=f"{_format_size(file_size)}  •  {str(category).capitalize()}", font=("Segoe UI", 8), bg="#151a24", fg="#94a3b8").pack(side=pad_side)
+        tk.Label(
+            meta_row,
+            text=f"{_format_size(file_size)}  •  {str(category).capitalize()}",
+            font=("Segoe UI", 8),
+            bg="#151a24",
+            fg="#94a3b8",
+            anchor="e" if is_ar else "w",
+        ).pack(fill=tk.X)
+
+    # Row 2b: Resume status separated cleanly onto its own row
+    resume_row = tk.Frame(card.inner, bg="#151a24"); resume_row.pack(fill=tk.X, pady=(2, 0))
+    res_txt = tr("info_resumable", "✓ Resumable") if supports_resume else tr("info_not_resumable", "✕ Non-resumable")
+    tk.Label(
+        resume_row,
+        text=res_txt,
+        font=("Segoe UI", 8),
+        bg="#151a24",
+        fg=("#22c55e" if supports_resume else "#ef4444"),
+        anchor="e" if is_ar else "w",
+    ).pack(fill=tk.X)
 
     # Third Row: Destination Path
     path_row = tk.Frame(card.inner, bg="#151a24"); path_row.pack(fill=tk.X, pady=(2, 0))
-    tk.Label(path_row, text=f"📁 {_truncate_title(final_dest, 36) if final_dest else '—'}", font=("Segoe UI", 7), bg="#151a24", fg="#64748b").pack(side=pad_side)
+    tk.Label(path_row, text=f"📁 {_truncate_title(final_dest, 34) if final_dest else '—'}", font=("Segoe UI", 7), bg="#151a24", fg="#64748b", anchor="e" if is_ar else "w").pack(fill=tk.X)
 
     # Fourth Row: Dedicated Quality & Dubbing Button (for Media)
     if is_media and "quality" in callbacks:
@@ -138,7 +172,7 @@ def build_staged_link_card(parent: Any, info: Dict[str, Any], callbacks: Dict[st
             q_row, text=tr("staged_btn_quality", "⚙ الجودة والدبلجة والترجمة" if is_ar else "⚙ Quality, Dubbing & Subtitles"),
             font=("Segoe UI", 8, "bold"),
             bg="#1e293b", fg="#38bdf8", activebackground="#0284c7", activeforeground="#ffffff",
-            relief="flat", bd=0, cursor="hand2", padx=8, pady=3,
+            relief="flat", bd=0, cursor="hand2", padx=8, pady=4,
             command=lambda: callbacks.get("quality", lambda i: None)(info)
         ).pack(fill=tk.X)
 
@@ -146,8 +180,8 @@ def build_staged_link_card(parent: Any, info: Dict[str, Any], callbacks: Dict[st
     btn_row = tk.Frame(card.inner, bg="#151a24"); btn_row.pack(fill=tk.X, pady=(5, 0))
     tk.Button(
         btn_row, text=tr("staged_btn_start", "▶ Start Download"), font=("Segoe UI", 8, "bold"),
-        bg="#10b981", fg="#ffffff", activebackground="#059669", activeforeground="#ffffff",
-        relief="flat", bd=0, cursor="hand2", padx=10, pady=3,
+        bg="#059669", fg="#ffffff", activebackground="#047857", activeforeground="#ffffff",
+        relief="flat", bd=0, cursor="hand2", padx=10, pady=4,
         command=lambda: callbacks.get("start", lambda i: None)(info)
     ).pack(side=pad_side, padx=(0, 6) if not is_ar else (6, 0))
 
@@ -155,20 +189,20 @@ def build_staged_link_card(parent: Any, info: Dict[str, Any], callbacks: Dict[st
         tk.Button(
             btn_row, text=tr("staged_btn_quality", "⚙ Quality & Dub"), font=("Segoe UI", 8, "bold"),
             bg="#1e293b", fg="#38bdf8", activebackground="#0284c7", activeforeground="#ffffff",
-            relief="flat", bd=0, cursor="hand2", padx=8, pady=3,
+            relief="flat", bd=0, cursor="hand2", padx=8, pady=4,
             command=lambda: callbacks.get("quality", lambda i: None)(info)
         ).pack(side=pad_side, padx=(0, 6) if not is_ar else (6, 0))
 
     tk.Button(
         btn_row, text=tr("staged_btn_info", "ℹ Info"), font=("Segoe UI", 8, "bold"),
         bg="#1e293b", fg="#94a3b8", activebackground="#0284c7", activeforeground="#ffffff",
-        relief="flat", bd=0, cursor="hand2", padx=8, pady=3,
+        relief="flat", bd=0, cursor="hand2", padx=8, pady=4,
         command=lambda: callbacks.get("info", lambda i: None)(info)
     ).pack(side=pad_side, padx=(0, 6) if not is_ar else (6, 0))
     tk.Button(
         btn_row, text="✕", font=("Segoe UI", 8, "bold"), bg="#1e293b", fg="#94a3b8",
         activebackground="#ef4444", activeforeground="#ffffff", relief="flat", bd=0, cursor="hand2",
-        padx=8, pady=3, command=lambda: callbacks.get("remove", lambda i: None)(info)
+        padx=8, pady=4, command=lambda: callbacks.get("remove", lambda i: None)(info)
     ).pack(side=opp_side)
 
     # Context Menu Binding
@@ -255,8 +289,8 @@ def render_kanban_col1_content(
         build_queued_card(
             container,
             url=url,
-            badge="PARSING",
-            badge_bg="#d4a12a",
+            badge=tr("badge_parsing", "PARSING"),
+            badge_bg="#b45309",
             status_text=tr("parsing_metadata", "Parsing video metadata..."),
             is_active=True
         )

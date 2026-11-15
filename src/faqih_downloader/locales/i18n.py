@@ -98,6 +98,31 @@ class LocalizationManager:
     def is_rtl(self) -> bool:
         return self._current_lang == "ar"
 
+    @staticmethod
+    def _apply_arabic_bidi(text: str) -> str:
+        """Anchor trailing Arabic punctuation (:, ., !) with RLM so LTR Tk widgets do not flip it."""
+        if not text or not isinstance(text, str):
+            return text
+        lines = text.split("\n")
+        out_lines = []
+        changed = False
+        for line in lines:
+            stripped = line.rstrip(" \t\r")
+            trailing = line[len(stripped):]
+            if stripped and any("\u0600" <= ch <= "\u06FF" for ch in stripped):
+                # Anchor leading step numbers (e.g. "1. ") and trailing punctuation (":", ".", "!")
+                new_line = stripped
+                if len(new_line) >= 3 and new_line[0].isdigit() and ". " in new_line[:5] and not new_line.startswith("\u200f"):
+                    new_line = f"\u200f{new_line}"
+                if new_line[-1] in (":", ".", "!") and not new_line.endswith("\u200f"):
+                    new_line = f"{new_line}\u200f"
+                if new_line != stripped:
+                    changed = True
+                out_lines.append(f"{new_line}{trailing}")
+            else:
+                out_lines.append(line)
+        return "\n".join(out_lines) if changed else text
+
     def get(self, key: str, default: Optional[str] = None, **kwargs) -> str:
         lang_dict = TRANSLATIONS.get(self._current_lang, {})
         val = lang_dict.get(key)
@@ -109,9 +134,11 @@ class LocalizationManager:
             val = default if default is not None else key
         if kwargs and isinstance(val, str):
             try:
-                return val.format(**kwargs)
+                val = val.format(**kwargs)
             except Exception:
-                return val
+                pass
+        if self._current_lang == "ar" and isinstance(val, str):
+            val = self._apply_arabic_bidi(val)
         return val
 
     def register_observer(self, callback: Callable[[], None]):

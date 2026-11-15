@@ -365,5 +365,8 @@
   "info_missing_on_disk": "✕ File not found on disk",
   "info_status_completed": "Completed",
   "info_status_staged": "Staged (Ready)",
-  "info_status_queued": "Queued"
+  "info_status_queued": "Queued",
+  "badge_parsing": "PARSING",
+  "settings_limiter_preset_lbl": "Preset Limit:",
+  "settings_limiter_slider_lbl": "Throttling Slider (KB/s):"
 }
