@@ -171,6 +171,8 @@ def open_video_preview(
     subtitle_pos_x: float = 50.0,
     subtitle_pos_y: float = 86.0,
     max_connections: Optional[int] = None,
+    external_subtitle_tracks: Optional[List[Dict[str, Any]]] = None,
+    **kwargs,
 ) -> str:
     """
     Builds and opens a real, VidMate-style video preview with synchronized live audio dubbing,
@@ -204,6 +206,16 @@ def open_video_preview(
 
     eff_boost = bool(getattr(cur_opt, "audio_boost_enabled", False))
     eff_ch_title = str(getattr(cur_opt, "selected_chapter_title", "") or "")
+    raw_ext = external_subtitle_tracks
+    if raw_ext is None and cur_opt is not None:
+        cand = getattr(cur_opt, "external_subtitle_tracks", None)
+        if isinstance(cand, list) and cand:
+            raw_ext = cand
+    if raw_ext is None and parent_app is not None:
+        cand = getattr(parent_app, "_main_external_subtitle_tracks", None)
+        if isinstance(cand, list):
+            raw_ext = cand
+    eff_ext_subs = [t for t in (raw_ext or []) if isinstance(t, dict) and str(t.get("sub_id") or "").lower() != "none"]
 
     stream_url = _find_progressive_mp4_url(stream_info, info_dict, source_url=clean_url)
 
@@ -268,6 +280,7 @@ def open_video_preview(
                 audio_boost=eff_boost,
                 chapter_title=eff_ch_title,
                 max_connections=eff_conn,
+                external_subtitle_tracks=eff_ext_subs,
             )
             target_launch_url = f"http://127.0.0.1:{port}/player?sid={sid}"
             if not stream_url:
@@ -340,6 +353,7 @@ def open_video_preview(
         chapters=chapters,
         chapter_title=eff_ch_title,
         max_connections=eff_conn,
+        external_subtitle_tracks=eff_ext_subs,
     )
 
     temp_html = os.path.join(tempfile.gettempdir(), f"_sd_preview_{os.getpid()}_{int(time.time()*1000)}.html")

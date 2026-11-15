@@ -35,9 +35,17 @@ video::cue, ::cue, video::-webkit-media-text-track-container, video::-webkit-med
 .format-table td { padding: 4px 10px; border-bottom: 1px solid #1e293b; color: #cbd5e1; }
 .opt-row { cursor: pointer; transition: background 0.1s ease; } .opt-row:hover { background: #1e293b; } .opt-row.selected { background: #0284c7; color: #fff; } .opt-row.selected td { color: #fff; }
 .col-center { text-align: center; } .col-right { text-align: right; } .col-note { color: #94a3b8; font-size: 11px; } .opt-row.selected .col-note { color: #e0f2fe; }
-.controls-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; }
-.ctrl-group { display: flex; flex-direction: column; gap: 2px; } .ctrl-group label { font-size: 11px; font-weight: 600; color: #94a3b8; }
+.controls-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
+.ctrl-group { display: flex; flex-direction: column; gap: 2px; position: relative; } .ctrl-group label { font-size: 11px; font-weight: 600; color: #94a3b8; }
 .ctrl-group select { background: #17233c; color: #f8fafc; border: 1px solid #334155; padding: 4px 8px; border-radius: 6px; font-size: 12px; outline: none; cursor: pointer; }
+.ctrl-group select:disabled { opacity: 0.48; cursor: not-allowed; }
+.ext-srt-wrap { position: relative; } #extSrtBtn { background: #17233c; color: #f8fafc; border: 1px solid #334155; padding: 4px 8px; border-radius: 6px; font-size: 12px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; gap: 6px; width: 100%; }
+#extSrtBtn.has-sel { border-color: #38bdf8; color: #38bdf8; font-weight: 700; }
+#extSrtDropdown { display: none; position: absolute; top: 100%; left: 0; min-width: 235px; max-height: 195px; overflow-y: auto; background: #0f172a; border: 1px solid #38bdf8; border-radius: 8px; padding: 4px; z-index: 1000; box-shadow: 0 10px 25px rgba(0,0,0,0.65); margin-top: 3px; }
+#extSrtDropdown.open { display: block; }
+.ext-srt-clear { padding: 5px 8px; font-size: 11px; color: #f87171; cursor: pointer; border-bottom: 1px solid #1e293b; margin-bottom: 3px; border-radius: 4px; font-weight: 600; } .ext-srt-clear:hover { background: #1e293b; }
+.ext-srt-item { display: flex; align-items: center; gap: 6px; padding: 4px 8px; font-size: 12px; color: #e2e8f0; cursor: pointer; border-radius: 4px; user-select: none; } .ext-srt-item:hover { background: #1e293b; }
+.ext-srt-item input { cursor: pointer; accent-color: #38bdf8; margin: 0; }
 .dest-card { display: flex; align-items: center; background: #17233c; border: 1px solid #334155; padding: 4px 10px; border-radius: 6px; gap: 8px; }
 .dest-card label { font-size: 11px; font-weight: 600; color: #94a3b8; white-space: nowrap; } .dest-card input { background: transparent; color: #f8fafc; border: none; outline: none; font-size: 12px; flex: 1; }
 .action-bar { display: flex; align-items: center; gap: 10px; margin-top: 2px; position: sticky; bottom: 0; background: #0f172a; padding-top: 4px; z-index: 10; }
@@ -240,7 +248,9 @@ function browseDestination() {
 function onSubChange() {
     if (!subSelect) return;
     const s = parseInt(subSelect.value);
-    if (s > 0 && !window._userTouchedMode && modeSelect) modeSelect.value = "hard_burn";
+    const isNoSub = (s <= 0 || s >= subtitleTracks.length);
+    if (modeSelect) modeSelect.disabled = isNoSub;
+    if (!isNoSub && !window._userTouchedMode && modeSelect) modeSelect.value = "hard_burn";
     let trk = document.getElementById("vttTrack"), loadP = null;
     if (s <= 0 || s >= subtitleTracks.length) {
         if (trk) { trk.src = ""; try { trk.track.mode = "disabled"; } catch (e) {} }
@@ -272,10 +282,30 @@ function onModeChange() {
     syncStateToBridge();
 }
 
+function getCheckedExtBoxes() { return Array.from(document.querySelectorAll(".ext-srt-cb:checked")); }
+function getSelectedExtSubIndices() { return getCheckedExtBoxes().map(cb => parseInt(cb.value)).filter(n => !isNaN(n)); }
+function getSelectedExtSubLangs() { return getCheckedExtBoxes().map(cb => cb.getAttribute("data-subid") || cb.getAttribute("data-lang") || "").filter(Boolean); }
+function updateExtSrtBtnLabel() {
+    const btn = document.getElementById("extSrtBtn"), txt = document.getElementById("extSrtBtnText");
+    if (!btn || !txt) return;
+    const cbs = getCheckedExtBoxes(), codes = [];
+    cbs.forEach(cb => { const c = (cb.getAttribute("data-lang") || "").toUpperCase(); if (c && !codes.includes(c)) codes.push(c); });
+    if (cbs.length === 0) { txt.textContent = "بدون (0)"; btn.classList.remove("has-sel"); }
+    else { const head = codes.slice(0, 3).join(", ") + (codes.length > 3 ? ".." : ""); txt.textContent = `${head} (${cbs.length})`; btn.classList.add("has-sel"); }
+}
+function toggleExtSrtDropdown(e) { if (e) e.stopPropagation(); const dd = document.getElementById("extSrtDropdown"); if (dd) dd.classList.toggle("open"); }
+function onExtSrtChange(e) { if (e) e.stopPropagation(); updateExtSrtBtnLabel(); syncStateToBridge(); }
+function clearExtSrt(e) { if (e) e.stopPropagation(); document.querySelectorAll(".ext-srt-cb").forEach(cb => { cb.checked = false; }); updateExtSrtBtnLabel(); syncStateToBridge(); }
+document.addEventListener("click", (ev) => {
+    const wrap = document.querySelector(".ext-srt-wrap"), dd = document.getElementById("extSrtDropdown");
+    if (dd && dd.classList.contains("open") && wrap && !wrap.contains(ev.target)) dd.classList.remove("open");
+});
+
 function getSyncPayload(extra) {
     return Object.assign({
         q_idx: selected_q_idx, a_idx: audioSelect ? parseInt(audioSelect.value) : 0,
         s_idx: subSelect ? parseInt(subSelect.value) : 0, sub_mode: modeSelect ? modeSelect.value : "hard_burn",
+        ext_sub_indices: getSelectedExtSubIndices(), ext_sub_langs: getSelectedExtSubLangs(),
         max_connections: connSelect ? parseInt(connSelect.value) : 8, sub_pos: "bottom", sub_preset: subPreset, sub_scale: subScale, sub_color: subColor,
         sub_bg_mode: subBgMode, sub_pos_x: subPosX, sub_pos_y: subPosY, dest_path: destInput ? destInput.value.trim() : "",
         clip_start: (typeof clipStartSec !== "undefined" ? clipStartSec : 0.0),
@@ -331,6 +361,7 @@ initLiveSubDragDrop();
 if (typeof initClipperStudioHooks === "function") initClipperStudioHooks();
 if (typeof updateClipUI === "function") updateClipUI();
 if (typeof disableNativeTextTracks === "function") disableNativeTextTracks();
+if (modeSelect && subSelect) { const s0 = parseInt(subSelect.value); modeSelect.disabled = (!s0 || s0 <= 0 || s0 >= subtitleTracks.length); }
 applyLiveSubStyle();
 if (sid && subtitleTracks && __SEL_S_IDX__ > 0) {
     loadLiveSubtitlesFromUrl(`${bridgeBase}/subtitle.vtt?sid=${encodeURIComponent(sid)}&s_idx=${__SEL_S_IDX__}`);
@@ -349,38 +380,15 @@ window.addEventListener("pagehide", () => {
 
 
 def generate_preview_html(
-    url: str,
-    video_title: str,
-    stream_url: Optional[str] = None,
-    vtt_data_uri: Optional[str] = None,
-    video_id: Optional[str] = None,
-    sub_label: Optional[str] = None,
-    quality_label: Optional[str] = None,
-    sub_lang: str = "ar",
-    dub_audio_url: Optional[str] = None,
-    audio_label: Optional[str] = None,
-    selected_audio_track: Optional[Dict[str, Any]] = None,
-    audio_tracks: Optional[List[Dict[str, Any]]] = None,
-    options: Optional[List[Any]] = None,
-    subtitle_tracks: Optional[List[Dict[str, Any]]] = None,
-    default_dest_path: Optional[str] = None,
-    sid: Optional[str] = None,
-    bridge_port: Optional[int] = None,
-    platform_name: Optional[str] = None,
-    selected_sub_track: Optional[Dict[str, Any]] = None,
-    subtitle_embed_mode: str = "hard_burn",
-    selected_q_idx: int = 0,
-    subtitle_position: str = "bottom",
-    subtitle_preset: str = "youtube",
-    subtitle_font_scale: float = 1.0,
-    subtitle_text_color: str = "#FFFFFF",
-    subtitle_bg_mode: str = "box",
-    subtitle_pos_x: float = 50.0,
-    subtitle_pos_y: float = 86.0,
-    clip_start: float = 0.0,
-    clip_end: float = 0.0,
-    dual_sub: bool = False,
-    **kwargs
+    url: str, video_title: str, stream_url: Optional[str] = None, vtt_data_uri: Optional[str] = None,
+    video_id: Optional[str] = None, sub_label: Optional[str] = None, quality_label: Optional[str] = None, sub_lang: str = "ar",
+    dub_audio_url: Optional[str] = None, audio_label: Optional[str] = None, selected_audio_track: Optional[Dict[str, Any]] = None,
+    audio_tracks: Optional[List[Dict[str, Any]]] = None, options: Optional[List[Any]] = None, subtitle_tracks: Optional[List[Dict[str, Any]]] = None,
+    default_dest_path: Optional[str] = None, sid: Optional[str] = None, bridge_port: Optional[int] = None, platform_name: Optional[str] = None,
+    selected_sub_track: Optional[Dict[str, Any]] = None, subtitle_embed_mode: str = "hard_burn", selected_q_idx: int = 0,
+    subtitle_position: str = "bottom", subtitle_preset: str = "youtube", subtitle_font_scale: float = 1.0,
+    subtitle_text_color: str = "#FFFFFF", subtitle_bg_mode: str = "box", subtitle_pos_x: float = 50.0, subtitle_pos_y: float = 86.0,
+    clip_start: float = 0.0, clip_end: float = 0.0, dual_sub: bool = False, **kwargs
 ) -> str:
     """Generates modern dark-themed HTML5 preview player with synchronized dubbing and controls."""
     safe_title = html.escape(video_title or "Video Preview")
@@ -459,87 +467,60 @@ def generate_preview_html(
         max_conn = int(kwargs.get("max_connections") or get_setting("max_connections", 8))
         c_opts = [f'<option value="{c}"{" selected" if max_conn == c else ""}>{c} {"Track (مسار)" if c == 1 else "Tracks (مسارات)"}</option>' for c in [1, 2, 4, 8, 16, 32]]
         safe_dst = html.escape(default_dest_path or "")
+        raw_ext = kwargs.get("external_subtitle_tracks")
+        if raw_ext is None and options and 0 <= selected_q_idx < len(options):
+            raw_ext = getattr(options[selected_q_idx], "external_subtitle_tracks", None)
+        sel_ext_ids = {str(t.get("sub_id")).strip().lower() for t in (raw_ext or []) if isinstance(t, dict) and t.get("sub_id") and str(t.get("sub_id")).lower() != "none"}
+        sel_ext_langs = {str(t.get("language")).strip().lower() for t in (raw_ext or []) if isinstance(t, dict) and not t.get("sub_id") and t.get("language") and str(t.get("language")).lower() != "none"}
+        ext_items = ['<div class="ext-srt-clear" onclick="clearExtSrt(event)">✕ بدون ملفات خارجية (مسح الكل / Clear All)</div>']
+        init_codes, init_cnt = [], 0
+        for i, t in enumerate(subtitle_tracks or []):
+            if not isinstance(t, dict): continue
+            sid_val = str(t.get("sub_id") or "").strip()
+            lng_val = str(t.get("language") or "").strip()
+            if sid_val.lower() == "none" or lng_val.lower() == "none" or (i == 0 and not t.get("url") and not sid_val): continue
+            eff_id = sid_val or lng_val or f"s{i}"
+            code = (lng_val or eff_id).split("-")[0].split("_")[0].upper() or f"S{i}"
+            is_chk = (eff_id.lower() in sel_ext_ids) or (lng_val.lower() in sel_ext_langs)
+            if is_chk:
+                init_cnt += 1
+                if code not in init_codes: init_codes.append(code)
+            ext_items.append(f'<label class="ext-srt-item" onclick="event.stopPropagation()"><input type="checkbox" class="ext-srt-cb" value="{i}" data-lang="{html.escape(code)}" data-subid="{html.escape(eff_id)}"{" checked" if is_chk else ""} onchange="onExtSrtChange(event)"><span>{html.escape(t.get("label") or lng_val or f"Subtitle #{i}")}</span></label>')
+        init_ext_lbl = (f"{', '.join(init_codes[:3])}{'..' if len(init_codes) > 3 else ''} ({init_cnt})" if init_cnt > 0 else "بدون (0)")
+        mode_dis = " disabled" if sel_s_idx <= 0 else ""
+        ext_srt_ctrl = f'<div class="ctrl-group ext-srt-wrap"><label>📄 Ext SRT / ملفات خارجية</label><button type="button" id="extSrtBtn" class="{"has-sel" if init_cnt > 0 else ""}" onclick="toggleExtSrtDropdown(event)"><span id="extSrtBtnText">{html.escape(init_ext_lbl)}</span><span>▾</span></button><div id="extSrtDropdown" onclick="event.stopPropagation()">{"".join(ext_items)}</div></div>'
         clipper_toolbar = get_clipper_toolbar_html(clip_start=clip_start, clip_end=clip_end, dual_sub=dual_sub, audio_boost=bool(kwargs.get("audio_boost", False)), chapters=kwargs.get("chapters", None))
         studio_toolbar = get_studio_toolbar_html(preset=subtitle_preset, scale=subtitle_font_scale, color=subtitle_text_color, bg_mode=subtitle_bg_mode, pos_x=subtitle_pos_x, pos_y=subtitle_pos_y)
-        settings_html = f"""<div class="settings-panel"><div class="settings-header"><span class="settings-title">⚡ Download Quality &amp; Controls</span><span class="settings-count">{len(options)} Formats Detected</span></div><div class="table-container"><table class="format-table"><thead><tr><th>Resolution / Quality</th><th class="col-center">Format</th><th class="col-right">Est. Size</th><th class="col-center">FPS</th><th>Stream Details</th></tr></thead><tbody>{"".join(rows)}</tbody></table></div><div class="controls-row"><div class="ctrl-group"><label>🔊 Audio / الدبلجة</label><select id="audioSelect" onchange="onAudioChange()">{"".join(a_opts)}</select></div><div class="ctrl-group"><label>💬 Subtitles / الترجمة</label><select id="subSelect" onchange="onSubChange()">{"".join(s_opts)}</select></div><div class="ctrl-group"><label>⚙️ Mode / الطريقة</label><select id="modeSelect" onchange="onModeChange()">{"".join(m_opts)}</select></div><div class="ctrl-group"><label>⚡ Threads / المسارات</label><select id="connSelect" onchange="onConnChange()">{"".join(c_opts)}</select></div></div>{clipper_toolbar}{studio_toolbar}<div class="dest-card"><label>📁 Save As / مسار الحفظ:</label><input type="text" id="destInput" value="{safe_dst}" /><button type="button" class="btn" style="padding:4px 8px;font-size:11px;" onclick="browseDestination()">📁 Browse...</button></div><div class="action-bar"><button class="btn btn-download" onclick="doAction('download')">⚡ Download Selected Quality</button><button class="btn btn-secondary" onclick="doAction('open_in_main')">🖥️ Open in Main Window</button><button class="btn btn-cancel" onclick="doAction('cancel')">✕ Cancel</button></div></div>"""
+        settings_html = f"""<div class="settings-panel"><div class="settings-header"><span class="settings-title">⚡ Download Quality &amp; Controls</span><span class="settings-count">{len(options)} Formats Detected</span></div><div class="table-container"><table class="format-table"><thead><tr><th>Resolution / Quality</th><th class="col-center">Format</th><th class="col-right">Est. Size</th><th class="col-center">FPS</th><th>Stream Details</th></tr></thead><tbody>{"".join(rows)}</tbody></table></div><div class="controls-row"><div class="ctrl-group"><label>🔊 Audio / الدبلجة</label><select id="audioSelect" onchange="onAudioChange()">{"".join(a_opts)}</select></div><div class="ctrl-group"><label>💬 Subtitles / الترجمة</label><select id="subSelect" onchange="onSubChange()">{"".join(s_opts)}</select></div><div class="ctrl-group"><label>⚙️ Mode / الطريقة</label><select id="modeSelect" onchange="onModeChange()"{mode_dis}>{"".join(m_opts)}</select></div>{ext_srt_ctrl}<div class="ctrl-group"><label>⚡ Threads / المسارات</label><select id="connSelect" onchange="onConnChange()">{"".join(c_opts)}</select></div></div>{clipper_toolbar}{studio_toolbar}<div class="dest-card"><label>📁 Save As / مسار الحفظ:</label><input type="text" id="destInput" value="{safe_dst}" /><button type="button" class="btn" style="padding:4px 8px;font-size:11px;" onclick="browseDestination()">📁 Browse...</button></div><div class="action-bar"><button class="btn btn-download" onclick="doAction('download')">⚡ Download Selected Quality</button><button class="btn btn-secondary" onclick="doAction('open_in_main')">🖥️ Open in Main Window</button><button class="btn btn-cancel" onclick="doAction('cancel')">✕ Cancel</button></div></div>"""
 
     opt_needs_audio = [bool(not getattr(o, "is_progressive", False) and not getattr(o, "is_audio_only", False) and getattr(o, "audio_url", None)) for o in (options or [])]
     safe_tracks = [{k: v for k, v in t.items() if (isinstance(v, (str, int, float, bool)) or v is None) and k not in ("style_config", "secondary_track")} for t in (subtitle_tracks or []) if isinstance(t, dict)]
     _j = lambda v: json.dumps(v).replace("</", "<\\/")
     safe_embed_src = html.escape(embed_src or "", quote=True)
-    js_code = (
-        _JS_TEMPLATE
-        .replace("__HAS_STREAM__", "true" if stream_url else "false")
-        .replace("__EMBED_SRC__", _j(embed_src))
-        .replace("__DUB_URL__", _j(eff_dub or ""))
-        .replace("__SID__", _j(sid or ""))
-        .replace("__AUDIO_TRACKS__", _j(audio_tracks or []))
-        .replace("__SUBTITLE_TRACKS__", _j(safe_tracks))
-        .replace("__EFFECTIVE_AUDIO_LABEL__", _j(eff_audio_lbl))
-        .replace("__BRIDGE_BASE__", _j(bridge_base))
-        .replace("__SELECTED_Q_IDX__", _j(selected_q_idx))
-        .replace("__OPT_NEEDS_AUDIO__", _j(opt_needs_audio))
-        .replace("__SUB_PRESET__", _j(subtitle_preset or "youtube"))
-        .replace("__SUB_SCALE__", str(float(subtitle_font_scale or 1.0)))
-        .replace("__SUB_COLOR__", _j(subtitle_text_color or "#FFFFFF"))
-        .replace("__SUB_BG__", _j(subtitle_bg_mode or "box"))
-        .replace("__SUB_PX__", str(float(subtitle_pos_x or 50.0)))
-        .replace("__SUB_PY__", str(float(subtitle_pos_y or 86.0)))
-        .replace("__SEL_S_IDX__", str(sel_s_idx))
-        .replace("__VTT_URI__", _j(vtt_data_uri or ""))
-        .replace("__STUDIO_JS__", get_studio_js())
-        .replace("__CLIPPER_JS__", get_clipper_js())
-        .replace("__CLIP_START__", str(float(clip_start or 0.0)))
-        .replace("__CLIP_END__", str(float(clip_end or 0.0)))
-        .replace("__DUAL_SUB__", "true" if dual_sub else "false")
-        .replace("__AUDIO_BOOST__", "true" if kwargs.get("audio_boost") else "false")
-        .replace("__CHAPTER_TITLE__", _j(str(kwargs.get("chapter_title", "") or "")))
-    )
-
+    js_code = _JS_TEMPLATE
+    for tok, val in (
+        ("__HAS_STREAM__", "true" if stream_url else "false"), ("__EMBED_SRC__", _j(embed_src)), ("__DUB_URL__", _j(eff_dub or "")),
+        ("__SID__", _j(sid or "")), ("__AUDIO_TRACKS__", _j(audio_tracks or [])), ("__SUBTITLE_TRACKS__", _j(safe_tracks)),
+        ("__EFFECTIVE_AUDIO_LABEL__", _j(eff_audio_lbl)), ("__BRIDGE_BASE__", _j(bridge_base)), ("__SELECTED_Q_IDX__", _j(selected_q_idx)),
+        ("__OPT_NEEDS_AUDIO__", _j(opt_needs_audio)), ("__SUB_PRESET__", _j(subtitle_preset or "youtube")),
+        ("__SUB_SCALE__", str(float(subtitle_font_scale or 1.0))), ("__SUB_COLOR__", _j(subtitle_text_color or "#FFFFFF")),
+        ("__SUB_BG__", _j(subtitle_bg_mode or "box")), ("__SUB_PX__", str(float(subtitle_pos_x or 50.0))),
+        ("__SUB_PY__", str(float(subtitle_pos_y or 86.0))), ("__SEL_S_IDX__", str(sel_s_idx)), ("__VTT_URI__", _j(vtt_data_uri or "")),
+        ("__STUDIO_JS__", get_studio_js()), ("__CLIPPER_JS__", get_clipper_js()), ("__CLIP_START__", str(float(clip_start or 0.0))),
+        ("__CLIP_END__", str(float(clip_end or 0.0))), ("__DUAL_SUB__", "true" if dual_sub else "false"),
+        ("__AUDIO_BOOST__", "true" if kwargs.get("audio_boost") else "false"), ("__CHAPTER_TITLE__", _j(str(kwargs.get("chapter_title", "") or ""))),
+    ):
+        js_code = js_code.replace(tok, val)
     player_flex = "52 1 0" if options else "1"
-    return f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{safe_title} — Faqih Downloader Preview</title>
-    <style>
+    return f"""<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>{safe_title} — Faqih Downloader Preview</title><style>
 {_CSS}
 {get_studio_css()}
 {get_clipper_css()}
     .player-container {{ flex: {player_flex}; }}
-    </style>
-</head>
-<body>
-    <div class="header">
-        <div class="title-group">
-            <span class="badge {plat_cls}">📺 {safe_platform}</span>
-            <span id="badgeRes" class="badge badge-res">🎞️ {safe_quality}</span>
-            {audio_badge}
-            {sub_badge}
-            <span class="title" title="{safe_title}">🎬 {safe_title}</span>
-        </div>
-        <div class="actions">
-            <div style="display:flex;align-items:center;gap:6px;">
-                <button id="muteBtn" class="btn" style="padding:4px 8px;" title="Mute / Unmute">🔊</button>
-                <input type="range" id="volSlider" min="0" max="1" step="0.05" value="1" style="width:65px;accent-color:#38bdf8;cursor:pointer;" title="Volume">
-            </div>
-            <button id="toggleBtn" class="btn" onclick="togglePlayer()">🌐 Switch to Web Player</button>
-        </div>
-    </div>
-    <div class="player-container" id="playerContainer">
-        <video id="videoEl" src="{safe_stream}" controls autoplay playsinline style="display: {'block' if stream_url else 'none'};">
-            {track_html}
-        </video>
-        <div id="liveSubOverlay" class="live-sub-overlay"></div>
-        <div id="centerGuideLine" class="center-guide-line"></div>
-        <audio id="dubAudioEl" preload="auto" style="display: none;"></audio>
-        <iframe id="iframeEl" src="{'about:blank' if stream_url else safe_embed_src}" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen style="display: {'none' if stream_url else 'block'};"></iframe>
-    </div>
-    {settings_html}
-    <script>
+    </style></head><body>
+    <div class="header"><div class="title-group"><span class="badge {plat_cls}">📺 {safe_platform}</span><span id="badgeRes" class="badge badge-res">🎞️ {safe_quality}</span>{audio_badge}{sub_badge}<span class="title" title="{safe_title}">🎬 {safe_title}</span></div>
+        <div class="actions"><div style="display:flex;align-items:center;gap:6px;"><button id="muteBtn" class="btn" style="padding:4px 8px;" title="Mute / Unmute">🔊</button><input type="range" id="volSlider" min="0" max="1" step="0.05" value="1" style="width:65px;accent-color:#38bdf8;cursor:pointer;" title="Volume"></div><button id="toggleBtn" class="btn" onclick="togglePlayer()">🌐 Switch to Web Player</button></div></div>
+    <div class="player-container" id="playerContainer"><video id="videoEl" src="{safe_stream}" controls autoplay playsinline style="display: {'block' if stream_url else 'none'};">{track_html}</video><div id="liveSubOverlay" class="live-sub-overlay"></div><div id="centerGuideLine" class="center-guide-line"></div><audio id="dubAudioEl" preload="auto" style="display: none;"></audio><iframe id="iframeEl" src="{'about:blank' if stream_url else safe_embed_src}" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen style="display: {'none' if stream_url else 'block'};"></iframe></div>
+    {settings_html}<script>
 {js_code}
-    </script>
-</body>
-</html>
-"""
+    </script></body></html>"""

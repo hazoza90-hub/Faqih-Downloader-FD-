@@ -293,6 +293,8 @@ def sync_clipper_state_from_body(session: Any, body: Dict[str, Any], opt: Any = 
     m = getattr(session, "modal_ref", None)
     for cand in ([*(getattr(m, "options", []) or []), opt, getattr(m, "selected_option", None)] if m else [opt]):
         if cand and cand not in target_opts: target_opts.append(cand)
+    from .external_subtitle_service import sync_preview_external_subtitles
+    sync_preview_external_subtitles(session, body, target_opts)
 
     for target_opt in target_opts:
         target_opt.clip_start_sec, target_opt.clip_end_sec = c_start, c_end

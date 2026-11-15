@@ -325,5 +325,99 @@ class TestExternalSubtitlesUI(unittest.TestCase):
                 pass
 
 
+class TestPreviewExtSrtAndSubtitleDedup(unittest.TestCase):
+    def test_preview_html_contains_ext_srt_dropdown_and_disables_mode_when_no_sub(self):
+        from faqih_downloader.ui.modals.preview_html_builder import generate_preview_html
+        from faqih_downloader.services.youtube_models import VideoFormatOption
+
+        opt = VideoFormatOption(
+            format_id="22", resolution_label="720p", height=720, ext="mp4",
+            filesize_approx=5 * 1024 * 1024, fps=30, vcodec="avc1", acodec="mp4a", note=""
+        )
+        subs = [
+            {"sub_id": "none", "language": "none", "label": "No Subtitles", "url": ""},
+            {"sub_id": "ar", "language": "ar", "label": "Arabic", "url": "https://example.com/ar.vtt", "ext": "vtt"},
+            {"sub_id": "en-auto", "language": "en", "label": "English (Auto-Translated)", "url": "https://example.com/en.vtt", "ext": "vtt"},
+        ]
+        html_empty = generate_preview_html(
+            url="https://youtube.com/watch?v=demo1234567",
+            video_title="Preview Ext SRT Test",
+            options=[opt],
+            subtitle_tracks=subs,
+            selected_sub_track=subs[0],
+        )
+        self.assertIn('id="extSrtBtn"', html_empty)
+        self.assertIn('id="extSrtDropdown"', html_empty)
+        self.assertIn("بدون (0)", html_empty)
+        self.assertIn("مسح الكل / Clear All", html_empty)
+        self.assertIn('<select id="modeSelect" onchange="onModeChange()" disabled>', html_empty)
+        self.assertIn("getSelectedExtSubIndices()", html_empty)
+        self.assertIn("getSelectedExtSubLangs()", html_empty)
+
+        opt.external_subtitle_tracks = [subs[1], subs[2]]
+        html_selected = generate_preview_html(
+            url="https://youtube.com/watch?v=demo1234567",
+            video_title="Preview Ext SRT Test",
+            options=[opt],
+            subtitle_tracks=subs,
+            selected_sub_track=subs[1],
+        )
+        self.assertIn("AR, EN (2)", html_selected)
+        self.assertIn('<select id="modeSelect" onchange="onModeChange()">', html_selected)
+
+    def test_sync_preview_external_subtitles_bridge_roundtrip(self):
+        from faqih_downloader.services.preview_stream_bridge import PreviewSession
+        from faqih_downloader.services.media_clipper_engine import sync_clipper_state_from_body
+        from faqih_downloader.services.youtube_models import VideoFormatOption
+
+        opt = VideoFormatOption(
+            format_id="22", resolution_label="720p", height=720, ext="mp4",
+            filesize_approx=5 * 1024 * 1024, fps=30, vcodec="avc1", acodec="mp4a", note=""
+        )
+        subs = [
+            {"sub_id": "none", "language": "none", "label": "No Subtitles", "url": ""},
+            {"sub_id": "ar-auto", "language": "ar", "label": "العربية (ترجمة تلقائية)", "url": "https://example.com/ar.vtt"},
+            {"sub_id": "en-auto", "language": "en", "label": "English (Auto-Translated)", "url": "https://example.com/en.vtt"},
+            {"sub_id": "fr", "language": "fr", "label": "French", "url": "https://example.com/fr.vtt"},
+        ]
+        sess = PreviewSession(
+            sid="sid1", url="https://youtube.com/watch?v=1", video_title="Test",
+            options=[opt], subtitle_tracks=subs,
+        )
+        sync_clipper_state_from_body(sess, {"ext_sub_indices": [1, 3], "ext_sub_langs": ["ar-auto", "fr"]}, opt)
+        self.assertEqual([t["sub_id"] for t in sess.external_subtitle_tracks], ["ar-auto", "fr"])
+        self.assertEqual([t["sub_id"] for t in opt.external_subtitle_tracks], ["ar-auto", "fr"])
+
+        # Language-only payload fallback
+        sync_clipper_state_from_body(sess, {"ext_sub_langs": ["en"]}, opt)
+        self.assertEqual([t["sub_id"] for t in sess.external_subtitle_tracks], ["en-auto"])
+
+        # Explicit clear
+        sync_clipper_state_from_body(sess, {"ext_sub_indices": [], "ext_sub_langs": []}, opt)
+        self.assertEqual(sess.external_subtitle_tracks, [])
+        self.assertEqual(opt.external_subtitle_tracks, [])
+
+    def test_extract_subtitle_tracks_deduplicates_orig_variants(self):
+        from faqih_downloader.services.youtube_tracks import extract_subtitle_tracks
+
+        info = {
+            "subtitles": {},
+            "automatic_captions": {
+                "ar-orig": [{"url": "https://example.com/ar-orig.vtt", "ext": "vtt"}],
+                "ar": [{"url": "https://example.com/ar.vtt", "ext": "vtt"}],
+                "en-orig": [{"url": "https://example.com/en-orig.vtt", "ext": "vtt"}],
+                "en": [{"url": "https://example.com/en.vtt", "ext": "vtt"}],
+                "es": [{"url": "https://example.com/es.vtt", "ext": "vtt"}],
+            },
+        }
+        tracks = extract_subtitle_tracks(info)
+        ar_tracks = [t for t in tracks if t.get("language", "").startswith("ar") and t.get("is_auto")]
+        en_tracks = [t for t in tracks if t.get("language", "").startswith("en") and t.get("is_auto")]
+        self.assertEqual(len(ar_tracks), 1)
+        self.assertEqual(ar_tracks[0]["language"], "ar")
+        self.assertEqual(len(en_tracks), 1)
+        self.assertEqual(en_tracks[0]["language"], "en")
+
+
 if __name__ == "__main__":
     unittest.main()

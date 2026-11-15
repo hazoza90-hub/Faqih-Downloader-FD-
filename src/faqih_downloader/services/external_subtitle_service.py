@@ -188,3 +188,85 @@ def rename_sidecar_srts_on_video_rename(
                 os.replace(old_p, new_p)
             except Exception:
                 pass
+
+
+def _normalize_ext_sub_key(track: Dict[str, Any]) -> str:
+    return str(track.get("sub_id") or track.get("language") or "").strip().lower()
+
+
+def sync_preview_external_subtitles(
+    session: Any,
+    body: Dict[str, Any],
+    target_opts: List[Any],
+) -> List[Dict[str, Any]]:
+    """Resolve and sync external .SRT tracks from a preview API payload onto session and target options."""
+    sub_trks = getattr(session, "subtitle_tracks", None) or []
+    has_idx = "ext_sub_indices" in body
+    has_langs = "ext_sub_langs" in body
+
+    if has_idx or has_langs:
+        raw_indices = body.get("ext_sub_indices")
+        raw_langs = body.get("ext_sub_langs")
+        picked: List[Dict[str, Any]] = []
+        seen: set = set()
+
+        if isinstance(raw_indices, list):
+            for raw_idx in raw_indices:
+                try:
+                    idx = int(raw_idx)
+                except (TypeError, ValueError):
+                    continue
+                if 0 <= idx < len(sub_trks):
+                    trk = sub_trks[idx]
+                    if isinstance(trk, dict) and str(trk.get("sub_id") or "").lower() != "none":
+                        key = _normalize_ext_sub_key(trk) or str(idx)
+                        if key not in seen:
+                            seen.add(key)
+                            picked.append(dict(trk))
+
+        if isinstance(raw_langs, list):
+            wanted = [
+                str(x).strip().lower()
+                for x in raw_langs
+                if str(x or "").strip() and str(x).strip().lower() != "none"
+            ]
+            for w in wanted:
+                w_base = w.split("-")[0].split("_")[0]
+                matched_idx = None
+                for pass_num in (1, 2):
+                    for idx, trk in enumerate(sub_trks):
+                        if not isinstance(trk, dict):
+                            continue
+                        sub_id = str(trk.get("sub_id") or "").strip().lower()
+                        lang = str(trk.get("language") or "").strip().lower()
+                        if sub_id == "none" or lang == "none":
+                            continue
+                        if pass_num == 1 and w in (sub_id, lang):
+                            matched_idx = idx
+                            break
+                        if pass_num == 2:
+                            lang_base = lang.split("-")[0].split("_")[0]
+                            sub_base = sub_id.split("-")[0].split("_")[0]
+                            if w in (lang_base, sub_base) or (w_base and w_base in (lang_base, sub_base)):
+                                matched_idx = idx
+                                break
+                    if matched_idx is not None:
+                        break
+                if matched_idx is not None:
+                    trk = sub_trks[matched_idx]
+                    key = _normalize_ext_sub_key(trk) or str(matched_idx)
+                    if key not in seen:
+                        seen.add(key)
+                        picked.append(dict(trk))
+
+        session.external_subtitle_tracks = picked
+
+    resolved_ext = get_valid_ext_tracks(session)
+    session.external_subtitle_tracks = list(resolved_ext)
+
+    for t_opt in (target_opts or []):
+        try:
+            t_opt.external_subtitle_tracks = list(resolved_ext)
+        except Exception:
+            pass
+    return list(resolved_ext)

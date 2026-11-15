@@ -33,27 +33,21 @@ class PreviewSession:
     subtitle_font_scale: float = 1.0; subtitle_text_color: str = "#FFFFFF"; subtitle_bg_mode: str = "box"
     subtitle_pos_x: float = 50.0; subtitle_pos_y: float = 86.0; clip_start: float = 0.0; clip_end: float = 0.0
     sub_custom_edits: Dict[str, str] = field(default_factory=dict); dual_sub: bool = False; sec_s_idx: int = -1
-    audio_boost: bool = False; chapter_title: str = ""; chapters: List[Dict[str, Any]] = field(default_factory=list)
+    audio_boost: bool = False; chapter_title: str = ""; chapters: List[Dict[str, Any]] = field(default_factory=list); external_subtitle_tracks: List[Dict[str, Any]] = field(default_factory=list)
 
 def start_preview_bridge(host: str = "127.0.0.1") -> int:
     """Starts the singleton background preview bridge HTTP server on an ephemeral loopback port."""
     global _BRIDGE_SERVER, _BRIDGE_PORT
     with _SERVER_LOCK:
-        if _BRIDGE_SERVER is not None and _BRIDGE_PORT > 0:
-            return _BRIDGE_PORT
+        if _BRIDGE_SERVER is not None and _BRIDGE_PORT > 0: return _BRIDGE_PORT
         server = http.server.ThreadingHTTPServer((host, 0), PreviewBridgeRequestHandler)
-        server.daemon_threads = True
-        _BRIDGE_PORT = server.server_address[1]
-        _BRIDGE_SERVER = server
-        t = threading.Thread(target=server.serve_forever, daemon=True, name="SD-PreviewBridge")
-        t.start()
+        server.daemon_threads = True; _BRIDGE_PORT, _BRIDGE_SERVER = server.server_address[1], server
+        threading.Thread(target=server.serve_forever, daemon=True, name="SD-PreviewBridge").start()
         return _BRIDGE_PORT
 
 def get_preview_bridge_port() -> int:
     """Returns the active preview bridge port, starting the server if necessary."""
-    if _BRIDGE_PORT > 0:
-        return _BRIDGE_PORT
-    return start_preview_bridge()
+    return _BRIDGE_PORT if _BRIDGE_PORT > 0 else start_preview_bridge()
 
 def register_preview_session(
     url: str, video_title: str,
@@ -93,7 +87,8 @@ def register_preview_session(
         except Exception: ch_list = []
     session.chapters = list(ch_list or [])
     session.audio_boost = bool(kwargs.get("audio_boost", False))
-    session.chapter_title = str(kwargs.get("chapter_title", "") or "")
+    _init_ext = kwargs.get("external_subtitle_tracks") or (getattr(options[selected_q_idx], "external_subtitle_tracks", []) if (options and 0 <= selected_q_idx < len(options)) else [])
+    session.chapter_title, session.external_subtitle_tracks = str(kwargs.get("chapter_title", "") or ""), list(_init_ext or [])
     with _SESSIONS_LOCK:
         _SESSIONS[session_id] = session
         _prune_preview_sessions(_SESSIONS, 15)
@@ -285,7 +280,7 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
             subtitle_pos_x=session.subtitle_pos_x, subtitle_pos_y=session.subtitle_pos_y,
             clip_start=session.clip_start, clip_end=session.clip_end, dual_sub=session.dual_sub,
             audio_boost=getattr(session, "audio_boost", False), chapters=getattr(session, "chapters", None),
-            chapter_title=getattr(session, "chapter_title", ""),
+            chapter_title=getattr(session, "chapter_title", ""), external_subtitle_tracks=getattr(session, "external_subtitle_tracks", []),
         )
         data = html_code.encode("utf-8")
         self.send_response(200)
@@ -432,8 +427,9 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
                     session.modal_ref.destroy()
                 except Exception: pass
             if session.parent_app:
-                if hasattr(session.parent_app, "clear_last_clipboard_url"):
-                    try: session.parent_app.clear_last_clipboard_url()
+                for fn in (lambda: hasattr(session.parent_app, "clear_last_clipboard_url") and session.parent_app.clear_last_clipboard_url(),
+                           lambda: hasattr(session.parent_app, "set_main_external_subtitles") and session.parent_app.set_main_external_subtitles(getattr(session, "external_subtitle_tracks", []), sync_state=True)):
+                    try: fn()
                     except Exception: pass
                 if getattr(session, "max_connections", 0) > 0:
                     if hasattr(session.parent_app, "conn_var"):
@@ -497,6 +493,9 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
         except Exception: pass
 
         def _sync_tk():
+            if session.parent_app and hasattr(session.parent_app, "set_main_external_subtitles"):
+                try: session.parent_app.set_main_external_subtitles(getattr(session, "external_subtitle_tracks", []) or [], sync_state=True)
+                except Exception: pass
             m = session.modal_ref
             if not m or (hasattr(m, "winfo_exists") and not m.winfo_exists()): return
             try:
@@ -507,10 +506,12 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
                     so.selected_audio_track, so.selected_subtitle_track = session.selected_audio_track, session.selected_sub_track
                     so.subtitle_embed_mode, so.subtitle_position, so.subtitle_preset, so.subtitle_font_scale = session.subtitle_embed_mode, session.subtitle_position, session.subtitle_preset, session.subtitle_font_scale
                     so.subtitle_text_color, so.subtitle_bg_mode, so.subtitle_pos_x, so.subtitle_pos_y = session.subtitle_text_color, session.subtitle_bg_mode, session.subtitle_pos_x, session.subtitle_pos_y
+                    so.external_subtitle_tracks = list(getattr(session, "external_subtitle_tracks", []) or [])
                     if getattr(session, "max_connections", 0) > 0: so.max_connections = session.max_connections
                 if hasattr(m, "cb_audio") and m.cb_audio: m.cb_audio.current(a_idx)
                 if hasattr(m, "cb_sub") and m.cb_sub:
                     m.cb_sub.current(s_idx); m.cb_sub._selected_mode, m.cb_sub._user_touched_mode, m.cb_sub._selected_pos = sub_mode, True, sub_pos
+                    if hasattr(m.cb_sub, "set_external_subtitle_tracks"): m.cb_sub.set_external_subtitle_tracks(getattr(session, "external_subtitle_tracks", []) or [], notify=False)
                     if hasattr(m.cb_sub, "_mode_var"): m.cb_sub._mode_var.set(sub_mode)
                     mode_cb = getattr(m.cb_sub, "_mode_combobox", None)
                     if mode_cb and hasattr(mode_cb, "current"):

@@ -244,12 +244,20 @@ def extract_subtitle_tracks(info: Dict[str, Any]) -> List[Dict[str, Any]]:
         elif isinstance(cookie_val, str) and cookie_val.strip():
             base_headers["Cookie"] = cookie_val.strip()
 
+    seen_keys = set()
     for is_auto, sub_dict in ((False, manual_subs), (True, auto_subs)):
-        for lang, flist in sub_dict.items():
+        sorted_sub_items = sorted(
+            sub_dict.items(),
+            key=lambda kv: (0 if kv[0].lower() == kv[0].lower().split("-")[0].split("_")[0] else 1, kv[0].lower()),
+        )
+        for lang, flist in sorted_sub_items:
             lang_norm = lang.lower()
             if "live_chat" in lang_norm or "rechat" in lang_norm or "livechat" in lang_norm or "live-chat" in lang_norm:
                 continue
             base_lang = lang_norm.split("-")[0].split("_")[0]
+            dedup_key = (base_lang, is_auto)
+            if dedup_key in seen_keys:
+                continue
             if is_auto and lang_norm not in popular_lower and base_lang not in popular_lower and lang not in manual_subs:
                 continue
             res = _pick_best_sub_url(flist)
@@ -290,6 +298,7 @@ def extract_subtitle_tracks(info: Dict[str, Any]) -> List[Dict[str, Any]]:
                 suffix = "Official"
             name = "العربية" if base_lang == "ar" else ("English" if base_lang == "en" else LANG_NAMES.get(lang_norm, LANG_NAMES.get(base_lang, (lang.upper(), "")))[0])
             label = f"{name} ({suffix})" if base_lang != "ar" or not is_auto else f"العربية ({suffix})"
+            seen_keys.add(dedup_key)
             tracks.append({
                 "sub_id": f"{lang}-auto" if is_auto else lang,
                 "language": lang, "label": label, "url": url, "ext": ext, "is_auto": is_auto,
