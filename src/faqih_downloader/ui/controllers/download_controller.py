@@ -125,7 +125,7 @@ class DownloadControllerMixin(MediaDownloadControllerMixin, DownloadCallbacksMix
                 self.log(f"[LINK RESOLVER] Web page detected. Real file found: {real_url}")
 
             downloads_dir = self._get_base_downloads_dir() if hasattr(self, "_get_base_downloads_dir") else get_base_downloads_dir()
-            dest_dir = os.path.dirname(dest) if dest else downloads_dir
+            dest_dir = dest if (dest and (os.path.isdir(dest) or not os.path.splitext(dest)[1])) else (os.path.dirname(dest) if dest else downloads_dir)
             if not os.path.isdir(dest_dir):
                 dest_dir = downloads_dir
 

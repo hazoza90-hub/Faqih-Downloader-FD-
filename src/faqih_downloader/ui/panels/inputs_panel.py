@@ -174,13 +174,21 @@ class InputsPanelMixin(ControlsPanelMixin):
         if not url:
             return
         fn = derive_download_filename(url)
+        is_media = False
+        try:
+            from faqih_downloader.services import is_media_url
+            is_media = bool(is_media_url(url))
+        except Exception:
+            pass
+        if is_media and os.path.splitext(fn)[1].lower() not in (".mp4", ".mkv", ".webm", ".mp3", ".m4a", ".mov", ".avi"):
+            fn = f"{os.path.splitext(fn)[0] or fn}.mp4"
         cur_dest = self.entry_dest.get().strip()
         downloads_dir = self._get_base_downloads_dir()
-        dest_dir = cur_dest if cur_dest and os.path.isdir(cur_dest) else (os.path.dirname(cur_dest) if cur_dest else downloads_dir)
+        dest_dir = cur_dest if (cur_dest and (os.path.isdir(cur_dest) or not os.path.splitext(cur_dest)[1])) else (os.path.dirname(cur_dest) if cur_dest else downloads_dir)
         if not os.path.isdir(dest_dir):
             dest_dir = downloads_dir
         if getattr(self, "auto_categorize_folders", True) and self._is_downloads_or_category_subfolder(dest_dir, downloads_dir):
-            new_dest = resolve_categorized_path(downloads_dir, fn, auto_categorize=True)
+            new_dest = resolve_categorized_path(downloads_dir, fn, auto_categorize=True, create_dir=not is_media)
         else:
             new_dest = os.path.join(dest_dir, fn)
         self.entry_dest.delete(0, tk.END)

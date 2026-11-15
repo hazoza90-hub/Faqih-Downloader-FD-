@@ -649,6 +649,315 @@ class TestPreviewExtSrtAndSubtitleDedup(unittest.TestCase):
                 self.assertEqual(os.path.basename(os.path.dirname(final_dest)).lower(), "video", f"Lost Video folder for entry_dest={dest_val}: {final_dest}")
                 self.assertEqual(os.path.dirname(os.path.dirname(final_dest)), dl_dir, f"Parent Downloads truncated for entry_dest={dest_val}: {final_dest}")
 
+    def test_download_subtitle_as_srt_creates_missing_directory(self):
+        from faqih_downloader.services.subtitle_downloader import download_subtitle_as_srt
+
+        with tempfile.TemporaryDirectory() as tmp:
+            missing_video_dir = os.path.join(tmp, "Downloads", "Video")
+            self.assertFalse(os.path.exists(missing_video_dir))
+            video_filepath = os.path.join(missing_video_dir, "demo_clip.mp4")
+            sub_track = {
+                "sub_id": "en",
+                "language": "en",
+                "url": "https://example.com/en.vtt",
+                "is_auto": False,
+            }
+            vtt = "WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nHello missing folder\n"
+            with patch("faqih_downloader.services.subtitle_downloader._fetch_url_direct", return_value=vtt):
+                srt_path = download_subtitle_as_srt(sub_track, video_filepath)
+            self.assertIsNotNone(srt_path)
+            self.assertTrue(os.path.isdir(missing_video_dir))
+            self.assertTrue(os.path.isfile(srt_path))
+            self.assertIn("Hello missing folder", _read_utf8(srt_path))
+
+    def test_phase4_shared_base_timedtext_cache_and_orig_arabic_tracks(self):
+        from faqih_downloader.services import subtitle_downloader as sd
+        from faqih_downloader.services.youtube_tracks import extract_subtitle_tracks
+
+        # 1) Verify youtube_tracks prefers -orig / untranslated URL in auto_subs even if info['language'] missing
+        info = {
+            "webpage_url": "https://www.youtube.com/watch?v=arab1234567",
+            "automatic_captions": {
+                "en": [{"url": "https://www.youtube.com/api/timedtext?v=arab1234567&lang=ar&tlang=en", "ext": "vtt"}],
+                "ar-orig": [{"url": "https://www.youtube.com/api/timedtext?v=arab1234567&lang=ar", "ext": "vtt"}],
+                "de": [{"url": "https://www.youtube.com/api/timedtext?v=arab1234567&lang=ar&tlang=de", "ext": "vtt"}],
+                "es": [{"url": "https://www.youtube.com/api/timedtext?v=arab1234567&lang=ar&tlang=es", "ext": "vtt"}],
+                "fr": [{"url": "https://www.youtube.com/api/timedtext?v=arab1234567&lang=ar&tlang=fr", "ext": "vtt"}],
+                "hi": [{"url": "https://www.youtube.com/api/timedtext?v=arab1234567&lang=ar&tlang=hi", "ext": "vtt"}],
+            },
+        }
+        tracks = extract_subtitle_tracks(info)
+        auto_tracks = [t for t in tracks if t.get("sub_id") != "none"]
+        self.assertEqual(len(auto_tracks), 6)
+        for trk in auto_tracks:
+            self.assertEqual(
+                trk["base_url"],
+                "https://www.youtube.com/api/timedtext?v=arab1234567&lang=ar&fmt=vtt",
+                f"Track {trk['language']} failed to use Arabic orig base_url",
+            )
+
+        # 2) Verify 6 languages hit base_cand_url HTTP ONCE via _BASE_TIMEDTEXT_CACHE,
+        # and Arabic without tlang= skips GTX translation completely
+        with sd._BASE_TIMEDTEXT_LOCK:
+            sd._BASE_TIMEDTEXT_CACHE.clear()
+        base_fetch_calls = []
+        gtx_calls = []
+
+        def fake_fetch(url, headers, timeout=15):
+            if "tlang=" in url:
+                return None  # simulate HTTP 429 on direct &tlang=
+            base_fetch_calls.append(url)
+            return "WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nمرحبا بكم\n"
+
+        def fake_gtx(cues, target_lang="ar"):
+            gtx_calls.append(target_lang)
+            return [(c[0], c[1], f"[{target_lang}] {c[2]}") for c in cues]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            vid = os.path.join(tmp, "Video", "clip.mp4")
+            with patch("faqih_downloader.services.subtitle_downloader._fetch_url_direct", side_effect=fake_fetch), \
+                 patch("faqih_downloader.services.subtitle_downloader._translate_srt_cues_via_gtx", side_effect=fake_gtx):
+                for trk in auto_tracks:
+                    out = sd.download_subtitle_as_srt(trk, vid)
+                    self.assertTrue(out and os.path.isfile(out), f"Failed for {trk['language']}")
+            self.assertEqual(len(base_fetch_calls), 1, f"Expected 1 base fetch across 6 langs, got {base_fetch_calls}")
+            # ar-orig (language="ar", no tlang=) matches base_src_lang=="ar", so GTX called only for 5 foreign langs
+            self.assertEqual(sorted(gtx_calls), ["de", "en", "es", "fr", "hi"])
+            self.assertIn("مرحبا بكم", _read_utf8(os.path.join(tmp, "Video", "clip.ar.srt")))
+            self.assertIn("[de] مرحبا بكم", _read_utf8(os.path.join(tmp, "Video", "clip.de.srt")))
+
+    def test_start_subtitle_prefetch_records_each_future_immediately(self):
+        import threading
+        from faqih_downloader.services import subtitle_downloader as sd
+
+        with tempfile.TemporaryDirectory() as tmp:
+            vid = os.path.join(tmp, "Video", "pref.mp4")
+            ar_gate = threading.Event()
+            en_done = threading.Event()
+
+            def slow_dl(trk, vpath):
+                lang = trk["language"]
+                os.makedirs(os.path.dirname(vpath), exist_ok=True)
+                if lang == "ar":
+                    ar_gate.wait(timeout=3.0)
+                p = f"{os.path.splitext(vpath)[0]}.{lang}.srt"
+                with open(p, "w", encoding="utf-8-sig") as f:
+                    f.write("1\n00:00:01,000 --> 00:00:02,000\nok\n")
+                if lang == "en":
+                    en_done.set()
+                return p
+
+            si = YouTubeStreamInfo(
+                video_id="pf1", title="Pref", clean_filename="Pref",
+                is_progressive=True, video_url="https://example.com/v.mp4",
+                external_subtitle_tracks=[
+                    {"sub_id": "en", "language": "en", "url": "https://example.com/en.vtt"},
+                    {"sub_id": "ar", "language": "ar", "url": "https://example.com/ar.vtt"},
+                ],
+            )
+            with patch("faqih_downloader.services.subtitle_processor.download_subtitle_as_srt", side_effect=slow_dl):
+                t = start_subtitle_prefetch(si, vid)
+                self.assertTrue(en_done.wait(timeout=2.0))
+                # Wait briefly for as_completed callback while 'ar' is still blocked on ar_gate
+                for _ in range(30):
+                    if "en" in getattr(si, "_prefetched_external_srts", {}):
+                        break
+                    threading.Event().wait(0.02)
+                self.assertIn("en", si._prefetched_external_srts)
+                self.assertNotIn("ar", si._prefetched_external_srts)
+                ar_gate.set()
+                t.join(timeout=2.0)
+                self.assertIn("ar", si._prefetched_external_srts)
+
+    def test_stream_coordinator_single_complete_uses_updated_destination_path(self):
+        from unittest.mock import MagicMock
+        from faqih_downloader.core.stream_coordinator import StreamDownloadCoordinator
+
+        with tempfile.TemporaryDirectory() as tmp:
+            orig_path = os.path.join(tmp, "Demo [Burn].mp4")
+            clean_path = os.path.join(tmp, "Demo.mp4")
+            with open(orig_path, "wb") as f:
+                f.write(b"1234567890")
+
+            si = YouTubeStreamInfo(
+                video_id="sc1", title="Demo", clean_filename="Demo",
+                is_progressive=True, video_url="https://example.com/v.mp4", video_ext="mp4",
+            )
+            on_complete = MagicMock()
+            coord = StreamDownloadCoordinator(si, orig_path, max_connections=1, on_complete=on_complete)
+
+            def fake_proc_subs(target_p):
+                os.replace(orig_path, clean_path)
+                coord.destination_path = clean_path
+
+            class _FakeEngine:
+                def __init__(self, on_c):
+                    self.is_running = False
+                    self.is_paused = False
+                    self.rate_limiter = None
+                    self._on_c = on_c
+                def start(self):
+                    self._on_c(orig_path, 10, 0.5)
+
+            with patch.object(coord, "_start_subtitle_prefetch"), \
+                 patch.object(coord, "_process_subtitles", side_effect=fake_proc_subs), \
+                 patch.object(coord, "_make_engine", side_effect=lambda *a, **kw: _FakeEngine(a[6])):
+                coord._run_coordinator()
+
+            on_complete.assert_called_once()
+            self.assertEqual(on_complete.call_args[0][0], clean_path)
+            self.assertEqual(on_complete.call_args[0][1], 10)
+
+    def test_start_pending_media_and_youtube_download_respect_video_folder(self):
+        import threading
+        import tkinter as tk
+        from unittest.mock import MagicMock
+        from faqih_downloader.ui.panels.media_options_bar import MediaOptionsBarMixin
+        from faqih_downloader.ui.panels.media_options_actions import MediaOptionsActionsMixin
+        from faqih_downloader.ui.controllers.youtube_download_controller import YouTubeDownloadControllerMixin
+        from faqih_downloader.ui.panels.inputs_panel import InputsPanelMixin
+        from faqih_downloader.ui.components.top_bar import TopHeaderBarMixin
+
+        class _FlowHarness(TopHeaderBarMixin, InputsPanelMixin, MediaOptionsBarMixin, MediaOptionsActionsMixin, YouTubeDownloadControllerMixin):
+            c_panel = "#1e293b"
+            c_panel_light = "#334155"
+            c_input_bg = "#0f172a"
+            c_text_bright = "#f8fafc"
+            c_accent = "#38bdf8"
+            c_accent_dark = "#0284c7"
+            c_bg = "#0b0f19"
+            c_text_dim = "#94a3b8"
+
+            def __init__(self, tk_root, dl_dir):
+                self.root = tk_root
+                self._dl_dir = dl_dir
+                self.auto_categorize_folders = True
+                self.history_manager = None
+                self.engine = None
+                self._staged_links = []
+                self._pending_media_context = None
+                self._quality_modal = None
+                self._candidates_modal = None
+                self._confirm_modal = None
+                self._yt_cancel_event = threading.Event()
+                self.entry_url = tk.Entry(tk_root)
+                self.entry_dest = tk.Entry(tk_root)
+                self.conn_var = MagicMock(get=MagicMock(return_value="8"))
+                self.entry_custom_speed = MagicMock(get=MagicMock(return_value="0"))
+                self.card_size = MagicMock()
+                self.btn_start = MagicMock()
+                self.btn_pause = MagicMock()
+                self.btn_cancel = MagicMock()
+                self.txt_log = MagicMock()
+                self.tree_chunks = MagicMock(get_children=MagicMock(return_value=[]))
+                self.btn_save_to = MagicMock()
+                self.launched = []
+                self._staged_refreshed = False
+
+            def _get_base_downloads_dir(self):
+                return self._dl_dir
+
+            def _theme_dict(self):
+                return {"c_bg": self.c_bg, "c_panel": self.c_panel, "c_panel_light": self.c_panel_light, "c_input_bg": self.c_input_bg, "c_text_bright": self.c_text_bright, "c_accent": self.c_accent, "c_accent_dark": self.c_accent_dark, "c_text_dim": self.c_text_dim}
+
+            def log(self, *_args, **_kwargs):
+                pass
+
+            def _draw_main_progress(self, *_a):
+                pass
+
+            def _draw_chunk_segments(self, *_a):
+                pass
+
+            def _show_fetching_toast(self, *_a, **_kw):
+                pass
+
+            def _close_fetching_toast(self):
+                pass
+
+            def _launch_stream_coordinator(self, stream_info, final_dest, max_conn, bytes_limit):
+                self.launched.append((stream_info, final_dest))
+
+            def _refresh_staged_links_ui(self):
+                self._staged_refreshed = True
+
+            def dispatch_to_main_thread(self, fn):
+                fn()
+
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                dl_dir = os.path.join(tmp, "Downloads")
+                os.makedirs(dl_dir, exist_ok=True)
+                app = _FlowHarness(root, dl_dir)
+                app._build_media_options_bar(tk.Frame(root))
+
+                # A) _on_url_change with YouTube URL must assume .mp4 (Video), NOT create Downloads/General
+                app.entry_dest.insert(0, dl_dir)
+                app.entry_url.insert(0, "https://youtu.be/cR4T9MDrlqE")
+                app._on_url_change()
+                self.assertEqual(os.path.basename(os.path.dirname(app.entry_dest.get())).lower(), "video")
+                self.assertFalse(os.path.exists(os.path.join(dl_dir, "General")))
+
+                # B) _set_category("Audio") uses CATEGORY_SUBFOLDERS["Audio"] == "Music" and updates ctx + staged card
+                opt = VideoFormatOption(
+                    format_id="22", resolution_label="720p", height=720, ext="mp4",
+                    filesize_approx=10 * 1024 * 1024, fps=30, vcodec="avc1", acodec="mp4a", note=""
+                )
+                app._pending_media_context = {
+                    "url": "https://youtu.be/cR4T9MDrlqE",
+                    "info": {"title": "Clip"},
+                    "options": [opt],
+                    "selected_option": opt,
+                    "final_dest": os.path.join(dl_dir, "Video", "Clip.mp4"),
+                    "resolver": MagicMock(build_stream_info=lambda i, o: i),
+                }
+                app._staged_links = [{"url": "https://youtu.be/cR4T9MDrlqE", "final_dest": os.path.join(dl_dir, "Video", "Clip.mp4"), "media_context": {"final_dest": os.path.join(dl_dir, "Video", "Clip.mp4")}}]
+                with patch("faqih_downloader.ui.components.top_bar.set_setting"):
+                    app._set_category("Audio")
+                self.assertEqual(os.path.basename(os.path.dirname(app._pending_media_context["final_dest"])), "Music")
+                self.assertEqual(os.path.basename(os.path.dirname(app._staged_links[0]["final_dest"])), "Music")
+                self.assertTrue(app._staged_refreshed)
+
+                # Reset to Video via _set_category and verify _start_pending_media_download uses Downloads/Video
+                with patch("faqih_downloader.ui.components.top_bar.set_setting"):
+                    app._set_category("Video")
+                app.entry_dest.delete(0, tk.END)
+                app.entry_dest.insert(0, dl_dir)  # simulate entry_dest holding Downloads directory
+                app._pending_media_context["final_dest"] = os.path.join(dl_dir, "Clip [720p].mp4")
+                app._start_pending_media_download()
+                self.assertTrue(app.launched)
+                pending_dest = app.launched[0][1]
+                self.assertEqual(os.path.basename(os.path.dirname(pending_dest)).lower(), "video")
+                self.assertEqual(os.path.dirname(os.path.dirname(pending_dest)), dl_dir)
+
+                # C) _start_youtube_download when entry_dest == dl_dir keeps Downloads/Video (not parent of Downloads)
+                captured = {}
+                class _InlineThread:
+                    def __init__(self, target=None, daemon=False):
+                        self._target = target
+                    def start(self):
+                        self._target()
+                class _CaptureModal:
+                    def __init__(self, **kw):
+                        captured["dest"] = kw.get("default_dest_path", "")
+                    def lift(self): pass
+                    def focus_force(self): pass
+                app.after = lambda _ms, fn: fn()
+                app.root.after = lambda _ms, fn: fn()
+                app._last_media_context = None
+                app._media_context_cache = {}
+                with patch("faqih_downloader.ui.controllers.youtube_download_controller.threading.Thread", _InlineThread), \
+                     patch("faqih_downloader.services.youtube_service.YouTubeResolver.extract_format_options", return_value=({"title": "My Arab Video", "duration": 60}, [opt])), \
+                     patch("faqih_downloader.ui.controllers.youtube_download_controller.QualitySelectionModal", _CaptureModal):
+                    app._start_youtube_download("https://youtu.be/freshVid123", dl_dir)
+                yt_dest = captured.get("dest", "")
+                self.assertEqual(os.path.basename(os.path.dirname(yt_dest)).lower(), "video", f"Expected Video dir, got {yt_dest}")
+                self.assertEqual(os.path.dirname(os.path.dirname(yt_dest)), dl_dir, f"Downloads stripped in {yt_dest}")
+        finally:
+            root.destroy()
+
 
 
 if __name__ == "__main__":

@@ -355,12 +355,15 @@ class MediaOptionsBarMixin(MediaOptionsActionsMixin):
             self.cb_main_quality.configure(values=q_vals)
             if 0 <= q_idx < len(q_vals): self.cb_main_quality.current(q_idx)
 
-        # Update destination path filename tags
+        # Update destination path filename tags (only when entry_dest is non-empty; never corrupt a directory into folder.mp4)
         cur_dest = self.entry_dest.get().strip() if hasattr(self, "entry_dest") else ""
-        if cur_dest and opt:
+        ctx_dest = ctx.get("final_dest", "") or ""
+        _is_file = lambda p: bool(p and not os.path.isdir(p) and os.path.splitext(p)[1])
+        tag_target = (cur_dest if _is_file(cur_dest) else (ctx_dest if _is_file(ctx_dest) else "")) if cur_dest else ""
+        if tag_target and opt:
             is_sub_burned = (sub_mode == "hard_burn") and bool(getattr(opt, "selected_subtitle_track", None))
-            updated_dest = apply_media_filename_tags(cur_dest, quality_label=opt.resolution_label, is_sub_burned=is_sub_burned, ext=opt.ext)
-            if hasattr(self, "entry_dest") and updated_dest != cur_dest:
+            updated_dest = apply_media_filename_tags(tag_target, quality_label=opt.resolution_label, is_sub_burned=is_sub_burned, ext=opt.ext)
+            if _is_file(cur_dest) and hasattr(self, "entry_dest") and updated_dest != cur_dest:
                 end_val = tk.END if tk else "end"
                 self.entry_dest.delete(0, end_val)
                 self.entry_dest.insert(0, updated_dest)

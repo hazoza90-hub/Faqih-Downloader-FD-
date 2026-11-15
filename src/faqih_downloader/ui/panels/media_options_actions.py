@@ -16,7 +16,7 @@ except Exception:
 
 from faqih_downloader.i18n import tr
 from faqih_downloader.config import get_base_downloads_dir, get_setting, parse_safe_int
-from faqih_downloader.utils.file_ops import apply_media_filename_tags, generate_unique_destination_path
+from faqih_downloader.utils.file_ops import apply_media_filename_tags, generate_unique_destination_path, resolve_categorized_path
 from faqih_downloader.services.youtube_service import VideoFormatOption, YouTubeResolver, sanitize_filename, format_filesize
 from ..modals.quality_modal import QualitySelectionModal
 from ..modals.confirm_modal import DownloadConfirmationModal
@@ -420,7 +420,20 @@ class MediaOptionsActionsMixin:
                 if ext_c:
                     selected_opt.external_subtitle_tracks = list(ext_c)
 
-        final_dest = (self.entry_dest.get().strip() if hasattr(self, "entry_dest") else "") or ctx.get("final_dest", "")
+        entry_p = self.entry_dest.get().strip() if hasattr(self, "entry_dest") else ""
+        ctx_p = ctx.get("final_dest", "") or ""
+        raw_title = (info.get("title") if isinstance(info, dict) else "") or ctx.get("raw_title") or "Video"
+        is_file = lambda p: bool(p and not os.path.isdir(p) and os.path.splitext(p)[1])
+        cand_dest = entry_p if is_file(entry_p) else (ctx_p if is_file(ctx_p) else "")
+        if cand_dest:
+            base_dl = self._get_base_downloads_dir() if hasattr(self, "_get_base_downloads_dir") else get_base_downloads_dir()
+            auto_cat = getattr(self, "auto_categorize_folders", True)
+            if auto_cat and os.path.normcase(os.path.abspath(os.path.dirname(cand_dest))) == os.path.normcase(os.path.abspath(base_dl)):
+                final_dest = resolve_categorized_path(base_dl, os.path.basename(cand_dest), auto_categorize=True, create_dir=False)
+            else:
+                final_dest = cand_dest
+        else:
+            final_dest = self._resolve_final_dest(entry_p or ctx_p, raw_title, selected_opt)
         if selected_opt:
             is_sub = (getattr(selected_opt, "subtitle_embed_mode", "") == "hard_burn") and bool(getattr(selected_opt, "selected_subtitle_track", None))
             final_dest = apply_media_filename_tags(final_dest, quality_label=selected_opt.resolution_label, is_sub_burned=is_sub, ext=selected_opt.ext)

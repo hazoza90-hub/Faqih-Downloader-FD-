@@ -52,13 +52,16 @@ class ClipboardDialogMixin:
             cur_dest = self.entry_dest.get().strip()
         except Exception:
             pass
-        dest_dir = cur_dest if cur_dest and os.path.isdir(cur_dest) else (os.path.dirname(cur_dest) if cur_dest else downloads_dir)
+        dest_dir = cur_dest if (cur_dest and (os.path.isdir(cur_dest) or not os.path.splitext(cur_dest)[1])) else (os.path.dirname(cur_dest) if cur_dest else downloads_dir)
         if not os.path.isdir(dest_dir):
             dest_dir = downloads_dir
 
+        is_media = is_media_url(url)
         url_fn = derive_download_filename(url)
+        if is_media and os.path.splitext(url_fn)[1].lower() not in (".mp4", ".mkv", ".webm", ".mp3", ".m4a", ".mov", ".avi"):
+            url_fn = f"{os.path.splitext(url_fn)[0] or url_fn}.mp4"
         if getattr(self, "auto_categorize_folders", True) and self._is_downloads_or_category_subfolder(dest_dir, downloads_dir):
-            new_dest = resolve_categorized_path(downloads_dir, url_fn, auto_categorize=True)
+            new_dest = resolve_categorized_path(downloads_dir, url_fn, auto_categorize=True, create_dir=not is_media)
         else:
             new_dest = os.path.join(dest_dir, url_fn)
         try:
@@ -111,7 +114,7 @@ class ClipboardDialogMixin:
                         cur_d = self.entry_dest.get().strip()
                     except Exception:
                         pass
-                    dest_dir = cur_d if cur_d and os.path.isdir(cur_d) else (os.path.dirname(cur_d) if cur_d else downloads_dir)
+                    dest_dir = cur_d if (cur_d and (os.path.isdir(cur_d) or not os.path.splitext(cur_d)[1])) else (os.path.dirname(cur_d) if cur_d else downloads_dir)
                     if not os.path.isdir(dest_dir):
                         dest_dir = downloads_dir
                     resolved_fn = info.get("filename") or derive_download_filename(real_url)
@@ -188,7 +191,9 @@ class ClipboardDialogMixin:
                 resolved_url = info.get("url") or url
                 resolved_fn = info.get("filename") or derive_download_filename(resolved_url)
                 downloads_dir = self._get_base_downloads_dir() if hasattr(self, "_get_base_downloads_dir") else get_base_downloads_dir()
-                dest_dir = os.path.dirname(final_dest) if final_dest else downloads_dir
+                dest_dir = final_dest if (final_dest and (os.path.isdir(final_dest) or not os.path.splitext(final_dest)[1])) else (os.path.dirname(final_dest) if final_dest else downloads_dir)
+                if not os.path.isdir(dest_dir):
+                    dest_dir = downloads_dir
                 if getattr(self, "auto_categorize_folders", True) and self._is_downloads_or_category_subfolder(dest_dir, downloads_dir):
                     act_dest = resolve_categorized_path(downloads_dir, resolved_fn, auto_categorize=True)
                 else:

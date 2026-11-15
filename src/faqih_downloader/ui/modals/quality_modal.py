@@ -400,7 +400,7 @@ class QualitySelectionModal(_BaseToplevel):
 
     def _attach_selected_tracks(self):
         attach_selected_tracks_to_option(
-            self.selected_option, self.audio_tracks, self.cb_audio, self.subtitle_tracks, self.cb_sub, all_options=self.options
+            self.selected_option, self.audio_tracks, self.cb_audio, self.subtitle_tracks, self.cb_sub, all_options=getattr(self, "options", None)
         )
 
     def _resolve_final_dest(self) -> str:

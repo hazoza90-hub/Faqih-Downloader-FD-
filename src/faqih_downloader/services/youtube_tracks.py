@@ -244,6 +244,44 @@ def extract_subtitle_tracks(info: Dict[str, Any]) -> List[Dict[str, Any]]:
         elif isinstance(cookie_val, str) and cookie_val.strip():
             base_headers["Cookie"] = cookie_val.strip()
 
+    def _strip_tl(u: str) -> str:
+        return re.sub(r'([?&])tlang=[^&]*(&|$)', r'\1', u).replace("?&", "?").rstrip("?&")
+
+    def _find_orig_auto_base_url() -> str:
+        def _is_chat(k: str) -> bool:
+            kl = str(k or "").lower()
+            return any(x in kl for x in ("live_chat", "rechat", "livechat", "live-chat"))
+
+        for k, flist in auto_subs.items():
+            kl = str(k or "").lower()
+            if not _is_chat(k) and (kl.endswith("-orig") or kl.endswith("_orig")):
+                picked = _pick_best_sub_url(flist)
+                if picked and picked[0] and "tlang=" not in picked[0]:
+                    return picked[0]
+        info_lang = str(info.get("language") or "").strip().lower()
+        prioritized = sorted(
+            auto_subs.items(),
+            key=lambda kv: (0 if (info_lang and str(kv[0]).lower().startswith(info_lang)) else 1, str(kv[0]).lower()),
+        )
+        for k, flist in prioritized:
+            if not _is_chat(k):
+                picked = _pick_best_sub_url(flist)
+                if picked and picked[0] and "tlang=" not in picked[0]:
+                    return picked[0]
+        for k, flist in auto_subs.items():
+            kl = str(k or "").lower()
+            if not _is_chat(k) and (kl.endswith("-orig") or kl.endswith("_orig")):
+                picked = _pick_best_sub_url(flist)
+                if picked and picked[0]:
+                    return _strip_tl(picked[0])
+        if info_lang and info_lang in manual_subs:
+            picked = _pick_best_sub_url(manual_subs[info_lang])
+            if picked and picked[0] and "tlang=" not in picked[0]:
+                return picked[0]
+        return ""
+
+    orig_auto_base_url = _find_orig_auto_base_url()
+
     seen_keys = set()
     for is_auto, sub_dict in ((False, manual_subs), (True, auto_subs)):
         sorted_sub_items = sorted(
@@ -266,21 +304,19 @@ def extract_subtitle_tracks(info: Dict[str, Any]) -> List[Dict[str, Any]]:
             url, ext = res
 
             base_url = ""
-            if "tlang=" in url:
-                base_url = re.sub(r'([?&])tlang=[^&]*(&|$)', r'\1', url).replace("?&", "?").rstrip("?&")
-            elif not is_auto:
+            if is_auto and orig_auto_base_url:
+                base_url = orig_auto_base_url
+            elif "tlang=" in url:
+                base_url = _strip_tl(url)
+            elif not is_auto or "tlang=" not in url:
                 base_url = url
-            if not base_url and is_auto:
-                for orig_cand in (str(info.get("language") or "en").lower(), "en"):
-                    if orig_cand in manual_subs:
-                        m_res = _pick_best_sub_url(manual_subs[orig_cand])
-                        if m_res and m_res[0]:
-                            base_url = m_res[0]
-                            break
-                    if not base_url and orig_cand in auto_subs:
-                        a_res = _pick_best_sub_url(auto_subs[orig_cand])
-                        if a_res and a_res[0]:
-                            base_url = a_res[0]
+            if not base_url and is_auto and info.get("language"):
+                orig_cand = str(info.get("language") or "").lower()
+                for src_map in (manual_subs, auto_subs):
+                    if orig_cand in src_map:
+                        cand_res = _pick_best_sub_url(src_map[orig_cand])
+                        if cand_res and cand_res[0]:
+                            base_url = _strip_tl(cand_res[0])
                             break
 
             fallback_urls: List[str] = []

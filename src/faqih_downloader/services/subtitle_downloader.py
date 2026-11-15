@@ -8,10 +8,11 @@ import sys
 import time
 import html
 import json
+import threading
 import concurrent.futures
 import urllib.request
 import urllib.parse
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Tuple, Any, Callable
 
 try:
     from ..config import get_setting
@@ -350,6 +351,113 @@ def _fetch_url_direct(url: str, headers: Dict[str, str], timeout: int = 15) -> O
         return None
 
 
+_BASE_TIMEDTEXT_LOCK = threading.Lock()
+_BASE_TIMEDTEXT_INFLIGHT: Dict[str, threading.Lock] = {}
+_BASE_TIMEDTEXT_CACHE: Dict[str, List[Tuple[float, float, str]]] = {}
+
+
+def _fetch_urls_with_cookies(cand_urls: List[str], headers: Dict[str, str], parse_fn: Callable[[str], Any], timeout: int = 15) -> Any:
+    """Attempts fetching candidate URLs using locally installed browser cookies."""
+    try:
+        import yt_dlp.cookies
+        for b in detect_installed_cookie_browsers():
+            try: cj = yt_dlp.cookies.extract_cookies_from_browser(b)
+            except Exception: cj = None
+            if not cj: continue
+            hdr = dict(headers)
+            try:
+                cstr = "; ".join(f"{c.name}={c.value}" for c in cj)
+                if cstr: hdr["Cookie"] = cstr
+            except Exception: pass
+            for u in cand_urls:
+                if requests is not None:
+                    try:
+                        r = requests.get(u, headers=hdr, cookies=cj, timeout=timeout)
+                        if r.status_code == 200:
+                            res = parse_fn(r.content.decode("utf-8", errors="replace"))
+                            if res: return res
+                    except Exception: pass
+                try:
+                    req = urllib.request.Request(u, headers=hdr)
+                    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
+                    with opener.open(req, timeout=timeout) as resp:
+                        res = parse_fn(resp.read().decode("utf-8", errors="replace"))
+                        if res: return res
+                except Exception: pass
+    except Exception: pass
+    return None
+
+
+def _fetch_via_ytdlp(webpage_url: str, lang: str, http_headers: Any, parse_fn: Callable[[str], Any]) -> Any:
+    """Extracts and parses subtitles via yt_dlp into a temporary directory."""
+    try:
+        import tempfile, yt_dlp
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            ydl_opts: Dict[str, Any] = {
+                "writesubtitles": True, "writeautomaticsub": True,
+                "subtitleslangs": [lang], "subtitlesformat": "srt/vtt/ttml/srv3/json3/best",
+                "skip_download": True, "quiet": True, "no_warnings": True,
+                "outtmpl": os.path.join(tmp_dir, "%(id)s.%(ext)s"),
+            }
+            cb = _resolve_cookie_browser(get_setting("cookies_browser", "none"))
+            if cb: ydl_opts["cookiesfrombrowser"] = (cb,)
+            if isinstance(http_headers, dict) and http_headers:
+                ydl_opts["http_headers"] = http_headers
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                try: ydl.download([webpage_url])
+                except Exception: pass
+            for fn in os.listdir(tmp_dir):
+                fp = os.path.join(tmp_dir, fn)
+                if os.path.isfile(fp) and any(fp.endswith(e) for e in (".srt", ".vtt", ".ttml", ".srv3", ".xml", ".json3")):
+                    try:
+                        with open(fp, "r", encoding="utf-8-sig", errors="replace") as sf:
+                            res = parse_fn(sf.read())
+                            if res: return res
+                    except Exception: pass
+    except Exception: pass
+    return None
+
+
+def _base_cache_key(url: str) -> str:
+    return re.sub(r'([?&])fmt=[^&]*(&|$)', r'\1', url).replace("?&", "?").rstrip("?&")
+
+
+def _get_cached_base_cues(base_cand_url: str, sub_track: Dict[str, Any], headers: Dict[str, str]) -> List[Tuple[float, float, str]]:
+    """Fetches untranslated base timedtext cues once per base URL and shares via thread-safe cache."""
+    cache_key = _base_cache_key(base_cand_url)
+    with _BASE_TIMEDTEXT_LOCK:
+        if cache_key in _BASE_TIMEDTEXT_CACHE:
+            return list(_BASE_TIMEDTEXT_CACHE[cache_key])
+        key_lock = _BASE_TIMEDTEXT_INFLIGHT.setdefault(cache_key, threading.Lock())
+    with key_lock:
+        with _BASE_TIMEDTEXT_LOCK:
+            if cache_key in _BASE_TIMEDTEXT_CACHE:
+                return list(_BASE_TIMEDTEXT_CACHE[cache_key])
+        fmt_urls = [
+            re.sub(r'([?&]fmt=)[^&]+', rf'\g<1>{fmt}', base_cand_url) if "fmt=" in base_cand_url
+            else f"{base_cand_url}{'&' if '?' in base_cand_url else '?'}fmt={fmt}"
+            for fmt in ("vtt", "json3", "srv3", "ttml")
+        ]
+        _parse_ok = lambda txt: _parse_timedtext_to_cues(txt) if (txt and len(txt.strip()) > 10) else []
+        clean_headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0.0.0"}
+        parsed_cues: List[Tuple[float, float, str]] = []
+        for test_url in fmt_urls:
+            parsed_cues = _parse_ok(_fetch_url_direct(test_url, clean_headers, timeout=10) or "")
+            if parsed_cues: break
+        if not parsed_cues:
+            parsed_cues = _fetch_urls_with_cookies(fmt_urls, dict(headers), _parse_ok, timeout=10) or []
+        if not parsed_cues and sub_track.get("webpage_url"):
+            qs_lang = urllib.parse.parse_qs(urllib.parse.urlparse(base_cand_url).query).get("lang")
+            orig_lang = qs_lang[0] if qs_lang else (sub_track.get("orig_language") or "en")
+            parsed_cues = _fetch_via_ytdlp(sub_track["webpage_url"], str(orig_lang), sub_track.get("http_headers"), _parse_ok) or []
+        if parsed_cues:
+            with _BASE_TIMEDTEXT_LOCK:
+                if len(_BASE_TIMEDTEXT_CACHE) >= 64:
+                    _BASE_TIMEDTEXT_CACHE.clear()
+                _BASE_TIMEDTEXT_CACHE[cache_key] = list(parsed_cues)
+        return list(parsed_cues)
+
+
 def download_subtitle_as_srt(sub_track: Dict[str, Any], video_filepath: str) -> Optional[str]:
     """
     Downloads subtitle, converts VTT/XML/JSON to SRT, and saves alongside video in pure UTF-8.
@@ -374,9 +482,15 @@ def download_subtitle_as_srt(sub_track: Dict[str, Any], video_filepath: str) -> 
         c = convert_vtt_to_srt(txt)
         return c if c and "-->" in c else (txt if "-->" in txt else "")
 
-    # Phase 1: Try candidate URLs directly
+    # Phase 1: Try candidate URLs directly (share base cache when URL matches base_url)
+    base_ref_key = _base_cache_key(sub_track["base_url"]) if sub_track.get("base_url") else ""
     srt_content = ""
     for u in cand_urls:
+        if base_ref_key and "tlang=" not in u and _base_cache_key(u) == base_ref_key:
+            cached_cues = _get_cached_base_cues(u, sub_track, headers)
+            if cached_cues:
+                srt_content = _format_cues_to_srt(cached_cues)
+                break
         srt_content = _convert(_fetch_url_direct(u, headers))
         if srt_content: break
 
@@ -384,108 +498,38 @@ def download_subtitle_as_srt(sub_track: Dict[str, Any], video_filepath: str) -> 
 
     # Phase 2: Try browser cookies if available (skip for &tlang= to jump straight to Phase 4 GTX)
     if not srt_content and not has_tlang:
-        try:
-            import yt_dlp.cookies
-            for b in detect_installed_cookie_browsers():
-                try: cj = yt_dlp.cookies.extract_cookies_from_browser(b)
-                except Exception: cj = None
-                if not cj: continue
-                try:
-                    cstr = "; ".join(f"{c.name}={c.value}" for c in cj)
-                    if cstr: headers["Cookie"] = cstr
-                except Exception: pass
-                for u in cand_urls:
-                    if requests is not None:
-                        try:
-                            r = requests.get(u, headers=headers, cookies=cj, timeout=15)
-                            if r.status_code == 200:
-                                srt_content = _convert(r.content.decode("utf-8", errors="replace"))
-                        except Exception: pass
-                    if not srt_content:
-                        try:
-                            req = urllib.request.Request(u, headers=headers)
-                            opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
-                            with opener.open(req, timeout=15) as resp:
-                                srt_content = _convert(resp.read().decode("utf-8", errors="replace"))
-                        except Exception: pass
-                    if srt_content: break
-                if srt_content: break
-        except Exception: pass
+        srt_content = _fetch_urls_with_cookies(cand_urls, headers, _convert, timeout=15) or ""
 
     # Phase 3: Try yt_dlp subprocess/temporary directory if webpage_url exists (skip for &tlang=)
     if not srt_content and not has_tlang and sub_track.get("webpage_url"):
-        try:
-            import tempfile, yt_dlp
-            lang = sub_track.get("language") or "en"
-            with tempfile.TemporaryDirectory() as tmp_dir:
-                ydl_opts: Dict[str, Any] = {
-                    "writesubtitles": True, "writeautomaticsub": True,
-                    "subtitleslangs": [lang], "subtitlesformat": "srt/vtt/ttml/srv3/json3/best",
-                    "skip_download": True, "quiet": True, "no_warnings": True,
-                    "outtmpl": os.path.join(tmp_dir, "%(id)s.%(ext)s"),
-                }
-                cb = _resolve_cookie_browser(get_setting("cookies_browser", "none"))
-                if cb:
-                    ydl_opts["cookiesfrombrowser"] = (cb,)
-                if isinstance(sub_track.get("http_headers"), dict) and sub_track["http_headers"]:
-                    ydl_opts["http_headers"] = sub_track["http_headers"]
-
-                def _scan_tmp() -> str:
-                    for fn in os.listdir(tmp_dir):
-                        fp = os.path.join(tmp_dir, fn)
-                        if os.path.isfile(fp) and any(fp.endswith(e) for e in (".srt", ".vtt", ".ttml", ".srv3", ".xml", ".json3")):
-                            try:
-                                with open(fp, "r", encoding="utf-8-sig", errors="replace") as sf:
-                                    sc = _convert(sf.read())
-                                    if sc: return sc
-                            except Exception: pass
-                    return ""
-
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    try: ydl.download([sub_track["webpage_url"]])
-                    except Exception: pass
-                srt_content = _scan_tmp()
-        except Exception: pass
+        srt_content = _fetch_via_ytdlp(sub_track["webpage_url"], sub_track.get("language") or "en", sub_track.get("http_headers"), _convert) or ""
 
     # Phase 4: Deterministic fallback for YouTube &tlang= HTTP 429 rate-limiting
-    # Fetch untranslated base timedtext track directly and translate via GTX
     if not srt_content:
-        base_cand_url = sub_track.get("base_url") or ""
-        if not base_cand_url:
-            for u in cand_urls:
-                if "tlang=" in u:
-                    base_cand_url = _strip_tlang_param(u)
-                    break
-
+        base_cand_url = sub_track.get("base_url") or next((_strip_tlang_param(u) for u in cand_urls if "tlang=" in u), "")
         if base_cand_url:
-            parsed_cues = []
-            clean_headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0.0.0"}
-            # Try formats vtt, json3, srv3, ttml
-            for fmt in ("vtt", "json3", "srv3", "ttml"):
-                if "fmt=" in base_cand_url:
-                    test_url = re.sub(r'([?&]fmt=)[^&]+', rf'\g<1>{fmt}', base_cand_url)
-                else:
-                    sep = "&" if "?" in base_cand_url else "?"
-                    test_url = f"{base_cand_url}{sep}fmt={fmt}"
-                fetched = _fetch_url_direct(test_url, clean_headers, timeout=10)
-                if fetched and len(fetched.strip()) > 10:
-                    c = _parse_timedtext_to_cues(fetched)
-                    if c:
-                        parsed_cues = c
-                        break
-
+            parsed_cues = _get_cached_base_cues(base_cand_url, sub_track, headers)
             if parsed_cues:
-                target_lang = str(sub_track.get("language") or "ar").split("-")[0].split("_")[0] or "ar"
-                translated_cues = _translate_srt_cues_via_gtx(parsed_cues, target_lang=target_lang)
-                if translated_cues:
-                    srt_content = _format_cues_to_srt(translated_cues)
+                target_lang = str(sub_track.get("language") or "ar").lower().split("-")[0].split("_")[0] or "ar"
+                base_qs = urllib.parse.parse_qs(urllib.parse.urlparse(base_cand_url).query)
+                base_src_lang = str((base_qs.get("lang") or [""])[0]).lower().split("-")[0].split("_")[0]
+                if base_src_lang and target_lang == base_src_lang and "tlang=" not in primary_url:
+                    srt_content = _format_cues_to_srt(parsed_cues)
+                else:
+                    translated_cues = _translate_srt_cues_via_gtx(parsed_cues, target_lang=target_lang)
+                    if translated_cues:
+                        srt_content = _format_cues_to_srt(translated_cues)
 
     if not srt_content or "-->" not in srt_content:
         return None
 
     stem = os.path.splitext(video_filepath)[0]
-    srt_path = f"{stem}.{sub_track.get('language') or 'sub'}.srt"
+    srt_lang = re.sub(r'[-_]orig$', '', str(sub_track.get('language') or 'sub'), flags=re.IGNORECASE) or 'sub'
+    srt_path = f"{stem}.{srt_lang}.srt"
     try:
+        srt_dir = os.path.dirname(os.path.abspath(srt_path))
+        if srt_dir:
+            os.makedirs(srt_dir, exist_ok=True)
         with open(srt_path, "w", encoding="utf-8-sig") as f:
             f.write(srt_content)
         return srt_path

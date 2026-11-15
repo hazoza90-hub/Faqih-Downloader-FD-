@@ -329,6 +329,7 @@ class StreamDownloadCoordinator:
                             if self.on_error: self.on_error(f"MP3 transcoding error: {ex}")
                     else:
                         self._process_subtitles(path)
+                        path = self.destination_path if (self.destination_path and os.path.isfile(self.destination_path)) else path
                         final_sz = os.path.getsize(path) if os.path.isfile(path) else size
                         with self._lock: self._is_running = False
                         if self.on_complete: self.on_complete(path, final_sz, elapsed)

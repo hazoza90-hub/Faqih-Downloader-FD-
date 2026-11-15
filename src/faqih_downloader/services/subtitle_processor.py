@@ -382,31 +382,30 @@ def start_subtitle_prefetch(stream_info: Any, output_path: str) -> Optional[thre
     if not has_prim and not ext_tracks:
         return None
 
+    setattr(stream_info, "_prefetched_external_srts", {})
+    pf_lock = threading.Lock()
     def _bg():
-        from concurrent.futures import ThreadPoolExecutor
+        from concurrent.futures import ThreadPoolExecutor, as_completed
         try:
-            with ThreadPoolExecutor(max_workers=3) as pool:
-                f_prim = pool.submit(download_subtitle_as_srt, sub, output_path) if has_prim else None
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                fut_meta: Dict[Any, Tuple[str, str]] = {}
+                if has_prim: fut_meta[pool.submit(download_subtitle_as_srt, sub, output_path)] = ("prim", "")
                 sec_trk = getattr(stream_info, "secondary_subtitle_track", None)
-                f_sec = None
                 if has_prim and getattr(stream_info, "dual_subtitle_enabled", False) and isinstance(sec_trk, dict) and (sec_trk.get("url") or sec_trk.get("base_url")):
-                    f_sec = pool.submit(download_subtitle_as_srt, sec_trk, f"{os.path.splitext(output_path)[0]}.sec.srt")
-                ext_futs = submit_external_prefetches(pool, stream_info, output_path, download_subtitle_as_srt) if ext_tracks else {}
-                if f_prim:
-                    srt_p = f_prim.result()
-                    if isinstance(srt_p, str) and srt_p and os.path.isfile(srt_p): setattr(stream_info, "_prefetched_srt_path", srt_p)
-                if f_sec:
-                    sec_p = f_sec.result()
-                    if isinstance(sec_p, str) and sec_p and os.path.isfile(sec_p): setattr(stream_info, "_prefetched_sec_srt_path", sec_p)
-                ext_ready = dict(getattr(stream_info, "_prefetched_external_srts", None) or {})
-                for lang, fut in ext_futs.items():
-                    try:
-                        p = fut.result()
-                        if isinstance(p, str) and p and os.path.isfile(p): ext_ready[lang] = p
-                    except Exception: pass
-                if ext_ready: setattr(stream_info, "_prefetched_external_srts", ext_ready)
-        except Exception:
-            pass
+                    fut_meta[pool.submit(download_subtitle_as_srt, sec_trk, f"{os.path.splitext(output_path)[0]}.sec.srt")] = ("sec", "")
+                if ext_tracks:
+                    for lang, fut in submit_external_prefetches(pool, stream_info, output_path, download_subtitle_as_srt).items():
+                        fut_meta[fut] = ("ext", lang)
+                for fut in as_completed(fut_meta):
+                    kind, lang = fut_meta[fut]
+                    try: p = fut.result()
+                    except Exception: p = None
+                    if isinstance(p, str) and p and os.path.isfile(p):
+                        with pf_lock:
+                            if kind == "prim": setattr(stream_info, "_prefetched_srt_path", p)
+                            elif kind == "sec": setattr(stream_info, "_prefetched_sec_srt_path", p)
+                            elif kind == "ext": stream_info._prefetched_external_srts[lang] = p
+        except Exception: pass
 
     t = threading.Thread(target=_bg, daemon=True)
     setattr(stream_info, "_subtitle_prefetch_thread", t)
@@ -434,7 +433,7 @@ def handle_subtitles_post_download(
             except Exception: pass
         pf_thread = getattr(stream_info, "_subtitle_prefetch_thread", None)
         if isinstance(pf_thread, threading.Thread) and pf_thread.is_alive():
-            pf_thread.join(timeout=15.0)
+            pf_thread.join(timeout=45.0)
         mode = getattr(stream_info, "subtitle_embed_mode", "hard_burn")
         orig_stem = os.path.splitext(output_path)[0]
         from .media_clipper_engine import prepare_post_download_subtitles

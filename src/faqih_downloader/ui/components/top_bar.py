@@ -217,7 +217,8 @@ class TopHeaderBarMixin:
         self.btn_start.pack(fill=tk.BOTH, expand=True)
 
         # "Save to: Video ▾" Category Dropdown Button
-        self._current_cat = get_setting("preferred_category", "Video") or "Video"
+        raw_cat = get_setting("preferred_category", "Video") or "Video"
+        self._current_cat = raw_cat.capitalize() if isinstance(raw_cat, str) and raw_cat.capitalize() in CATEGORY_SUBFOLDERS else str(raw_cat)
         cat_loc = tr("cat_" + self._current_cat.lower(), self._current_cat)
         self._pill_save = RoundedGlassCard(
             mid_box,
@@ -372,23 +373,55 @@ class TopHeaderBarMixin:
             menu.grab_release()
 
     def _set_category(self, cat: str):
+        cat = cat.capitalize() if isinstance(cat, str) and cat.capitalize() in CATEGORY_SUBFOLDERS else cat
         self._current_cat = cat
         set_setting("preferred_category", cat)
+        if cat != "General":
+            self.auto_categorize_folders = True
+            set_setting("auto_categorize_folders", True)
         if hasattr(self, "btn_save_to"):
             cat_loc = tr("cat_" + cat.lower(), cat)
             self.btn_save_to.configure(text=f"{tr('lbl_save_to', 'Save to:')} {cat_loc} ▾")
-        # Update entry_dest if available
+        base_dir = self._get_base_downloads_dir() if hasattr(self, "_get_base_downloads_dir") else os.path.expanduser("~/Downloads")
+        sub = CATEGORY_SUBFOLDERS.get(cat, CATEGORY_SUBFOLDERS.get(cat.capitalize(), cat))
+        target_dir = os.path.join(base_dir, sub) if cat != "General" else base_dir
+        fn = "download.bin"
         if hasattr(self, "entry_dest"):
             try:
-                base_dir = self._get_base_downloads_dir() if hasattr(self, "_get_base_downloads_dir") else os.path.expanduser("~/Downloads")
-                sub = CATEGORY_SUBFOLDERS.get(cat.lower(), cat)
-                target_dir = os.path.join(base_dir, sub) if cat != "General" else base_dir
-                cur_val = self.entry_dest.get()
-                fn = os.path.basename(cur_val) if cur_val and not os.path.isdir(cur_val) else "download.bin"
+                cur_val = self.entry_dest.get().strip()
+                fn = os.path.basename(cur_val) if (cur_val and not os.path.isdir(cur_val) and os.path.splitext(cur_val)[1]) else "download.bin"
                 self.entry_dest.delete(0, tk.END)
                 self.entry_dest.insert(0, os.path.join(target_dir, fn))
             except Exception:
                 pass
+        ctx = getattr(self, "_pending_media_context", None)
+        active_url = ""
+        if isinstance(ctx, dict):
+            active_url = ctx.get("url", "")
+            old_ctx_dest = ctx.get("final_dest", "")
+            if old_ctx_dest and not os.path.isdir(old_ctx_dest) and os.path.splitext(old_ctx_dest)[1]:
+                ctx["final_dest"] = os.path.join(target_dir, os.path.basename(old_ctx_dest))
+            else:
+                ctx["final_dest"] = os.path.join(target_dir, fn)
+        staged = getattr(self, "_staged_links", None)
+        if isinstance(staged, list) and staged:
+            changed = False
+            for it in staged:
+                if not active_url or it.get("url") == active_url:
+                    old_sd = it.get("final_dest", "")
+                    if old_sd and not os.path.isdir(old_sd) and os.path.splitext(old_sd)[1]:
+                        upd_sd = os.path.join(target_dir, os.path.basename(old_sd))
+                        it["final_dest"] = upd_sd
+                        if isinstance(it.get("media_context"), dict):
+                            it["media_context"]["final_dest"] = upd_sd
+                        changed = True
+            if changed:
+                if hasattr(self, "_refresh_staged_links_ui"):
+                    try: self._refresh_staged_links_ui()
+                    except Exception: pass
+                elif hasattr(self, "_sync_staged_links_ui"):
+                    try: self._sync_staged_links_ui()
+                    except Exception: pass
 
     def probe_and_stage_pasted_url(self, url: str):
         """Dispatches URL probing and staging into Column 1."""

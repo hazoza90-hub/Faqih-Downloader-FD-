@@ -133,7 +133,9 @@ class YouTubeDownloadControllerMixin:
                 duration = int(info.get("duration") or 0)
 
                 downloads_dir = self._get_base_downloads_dir() if hasattr(self, "_get_base_downloads_dir") else get_base_downloads_dir()
-                dest_dir = os.path.dirname(dest) or downloads_dir
+                dest_dir = dest if (dest and (os.path.isdir(dest) or not os.path.splitext(dest)[1])) else (os.path.dirname(dest) if dest else downloads_dir)
+                if not dest_dir:
+                    dest_dir = downloads_dir
                 try:
                     os.makedirs(dest_dir, exist_ok=True)
                 except Exception:
