@@ -513,7 +513,7 @@ def download_subtitle_as_srt(sub_track: Dict[str, Any], video_filepath: str) -> 
                 target_lang = str(sub_track.get("language") or "ar").lower().split("-")[0].split("_")[0] or "ar"
                 base_qs = urllib.parse.parse_qs(urllib.parse.urlparse(base_cand_url).query)
                 base_src_lang = str((base_qs.get("lang") or [""])[0]).lower().split("-")[0].split("_")[0]
-                if base_src_lang and target_lang == base_src_lang and "tlang=" not in primary_url:
+                if base_src_lang and target_lang == base_src_lang:
                     srt_content = _format_cues_to_srt(parsed_cues)
                 else:
                     translated_cues = _translate_srt_cues_via_gtx(parsed_cues, target_lang=target_lang)

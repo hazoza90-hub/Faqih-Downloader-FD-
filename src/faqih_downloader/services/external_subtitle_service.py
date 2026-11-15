@@ -3,7 +3,13 @@ Independent multi-language external .SRT subtitle helpers for Faqih Downloader (
 """
 
 import os
+import re
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+
+
+def _clean_lang_code(val: str) -> str:
+    """Normalizes language/sub codes by stripping trailing -orig/_orig suffixes."""
+    return re.sub(r'[-_]orig$', '', str(val or "").strip().lower(), flags=re.IGNORECASE)
 
 
 def get_valid_ext_tracks(stream_info: Any) -> List[Dict[str, Any]]:
@@ -32,9 +38,9 @@ def get_protected_ext_langs(stream_info: Any) -> Set[str]:
     langs: Set[str] = set()
     for trk in get_valid_ext_tracks(stream_info):
         for k in ("language", "sub_id"):
-            val = str(trk.get(k) or "").strip()
-            if val and val.lower() != "none":
-                langs.add(val.lower())
+            val = _clean_lang_code(trk.get(k) or "")
+            if val and val != "none":
+                langs.add(val)
     return langs
 
 
@@ -79,9 +85,9 @@ def submit_external_prefetches(
     sub = getattr(stream_info, "subtitle_track", None) or getattr(stream_info, "selected_subtitle_track", None)
     primary_lang = ""
     if isinstance(sub, dict) and sub.get("sub_id") not in (None, "none"):
-        primary_lang = str(sub.get("language") or sub.get("sub_id") or "").strip().lower()
+        primary_lang = _clean_lang_code(sub.get("language") or sub.get("sub_id") or "")
     for trk in get_valid_ext_tracks(stream_info):
-        lang = str(trk.get("language") or trk.get("sub_id") or "sub").strip().lower()
+        lang = _clean_lang_code(trk.get("language") or trk.get("sub_id") or "sub") or "sub"
         if primary_lang and lang == primary_lang:
             continue
         futures[lang] = executor.submit(download_fn, trk, output_path)
@@ -124,13 +130,13 @@ def process_external_subtitle_tracks(
     prefetched_map = getattr(stream_info, "_prefetched_external_srts", None) or {}
     primary_pref = getattr(stream_info, "_prefetched_srt_path", None)
     sub = getattr(stream_info, "subtitle_track", None) or getattr(stream_info, "selected_subtitle_track", None)
-    primary_lang = str(sub.get("language") or sub.get("sub_id") or "").strip().lower() if isinstance(sub, dict) else ""
+    primary_lang = _clean_lang_code(sub.get("language") or sub.get("sub_id") or "") if isinstance(sub, dict) else ""
 
     for trk in ext_tracks:
         if cancel_event and cancel_event.is_set():
             break
         lang_raw = str(trk.get("language") or trk.get("sub_id") or "sub").strip()
-        lang_key = lang_raw.lower()
+        lang_key = _clean_lang_code(lang_raw) or lang_raw.lower()
 
         srt_p = prefetched_map.get(lang_key)
         if (not srt_p or not os.path.isfile(srt_p) or os.path.getsize(srt_p) == 0) and lang_key == primary_lang:

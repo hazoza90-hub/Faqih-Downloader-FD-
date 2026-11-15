@@ -674,10 +674,11 @@ class TestPreviewExtSrtAndSubtitleDedup(unittest.TestCase):
         from faqih_downloader.services import subtitle_downloader as sd
         from faqih_downloader.services.youtube_tracks import extract_subtitle_tracks
 
-        # 1) Verify youtube_tracks prefers -orig / untranslated URL in auto_subs even if info['language'] missing
+        # 1) Verify youtube_tracks prefers -orig / untranslated URL in auto_subs even when both "ar" (with tlang=) and "ar-orig" exist
         info = {
             "webpage_url": "https://www.youtube.com/watch?v=arab1234567",
             "automatic_captions": {
+                "ar": [{"url": "https://www.youtube.com/api/timedtext?v=arab1234567&lang=ar&tlang=ar", "ext": "vtt"}],
                 "en": [{"url": "https://www.youtube.com/api/timedtext?v=arab1234567&lang=ar&tlang=en", "ext": "vtt"}],
                 "ar-orig": [{"url": "https://www.youtube.com/api/timedtext?v=arab1234567&lang=ar", "ext": "vtt"}],
                 "de": [{"url": "https://www.youtube.com/api/timedtext?v=arab1234567&lang=ar&tlang=de", "ext": "vtt"}],
@@ -689,6 +690,9 @@ class TestPreviewExtSrtAndSubtitleDedup(unittest.TestCase):
         tracks = extract_subtitle_tracks(info)
         auto_tracks = [t for t in tracks if t.get("sub_id") != "none"]
         self.assertEqual(len(auto_tracks), 6)
+        ar_trk = next(t for t in auto_tracks if t["language"] == "ar")
+        self.assertEqual(ar_trk["language"], "ar")
+        self.assertNotIn("tlang=", ar_trk["url"])
         for trk in auto_tracks:
             self.assertEqual(
                 trk["base_url"],
@@ -725,6 +729,21 @@ class TestPreviewExtSrtAndSubtitleDedup(unittest.TestCase):
             self.assertEqual(sorted(gtx_calls), ["de", "en", "es", "fr", "hi"])
             self.assertIn("مرحبا بكم", _read_utf8(os.path.join(tmp, "Video", "clip.ar.srt")))
             self.assertIn("[de] مرحبا بكم", _read_utf8(os.path.join(tmp, "Video", "clip.de.srt")))
+
+            # Even if primary_url has tlang=ar, Phase 4 skips GTX when target_lang == base_src_lang
+            gtx_calls.clear()
+            tlang_ar_trk = {
+                "sub_id": "ar-auto",
+                "language": "ar",
+                "url": "https://www.youtube.com/api/timedtext?v=arab1234567&lang=ar&tlang=ar&fmt=vtt",
+                "base_url": "https://www.youtube.com/api/timedtext?v=arab1234567&lang=ar&fmt=vtt",
+            }
+            with patch("faqih_downloader.services.subtitle_downloader._fetch_url_direct", side_effect=fake_fetch), \
+                 patch("faqih_downloader.services.subtitle_downloader._translate_srt_cues_via_gtx", side_effect=fake_gtx):
+                out_tl = sd.download_subtitle_as_srt(tlang_ar_trk, os.path.join(tmp, "Video", "clip2.mp4"))
+            self.assertTrue(out_tl and os.path.isfile(out_tl))
+            self.assertEqual(gtx_calls, [])
+            self.assertIn("مرحبا بكم", _read_utf8(out_tl))
 
     def test_start_subtitle_prefetch_records_each_future_immediately(self):
         import threading
@@ -807,6 +826,68 @@ class TestPreviewExtSrtAndSubtitleDedup(unittest.TestCase):
             on_complete.assert_called_once()
             self.assertEqual(on_complete.call_args[0][0], clean_path)
             self.assertEqual(on_complete.call_args[0][1], 10)
+
+    def test_orig_lang_normalization_in_external_service_and_coordinator_mkdir(self):
+        import concurrent.futures
+        from unittest.mock import MagicMock
+        from faqih_downloader.core.stream_coordinator import StreamDownloadCoordinator
+        from faqih_downloader.services.external_subtitle_service import (
+            _clean_lang_code,
+            get_protected_ext_langs,
+            submit_external_prefetches,
+            process_external_subtitle_tracks,
+        )
+
+        self.assertEqual(_clean_lang_code("ar-orig"), "ar")
+        self.assertEqual(_clean_lang_code("EN_ORIG"), "en")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            si = YouTubeStreamInfo(
+                video_id="orig1", title="OrigTest", clean_filename="OrigTest",
+                is_progressive=True, video_url="https://example.com/v.mp4",
+                subtitle_track={"sub_id": "ar", "language": "ar"},
+                external_subtitle_tracks=[{"sub_id": "ar-orig", "language": "ar-orig", "url": "https://example.com/ar.vtt"}],
+            )
+            self.assertIn("ar", get_protected_ext_langs(si))
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+                # Primary sub is 'ar' -> 'ar-orig' external track shares normalized 'ar' key and skips duplicate prefetch
+                futs = submit_external_prefetches(ex, si, os.path.join(tmp, "v.mp4"), lambda *_a: None)
+                self.assertEqual(futs, {})
+
+            # Primary is none; pre-fetched 'ar' SRT is reused when external track has language 'ar-orig'
+            si.subtitle_track = None
+            prefetched_ar = os.path.join(tmp, "v.ar.srt")
+            with open(prefetched_ar, "w", encoding="utf-8-sig") as f:
+                f.write("1\n00:00:01,000 --> 00:00:02,000\nready\n")
+            si._prefetched_external_srts = {"ar": prefetched_ar}
+            dl_mock = MagicMock()
+            ext_paths, _ = process_external_subtitle_tracks(si, os.path.join(tmp, "v.mp4"), os.path.join(tmp, "v"), download_fn=dl_mock)
+            dl_mock.assert_not_called()
+            self.assertEqual(ext_paths.get("ar"), prefetched_ar)
+
+            # StreamDownloadCoordinator._run_coordinator creates missing parent dir before prefetch & clipped download
+            missing_dir = os.path.join(tmp, "Downloads", "Video")
+            self.assertFalse(os.path.exists(missing_dir))
+            si_clip = YouTubeStreamInfo(
+                video_id="c1", title="Clip", clean_filename="Clip",
+                is_progressive=True, video_url="https://example.com/v.mp4",
+                clip_start_sec=0.0, clip_end_sec=5.0,
+            )
+            coord = StreamDownloadCoordinator(si_clip, os.path.join(missing_dir, "Clip.mp4"), max_connections=1)
+            dir_states = {}
+
+            def check_prefetch():
+                dir_states["prefetch"] = os.path.isdir(missing_dir)
+
+            def check_clip(_coord):
+                dir_states["clip"] = os.path.isdir(missing_dir)
+                return True
+
+            with patch.object(coord, "_start_subtitle_prefetch", side_effect=check_prefetch), \
+                 patch("faqih_downloader.core.stream_coordinator.download_clipped_stream_direct", side_effect=check_clip):
+                coord._run_coordinator()
+            self.assertTrue(dir_states.get("prefetch"))
+            self.assertTrue(dir_states.get("clip"))
 
     def test_start_pending_media_and_youtube_download_respect_video_folder(self):
         import threading

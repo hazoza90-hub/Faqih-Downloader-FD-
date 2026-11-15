@@ -284,10 +284,17 @@ def extract_subtitle_tracks(info: Dict[str, Any]) -> List[Dict[str, Any]]:
 
     seen_keys = set()
     for is_auto, sub_dict in ((False, manual_subs), (True, auto_subs)):
-        sorted_sub_items = sorted(
-            sub_dict.items(),
-            key=lambda kv: (0 if kv[0].lower() == kv[0].lower().split("-")[0].split("_")[0] else 1, kv[0].lower()),
-        )
+        def _sub_item_sort_key(kv):
+            kl = str(kv[0] or "").lower()
+            is_base = 0 if kl == kl.split("-")[0].split("_")[0] else 1
+            if not is_auto:
+                return (0, 0, is_base, kl)
+            is_orig_k = 0 if (kl.endswith("-orig") or kl.endswith("_orig")) else 1
+            picked = _pick_best_sub_url(kv[1])
+            has_tl = 1 if (picked and picked[0] and "tlang=" in picked[0]) else 0
+            return (is_orig_k, has_tl, is_base, kl)
+
+        sorted_sub_items = sorted(sub_dict.items(), key=_sub_item_sort_key)
         for lang, flist in sorted_sub_items:
             lang_norm = lang.lower()
             if "live_chat" in lang_norm or "rechat" in lang_norm or "livechat" in lang_norm or "live-chat" in lang_norm:
@@ -328,16 +335,17 @@ def extract_subtitle_tracks(info: Dict[str, Any]) -> List[Dict[str, Any]]:
                 if isinstance(f.get("http_headers"), dict):
                     sub_headers.update(f["http_headers"])
 
+            clean_lang = re.sub(r'[-_]orig$', '', lang, flags=re.IGNORECASE) or base_lang
             if is_auto:
                 suffix = "ترجمة تلقائية" if base_lang == "ar" else "Auto-Translated"
             else:
                 suffix = "Official"
-            name = "العربية" if base_lang == "ar" else ("English" if base_lang == "en" else LANG_NAMES.get(lang_norm, LANG_NAMES.get(base_lang, (lang.upper(), "")))[0])
+            name = "العربية" if base_lang == "ar" else ("English" if base_lang == "en" else LANG_NAMES.get(lang_norm, LANG_NAMES.get(base_lang, (clean_lang.upper(), "")))[0])
             label = f"{name} ({suffix})" if base_lang != "ar" or not is_auto else f"العربية ({suffix})"
             seen_keys.add(dedup_key)
             tracks.append({
                 "sub_id": f"{lang}-auto" if is_auto else lang,
-                "language": lang, "label": label, "url": url, "ext": ext, "is_auto": is_auto,
+                "language": clean_lang, "label": label, "url": url, "ext": ext, "is_auto": is_auto,
                 "fallback_urls": fallback_urls,
                 "http_headers": sub_headers,
                 "webpage_url": webpage_url,
