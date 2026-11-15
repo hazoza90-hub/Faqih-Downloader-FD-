@@ -133,13 +133,20 @@ class EnginePersistenceMixin:
         else:
             tmp_assembled = f"{self.destination_path}.assembling_{os.getpid()}_{threading.get_ident()}.tmp"
             try:
-                with _open_with_retry(tmp_assembled, "wb") as out_f:
-                    if self.total_size > 0:
+                if not need_hash and len(sorted_chunks) > 1 and os.path.exists(sorted_chunks[0].part_filepath):
+                    atomic_replace_with_retry(sorted_chunks[0].part_filepath, tmp_assembled)
+                    total_written = os.path.getsize(tmp_assembled)
+                    chunks_to_write, write_mode = sorted_chunks[1:], "ab"
+                else:
+                    chunks_to_write, write_mode = sorted_chunks, "wb"
+
+                with _open_with_retry(tmp_assembled, write_mode) as out_f:
+                    if write_mode == "wb" and self.total_size > 0:
                         try:
                             out_f.truncate(self.total_size)
                         except Exception:
                             pass
-                    for c in sorted_chunks:
+                    for c in chunks_to_write:
                         if not os.path.exists(c.part_filepath):
                             continue
                         with _open_with_retry(c.part_filepath, "rb") as in_f:

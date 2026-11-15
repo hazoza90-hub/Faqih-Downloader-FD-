@@ -148,7 +148,7 @@ class YouTubeFormatBuilderMixin:
             ext_l = (f.get("ext") or "").lower()
             acodec_l = str(f.get("acodec") or "").lower()
             is_m4a = 1 if (ext_l in ("m4a", "mp4") or acodec_l.startswith("mp4a")) else 0
-            return (lang_pref, is_m4a, _client_tier(f), abr, ydl_idx_map.get(id(f), 0))
+            return (lang_pref, _client_tier(f), is_m4a, abr, ydl_idx_map.get(id(f), 0))
 
         sorted_audios = sorted(audio_only_formats, key=_audio_rank, reverse=True)
         best_audio = sorted_audios[0] if sorted_audios else None
@@ -466,10 +466,12 @@ class YouTubeFormatBuilderMixin:
             is_orig_sel = bool(sel_audio.get("is_original") or sel_audio.get("track_id") == "original")
             ext_opt_m4a = (opt.audio_ext or "").lower() in ("m4a", "mp4")
             ext_sel_m4a = (sel_audio.get("ext") or "").lower() in ("m4a", "mp4")
+            opt_tier = get_format_client_tier({"url": opt.audio_url})
+            sel_tier = get_format_client_tier(sel_audio)
             keep_existing = (
                 is_orig_sel and bool(opt.audio_url)
-                and (ext_opt_m4a >= ext_sel_m4a)
-                and (ext_opt_m4a > ext_sel_m4a or get_format_client_tier({"url": opt.audio_url}) >= get_format_client_tier(sel_audio))
+                and (opt_tier >= sel_tier)
+                and (opt_tier > sel_tier or ext_opt_m4a >= ext_sel_m4a)
             )
             if not keep_existing:
                 opt.audio_url = sel_audio["url"]
