@@ -225,7 +225,7 @@ class MediaOptionsActionsMixin:
 
         def _sync_ui(opt, dst, stage_col1: bool = True):
             if opt and opts:
-                for attr in ("clip_start_sec", "clip_end_sec", "selected_chapter_title", "audio_boost_enabled", "dual_subtitle_enabled", "subtitle_custom_edits", "duration"):
+                for attr in ("clip_start_sec", "clip_end_sec", "selected_chapter_title", "audio_boost_enabled", "dual_subtitle_enabled", "subtitle_custom_edits", "external_subtitle_tracks", "duration"):
                     if hasattr(opt, attr):
                         val = getattr(opt, attr)
                         for o in opts: setattr(o, attr, val)
@@ -257,10 +257,12 @@ class MediaOptionsActionsMixin:
                     if (sel_s and (s == sel_s or s.get("sub_id") == sel_s.get("sub_id"))) or (not sel_s and i == 0):
                         self.cb_main_sub.current(i)
                         if hasattr(self, "cb_main_sub_mode"):
-                            self.cb_main_sub_mode.configure(state="readonly" if len(subs) > 1 else "disabled")
+                            self.cb_main_sub_mode.configure(state="readonly" if (len(subs) > 1 and i > 0) else "disabled")
                         if hasattr(self, "cb_main_sub_pos"):
                             self.cb_main_sub_pos.configure(state="readonly")
                         break
+            if hasattr(self, "set_main_external_subtitles"):
+                self.set_main_external_subtitles(getattr(opt, "external_subtitle_tracks", []) or [], sync_state=False)
             sm = getattr(opt, "subtitle_embed_mode", None)
             if sm and hasattr(self, "cb_main_sub_mode") and hasattr(self, "_main_sub_mode_codes") and sm in self._main_sub_mode_codes:
                 self.cb_main_sub_mode.current(self._main_sub_mode_codes.index(sm))
@@ -272,6 +274,7 @@ class MediaOptionsActionsMixin:
                 self.entry_dest.delete(0, tk.END)
                 self.entry_dest.insert(0, dst)
             ctx["selected_option"] = opt
+            ctx["external_subtitle_tracks"] = list(getattr(opt, "external_subtitle_tracks", []) or [])
             if dst:
                 ctx["final_dest"] = dst
             self._pending_media_context = dict(ctx)
@@ -360,6 +363,10 @@ class MediaOptionsActionsMixin:
                     s_idx = self.cb_main_sub.current()
                     if 0 < s_idx < len(subtitle_tracks):
                         selected_opt.selected_subtitle_track = subtitle_tracks[s_idx]
+            if not getattr(selected_opt, "external_subtitle_tracks", None):
+                ext_c = getattr(self, "_main_external_subtitle_tracks", None) or ctx.get("external_subtitle_tracks")
+                if ext_c:
+                    selected_opt.external_subtitle_tracks = list(ext_c)
 
         final_dest = (self.entry_dest.get().strip() if hasattr(self, "entry_dest") else "") or ctx.get("final_dest", "")
         if selected_opt:

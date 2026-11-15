@@ -126,6 +126,18 @@ def build_staged_link_card(parent: Any, info: Dict[str, Any], callbacks: Dict[st
         a_summary = f"🔊 {audio_lbl}" if audio_lbl else ("🔊 " + tr("media_opt_audio_default", "الصوت الافتراضي" if is_ar else "Default Audio"))
         s_summary = f"💬 {sub_lbl}" if sub_lbl else ("💬 " + tr("sub_none", "بدون ترجمة" if is_ar else "No Sub"))
         parts = [q_summary, a_summary, s_summary]
+        ext_subs = getattr(opt, "external_subtitle_tracks", None) if opt else None
+        if not ext_subs and isinstance(info.get("media_context"), dict):
+            ext_subs = info["media_context"].get("external_subtitle_tracks")
+        if ext_subs:
+            ext_codes = []
+            for et in ext_subs:
+                if isinstance(et, dict) and str(et.get("sub_id") or "").lower() != "none":
+                    c = str(et.get("language") or et.get("sub_id") or "").split("-")[0].split("_")[0].upper()
+                    if c and c not in ext_codes:
+                        ext_codes.append(c)
+            if ext_codes:
+                parts.append(f"❏ SRT: {', '.join(ext_codes)}")
         if file_size > 0:
             parts.append(_format_size(file_size))
         desc_txt = " • ".join(parts)

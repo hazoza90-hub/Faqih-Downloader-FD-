@@ -308,6 +308,7 @@ class VideoFormatOption:
     secondary_subtitle_track: Optional[Dict[str, Any]] = None
     audio_boost_enabled: bool = False
     selected_chapter_title: str = ""
+    external_subtitle_tracks: List[Dict[str, Any]] = field(default_factory=list)
 
 
 def format_filesize(num_bytes: int) -> str:
@@ -366,6 +367,7 @@ class YouTubeStreamInfo:
     secondary_subtitle_track: Optional[Dict[str, Any]] = None
     audio_boost_enabled: bool = False
     selected_chapter_title: str = ""
+    external_subtitle_tracks: List[Dict[str, Any]] = field(default_factory=list)
 
     def __post_init__(self):
         if self.subtitle_track and isinstance(self.subtitle_track, dict):

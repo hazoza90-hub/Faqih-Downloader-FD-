@@ -210,7 +210,10 @@ def process_post_download_clip_and_subtitles(
     has_clip, audio_boost = (clip_end > clip_start >= 0.0), bool(getattr(stream_info, "audio_boost_enabled", False))
     chapter_title, boost_applied = str(getattr(stream_info, "selected_chapter_title", "") or "").strip(), bool(getattr(stream_info, "_audio_boost_applied", False))
 
-    if has_sub:
+    from .external_subtitle_service import get_valid_ext_tracks, rename_sidecar_srts_on_video_rename
+    has_ext_sub = bool(get_valid_ext_tracks(stream_info))
+
+    if has_sub or has_ext_sub:
         sc = getattr(stream_info, "style_config", None) or {}
         sc.update({"clip_start": clip_start, "clip_end": clip_end, "custom_edits": getattr(stream_info, "subtitle_custom_edits", {}), "dual_sub": getattr(stream_info, "dual_subtitle_enabled", False), "secondary_track": clone_clean_subtitle_track(getattr(stream_info, "secondary_subtitle_track", None)), "audio_boost": audio_boost, "chapter_title": chapter_title, "_already_trimmed": bool(getattr(stream_info, "_already_trimmed", False))})
         setattr(stream_info, "style_config", sc)
@@ -221,7 +224,7 @@ def process_post_download_clip_and_subtitles(
         s_mode = getattr(stream_info, "subtitle_embed_mode", "hard_burn")
         sub_stage = "Burning Subtitles" if s_mode == "hard_burn" else "Embedding Subtitles"
         dur = float(getattr(stream_info, "duration", 0.0) or 0.0)
-        _sub_cb = (lambda p, eta: on_stage_progress(sub_stage, p, eta)) if on_stage_progress else None
+        _sub_cb = (lambda p, eta: on_stage_progress(sub_stage, p, eta)) if (on_stage_progress and has_sub) else None
         f_path = handle_subtitles_post_download(stream_info, target_path, on_log=on_log, cancel_event=cancel_event, total_duration=dur, on_progress_pct=_sub_cb)
         if f_path and os.path.isfile(f_path):
             target_path = f_path
@@ -256,10 +259,7 @@ def process_post_download_clip_and_subtitles(
             for _ in range(4):
                 try:
                     os.replace(target_path, new_path); target_path = new_path
-                    old_srt, new_srt = os.path.join(d_dir, f"{stem}.srt"), os.path.join(d_dir, f"{new_stem}.srt")
-                    if os.path.isfile(old_srt):
-                        try: os.replace(old_srt, new_srt)
-                        except Exception: pass
+                    rename_sidecar_srts_on_video_rename(d_dir, stem, new_stem)
                     break
                 except Exception: time.sleep(0.08)
     return target_path
@@ -316,6 +316,7 @@ def enrich_stream_info_with_clip(stream_info: Any, opt: Any) -> Any:
     if opt and stream_info:
         for a, dv in (("clip_start_sec", 0.0), ("clip_end_sec", 0.0), ("subtitle_custom_edits", {}), ("dual_subtitle_enabled", False), ("secondary_subtitle_track", None), ("audio_boost_enabled", False), ("selected_chapter_title", "")):
             setattr(stream_info, a, getattr(opt, a, dv))
+        setattr(stream_info, "external_subtitle_tracks", [clone_clean_subtitle_track(t) or t for t in (getattr(opt, "external_subtitle_tracks", None) or []) if isinstance(t, dict)])
         if getattr(stream_info, "duration", 0) <= 0 and getattr(opt, "duration", 0) > 0:
             stream_info.duration = float(opt.duration)
     return stream_info

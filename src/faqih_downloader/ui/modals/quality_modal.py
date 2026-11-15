@@ -188,6 +188,10 @@ class QualitySelectionModal(_BaseToplevel):
             if self.cb_audio:
                 self.cb_audio.bind("<<ComboboxSelected>>", lambda e: sync_modal_selection_to_staged(self), add="+")
             if self.cb_sub:
+                init_ext = getattr(self.selected_option, "external_subtitle_tracks", None) or []
+                if init_ext and hasattr(self.cb_sub, "set_external_subtitle_tracks"):
+                    self.cb_sub.set_external_subtitle_tracks(init_ext, notify=False)
+                self.cb_sub._on_ext_srt_changed = lambda _: sync_modal_selection_to_staged(self)
                 self.cb_sub.bind("<<ComboboxSelected>>", lambda e: sync_modal_selection_to_staged(self), add="+")
 
         card_dest = tk.Frame(body, bg=c_panel, padx=12, pady=8, highlightbackground=c_border, highlightthickness=1)

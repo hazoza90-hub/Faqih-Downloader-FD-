@@ -64,6 +64,11 @@ def attach_selected_tracks_to_option(
             selected_option.selected_subtitle_track = None
     else:
         selected_option.selected_subtitle_track = None
+    if cb_sub:
+        ext_fn = getattr(cb_sub, "get_external_subtitle_tracks", None)
+        ext_list = ext_fn() if callable(ext_fn) else getattr(cb_sub, "_external_subtitle_tracks", None)
+        if ext_list is not None:
+            selected_option.external_subtitle_tracks = [dict(t) for t in ext_list if isinstance(t, dict)]
 
 
 def sync_modal_selection_to_staged(modal: Any) -> None:
@@ -85,10 +90,12 @@ def sync_modal_selection_to_staged(modal: Any) -> None:
     u = getattr(modal, "video_url", "")
     opt = modal.selected_option
 
+    ext_subs = [dict(t) for t in (getattr(opt, "external_subtitle_tracks", None) or []) if isinstance(t, dict)]
     ctx = getattr(target, "_pending_media_context", None)
     if isinstance(ctx, dict):
         ctx["selected_option"] = opt
         ctx["selected_opt"] = opt
+        ctx["external_subtitle_tracks"] = ext_subs
         if cur_dest: ctx["final_dest"] = cur_dest
 
     staged = getattr(target, "_staged_links", [])
@@ -99,6 +106,7 @@ def sync_modal_selection_to_staged(modal: Any) -> None:
             if isinstance(it.get("media_context"), dict):
                 it["media_context"]["selected_option"] = opt
                 it["media_context"]["selected_opt"] = opt
+                it["media_context"]["external_subtitle_tracks"] = ext_subs
 
     # Synchronize parent main media bar comboboxes and entry_dest if present
     if hasattr(target, "cb_main_quality"):
@@ -131,10 +139,15 @@ def sync_modal_selection_to_staged(modal: Any) -> None:
             except Exception: pass
     if hasattr(target, "cb_main_sub_mode"):
         sub_mode = getattr(opt, "subtitle_embed_mode", "soft_embed")
-        codes = getattr(target, "_main_sub_mode_codes", ["soft_embed", "srt_only", "hard_burn"])
+        codes = getattr(target, "_main_sub_mode_codes", ["soft_embed", "hard_burn"])
         if sub_mode in codes:
             try: target.cb_main_sub_mode.current(codes.index(sub_mode))
             except Exception: pass
+        try: target.cb_main_sub_mode.configure(state=("readonly" if sel_s else "disabled"))
+        except Exception: pass
+    if hasattr(target, "set_main_external_subtitles"):
+        try: target.set_main_external_subtitles(ext_subs, sync_state=False)
+        except Exception: pass
     if hasattr(target, "conn_var") and getattr(opt, "max_connections", None):
         try: target.conn_var.set(str(opt.max_connections))
         except Exception: pass

@@ -38,7 +38,8 @@ class MediaOptionsBarMixin(MediaOptionsActionsMixin):
         self._main_media_options: List[VideoFormatOption] = []
         self._main_audio_tracks: List[Dict[str, Any]] = []
         self._main_subtitle_tracks: List[Dict[str, Any]] = []
-        self._main_sub_mode_codes = ["soft_embed", "srt_only", "hard_burn"]
+        self._main_external_subtitle_tracks: List[Dict[str, Any]] = []
+        self._main_sub_mode_codes = ["soft_embed", "hard_burn"]
         self._pending_media_context: Optional[Dict[str, Any]] = None
         self._last_yt_info: Optional[Dict[str, Any]] = None
 
@@ -61,27 +62,37 @@ class MediaOptionsBarMixin(MediaOptionsActionsMixin):
         self.btn_reopen_quality.pack(side=tk.RIGHT, padx=(0, 4))
         self.btn_main_advanced = self.btn_reopen_quality
 
-        # Row 2: Subtitles (Combobox), Subtitle Delivery Mode (Combobox), Subtitle Position (Combobox)
+        # Row 2: Subtitles (Combobox), Internal Delivery Mode (Combobox), External SRT Button, Threads
         row2 = tk.Frame(self.media_options_frame, bg=self.c_panel)
         row2.pack(fill=tk.X, pady=(2, 2))
         self.lbl_main_sub = tk.Label(row2, text=tr("lbl_main_sub", "≡ Subtitles:"), font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_text_bright, width=10, anchor="w")
-        self.cb_main_sub = ttk.Combobox(row2, state="readonly", font=("Segoe UI", 8), width=24)
-        self.lbl_main_sub.pack(side=tk.LEFT); self.cb_main_sub.pack(side=tk.LEFT, padx=(4, 10))
+        self.cb_main_sub = ttk.Combobox(row2, state="readonly", font=("Segoe UI", 8), width=20)
+        self.lbl_main_sub.pack(side=tk.LEFT); self.cb_main_sub.pack(side=tk.LEFT, padx=(4, 8))
         self.cb_main_sub.bind("<<ComboboxSelected>>", self._on_main_sub_changed)
 
         self.lbl_main_sub_mode = tk.Label(row2, text=tr("lbl_main_sub_mode", "⚙️ Mode:"), font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_text_bright, width=8, anchor="w")
-        sub_mode_labels = [tr("sub_mode_soft", "دمج ناعم"), tr("sub_mode_srt_only", "ملف ترجمة"), tr("sub_mode_burn", "حرق دائم (Burn-in)")]
-        self.cb_main_sub_mode = ttk.Combobox(row2, values=sub_mode_labels, state="disabled", font=("Segoe UI", 8), width=25)
+        sub_mode_labels = [tr("sub_mode_soft", "دمج ناعم (Soft Embed)"), tr("sub_mode_burn", "حرق دائم (Burn-in)")]
+        self.cb_main_sub_mode = ttk.Combobox(row2, values=sub_mode_labels, state="disabled", font=("Segoe UI", 8), width=20)
         self.cb_main_sub_mode.current(0)
         self.lbl_main_sub_mode.pack(side=tk.LEFT); self.cb_main_sub_mode.pack(side=tk.LEFT, padx=(4, 8))
         self.cb_main_sub_mode.bind("<<ComboboxSelected>>", self._on_main_sub_mode_changed)
+
+        from ..modals.quality_tracks_ui import format_ext_srt_button_text
+        self.lbl_main_ext_srt = tk.Label(row2, text=tr("lbl_ext_srt", "❏ خارجي:"), font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_text_bright)
+        self.btn_main_ext_srt = tk.Button(
+            row2, text=format_ext_srt_button_text([]), font=("Segoe UI", 8, "bold"),
+            bg=getattr(self, "c_input_bg", self.c_panel_light), fg=self.c_text_bright,
+            activebackground=self.c_accent, activeforeground="white", relief="flat", bd=1,
+            padx=8, pady=2, cursor="hand2", command=self._open_main_ext_srt_menu,
+        )
+        self.lbl_main_ext_srt.pack(side=tk.LEFT); self.btn_main_ext_srt.pack(side=tk.LEFT, padx=(4, 8))
 
         is_ar = (getattr(self, "current_language", "en") == "ar") or (get_setting("language", "ar") == "ar")
         lbl_threads = tr("lbl_main_threads", "⚡ المسارات:" if is_ar else "⚡ Threads:")
         self.lbl_main_sub_pos = tk.Label(row2, text=lbl_threads, font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_text_bright, width=9, anchor="w")
         self._main_conn_values = ["1", "2", "4", "8", "16", "32"]
         self._main_sub_pos_codes = ["bottom", "middle", "top"]
-        self.cb_main_sub_pos = ttk.Combobox(row2, values=self._main_conn_values, state="readonly", font=("Segoe UI", 8), width=8)
+        self.cb_main_sub_pos = ttk.Combobox(row2, values=self._main_conn_values, state="readonly", font=("Segoe UI", 8), width=6)
         init_conn = str(get_setting("max_connections", 8))
         self.cb_main_sub_pos.set(init_conn if init_conn in self._main_conn_values else "8")
         self.cb_main_conn = self.cb_main_sub_pos
@@ -227,8 +238,12 @@ class MediaOptionsBarMixin(MediaOptionsActionsMixin):
             self.cb_main_sub_pos.set(cur_conn if cur_conn in getattr(self, "_main_conn_values", ["1", "2", "4", "8", "16", "32"]) else "8")
             self.cb_main_sub_pos.configure(state="readonly")
 
-        mode_st = "readonly" if len(self._main_subtitle_tracks) > 1 else "disabled"
+        mode_st = "readonly" if (len(self._main_subtitle_tracks) > 1 and sub_idx > 0) else "disabled"
         if hasattr(self, "cb_main_sub_mode") and self.cb_main_sub_mode: self.cb_main_sub_mode.configure(state=mode_st)
+
+        ext_sel = getattr(sel_opt, "external_subtitle_tracks", None) or (getattr(self, "_pending_media_context", None) or {}).get("external_subtitle_tracks") or []
+        if hasattr(self, "set_main_external_subtitles"):
+            self.set_main_external_subtitles(ext_sel, sync_state=False)
 
         # Synchronize context and column 1 card immediately
         self._sync_media_bar_state()
@@ -263,7 +278,7 @@ class MediaOptionsBarMixin(MediaOptionsActionsMixin):
         prev_opt = ctx.get("selected_option") or ctx.get("selected_opt")
         opt = opts[q_idx] if (0 <= q_idx < len(opts)) else prev_opt
         if prev_opt and opt and prev_opt != opt:
-            for attr in ("clip_start_sec", "clip_end_sec", "selected_chapter_title", "audio_boost_enabled", "dual_subtitle_enabled", "subtitle_custom_edits", "duration"):
+            for attr in ("clip_start_sec", "clip_end_sec", "selected_chapter_title", "audio_boost_enabled", "dual_subtitle_enabled", "subtitle_custom_edits", "external_subtitle_tracks", "duration"):
                 if hasattr(prev_opt, attr): setattr(opt, attr, getattr(prev_opt, attr))
 
         # Audio track
@@ -308,6 +323,9 @@ class MediaOptionsBarMixin(MediaOptionsActionsMixin):
 
         ctx["selected_option"] = opt
         ctx["selected_opt"] = opt
+        ext_sel = [dict(t) for t in (getattr(self, "_main_external_subtitle_tracks", []) or []) if isinstance(t, dict)]
+        if opt: opt.external_subtitle_tracks = ext_sel
+        ctx["external_subtitle_tracks"] = ext_sel
         if opts and hasattr(self, "cb_main_quality"):
             from faqih_downloader.services.media_clipper_engine import estimate_clip_total_bytes
             q_vals = []
@@ -345,6 +363,7 @@ class MediaOptionsBarMixin(MediaOptionsActionsMixin):
                     it["media_context"]["selected_audio_track"] = getattr(opt, "selected_audio_track", None)
                     it["media_context"]["selected_subtitle_track"] = getattr(opt, "selected_subtitle_track", None)
                     it["media_context"]["subtitle_embed_mode"] = sub_mode
+                    it["media_context"]["external_subtitle_tracks"] = ext_sel
         try:
             from faqih_downloader.ui.panels.kanban_staged_prober import stage_media_option_in_col1
             raw_title = ctx.get("raw_title") or (ctx.get("info", {}).get("title") if isinstance(ctx.get("info"), dict) else "")
@@ -385,7 +404,7 @@ class MediaOptionsBarMixin(MediaOptionsActionsMixin):
     def _on_main_sub_changed(self, event=None):
         """Enables or disables subtitle mode combobox based on selected subtitle."""
         idx = self.cb_main_sub.current()
-        has_s = len(getattr(self, "_main_subtitle_tracks", [])) > 1
+        has_s = len(getattr(self, "_main_subtitle_tracks", [])) > 1 and idx > 0
         if hasattr(self, "cb_main_sub_mode"):
             self.cb_main_sub_mode.configure(state="readonly" if has_s else "disabled")
         if hasattr(self, "cb_main_sub_pos"):
@@ -395,6 +414,27 @@ class MediaOptionsBarMixin(MediaOptionsActionsMixin):
             try: set_setting("preferred_subtitle_lang", lang or "none")
             except Exception: pass
         self._sync_media_bar_state(event)
+
+    def _open_main_ext_srt_menu(self):
+        """Opens dark multi-select popup menu for independent external .SRT files."""
+        from ..modals.quality_tracks_ui import open_ext_srt_popup_menu
+        theme = getattr(self, "_theme_dict", lambda: {})()
+        open_ext_srt_popup_menu(
+            self.btn_main_ext_srt, getattr(self, "_main_subtitle_tracks", []),
+            getattr(self, "_main_external_subtitle_tracks", []),
+            lambda picked: self.set_main_external_subtitles(picked, sync_state=True), theme=theme,
+        )
+
+    def set_main_external_subtitles(self, tracks: List[Dict[str, Any]], sync_state: bool = True):
+        """Updates selected external .SRT tracks and button badge on main media bar."""
+        from ..modals.quality_tracks_ui import format_ext_srt_button_text
+        self._main_external_subtitle_tracks = [
+            dict(t) for t in (tracks or []) if isinstance(t, dict) and str(t.get("sub_id") or "").lower() != "none"
+        ]
+        if hasattr(self, "btn_main_ext_srt") and self.btn_main_ext_srt and self.btn_main_ext_srt.winfo_exists():
+            self.btn_main_ext_srt.configure(text=format_ext_srt_button_text(self._main_external_subtitle_tracks))
+        if sync_state:
+            self._sync_media_bar_state()
 
     def _on_main_sub_mode_changed(self, event=None):
         """Saves chosen mode, auto-selects Arabic/first subtitle track if None, and reflects [Sub] tag."""
@@ -445,6 +485,11 @@ class MediaOptionsBarMixin(MediaOptionsActionsMixin):
             self.lbl_main_sub.configure(text=tr("lbl_main_sub", "≡ Subtitles:"))
         if hasattr(self, "lbl_main_sub_mode") and self.lbl_main_sub_mode.winfo_exists():
             self.lbl_main_sub_mode.configure(text=tr("lbl_main_sub_mode", "⚙️ Mode:"))
+        if hasattr(self, "lbl_main_ext_srt") and self.lbl_main_ext_srt.winfo_exists():
+            self.lbl_main_ext_srt.configure(text=tr("lbl_ext_srt", "❏ خارجي:" if is_ar else "❏ Ext SRT:"))
+        if hasattr(self, "btn_main_ext_srt") and self.btn_main_ext_srt.winfo_exists():
+            from ..modals.quality_tracks_ui import format_ext_srt_button_text
+            self.btn_main_ext_srt.configure(text=format_ext_srt_button_text(getattr(self, "_main_external_subtitle_tracks", [])))
         if hasattr(self, "lbl_main_sub_pos") and self.lbl_main_sub_pos.winfo_exists():
             self.lbl_main_sub_pos.configure(text=tr("lbl_main_threads", "⚡ المسارات:" if is_ar else "⚡ Threads:"))
         if hasattr(self, "btn_reopen_quality") and self.btn_reopen_quality.winfo_exists():
@@ -457,8 +502,7 @@ class MediaOptionsBarMixin(MediaOptionsActionsMixin):
             except Exception:
                 cur_idx = 0
             sub_mode_labels = [
-                tr("sub_mode_soft", "دمج ناعم"),
-                tr("sub_mode_srt_only", "ملف ترجمة"),
+                tr("sub_mode_soft", "دمج ناعم (Soft Embed)"),
                 tr("sub_mode_burn", "حرق دائم (Burn-in)"),
             ]
             self.cb_main_sub_mode.configure(values=sub_mode_labels)

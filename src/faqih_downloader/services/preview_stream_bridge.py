@@ -514,7 +514,7 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
                     if hasattr(m.cb_sub, "_mode_var"): m.cb_sub._mode_var.set(sub_mode)
                     mode_cb = getattr(m.cb_sub, "_mode_combobox", None)
                     if mode_cb and hasattr(mode_cb, "current"):
-                        codes = getattr(m.cb_sub, "_mode_codes", ["soft_embed", "hard_burn", "srt_only"])
+                        codes = getattr(m.cb_sub, "_mode_codes", ["soft_embed", "hard_burn"])
                         if sub_mode in codes: mode_cb.current(codes.index(sub_mode))
                         if hasattr(mode_cb, "configure"): mode_cb.configure(state="readonly" if s_idx > 0 else "disabled")
                     conn_cb = getattr(m.cb_sub, "_conn_combobox", None) or getattr(m.cb_sub, "_pos_combobox", None)

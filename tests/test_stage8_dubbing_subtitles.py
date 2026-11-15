@@ -416,13 +416,13 @@ Hello world from <i>smart</i> download!
 
             modal.cb_audio.current(1)
             modal.cb_sub.current(1)
-            modal.cb_sub._mode_combobox.current(1)  # "srt_only"
+            modal.cb_sub._mode_combobox.current(1)  # "hard_burn"
 
             modal._on_download()
             self.assertEqual(len(confirmed_opt), 1)
             self.assertEqual(confirmed_opt[0].selected_audio_track["track_id"], "ar")
             self.assertEqual(confirmed_opt[0].selected_subtitle_track["sub_id"], "ar")
-            self.assertEqual(confirmed_opt[0].subtitle_embed_mode, "srt_only")
+            self.assertEqual(confirmed_opt[0].subtitle_embed_mode, "hard_burn")
         finally:
             try:
                 root.destroy()
@@ -682,8 +682,8 @@ Hello world from <i>smart</i> download!
             cb_sub.current(1)
             cb_sub._update_mode_state()
             self.assertEqual(str(mode_cb.cget("state")), "readonly")
-            # Select hard_burn (idx 2)
-            mode_cb.current(2)
+            # Select hard_burn (idx 1 in ["soft_embed", "hard_burn"])
+            mode_cb.current(1)
             self.assertEqual(cb_sub.get_selected_mode(), "hard_burn")
         finally:
             try: root.destroy()

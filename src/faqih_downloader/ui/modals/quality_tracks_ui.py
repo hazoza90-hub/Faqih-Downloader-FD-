@@ -17,10 +17,78 @@ except Exception:
         return default
 
 try:
-    from faqih_downloader.config import get_setting, set_setting
+    from faqih_downloader.config import get_setting, set_setting, is_test_environment
 except Exception:
     def get_setting(k: str, d: Any = None) -> Any: return d  # type: ignore
     def set_setting(k: str, v: Any) -> bool: return True  # type: ignore
+    def is_test_environment() -> bool: return False  # type: ignore
+
+
+def format_ext_srt_button_text(selected_tracks: List[Dict[str, Any]]) -> str:
+    """Formats button summary text for selected external .SRT languages, e.g. 'AR, EN (2)' or 'بدون (0)'."""
+    codes: List[str] = []
+    seen = set()
+    for trk in (selected_tracks or []):
+        if not isinstance(trk, dict):
+            continue
+        raw = str(trk.get("language") or trk.get("sub_id") or "").strip()
+        if not raw or raw.lower() == "none":
+            continue
+        code = raw.split("-")[0].split("_")[0].upper()
+        if code and code not in seen:
+            seen.add(code)
+            codes.append(code)
+    if not codes:
+        return tr("btn_ext_srt_none", "بدون (0)")
+    head = ", ".join(codes[:3]) + (f" +{len(codes) - 3}" if len(codes) > 3 else "")
+    return f"{head} ({len(codes)})"
+
+
+def open_ext_srt_popup_menu(
+    widget: Any,
+    subtitle_tracks: List[Dict[str, Any]],
+    selected_tracks: List[Dict[str, Any]],
+    on_change: Any,
+    theme: Optional[Dict[str, str]] = None,
+) -> Optional[Any]:
+    """Opens dark multi-select popup menu allowing selection of zero or more external .SRT tracks."""
+    if tk is None or widget is None:
+        return None
+    t = theme or {}
+    c_bg = t.get("c_panel", "#1e293b")
+    c_fg = t.get("c_text_bright", "#f8fafc")
+    c_acc = t.get("c_accent", "#38bdf8")
+    menu = tk.Menu(widget, tearoff=0, bg=c_bg, fg=c_fg, activebackground=c_acc, activeforeground="#0f172a", selectcolor=c_acc, font=("Segoe UI", 9))
+    menu._vars = {}
+    menu._tracks = [
+        s for s in (subtitle_tracks or [])
+        if isinstance(s, dict) and str(s.get("sub_id") or "").lower() != "none" and str(s.get("language") or "").lower() != "none"
+    ]
+    sel_langs = {str(s.get("language") or s.get("sub_id") or "").strip().lower() for s in (selected_tracks or []) if isinstance(s, dict)}
+    menu.add_command(label=tr("menu_ext_srt_clear", "✕ عدم تنزيل ملفات خارجية (مسح الكل)"), command=lambda: on_change([]))
+    if menu._tracks:
+        menu.add_separator()
+
+    def _on_toggle():
+        picked = [
+            s for s in menu._tracks
+            if (var := menu._vars.get(str(s.get("language") or s.get("sub_id") or "").strip().lower())) is not None and bool(var.get())
+        ]
+        on_change(picked)
+
+    for s in menu._tracks:
+        lc = str(s.get("language") or s.get("sub_id") or "").strip().lower()
+        var = tk.BooleanVar(master=menu, value=(lc in sel_langs))
+        menu._vars[lc] = var
+        menu.add_checkbutton(label=s.get("label") or lc.upper(), variable=var, onvalue=True, offvalue=False, command=_on_toggle)
+
+    widget._ext_srt_menu = menu
+    if not is_test_environment() and getattr(widget, "winfo_ismapped", lambda: False)():
+        try:
+            menu.tk_popup(widget.winfo_rootx(), widget.winfo_rooty() + widget.winfo_height())
+        except Exception:
+            pass
+    return menu
 
 
 def build_audio_subtitle_row(
@@ -71,9 +139,8 @@ def build_audio_subtitle_row(
         cb_sub.pack(side=tk.LEFT, padx=(0, 8))
 
         mode_options = [
-            ("soft_embed", tr("sub_mode_soft", "دمج ناعم")),
-            ("srt_only", tr("sub_mode_srt_only", "ملف منفصل")),
-            ("hard_burn", tr("sub_mode_burn", "حرق دائم")),
+            ("soft_embed", tr("sub_mode_soft", "دمج ناعم (Soft Embed)")),
+            ("hard_burn", tr("sub_mode_burn", "حرق دائم (Burn-in)")),
         ]
         mode_codes = [m[0] for m in mode_options]
         mode_labels = [m[1] for m in mode_options]
@@ -121,6 +188,37 @@ def build_audio_subtitle_row(
             rb = tk.Radiobutton(row2, text=label_txt, value=code, variable=mode_var, command=_on_radio_click, bg=c_panel, fg=c_text_bright, selectcolor=c_input_bg, activebackground=c_panel, activeforeground=c_accent, cursor="hand2", font=("Segoe UI", 8, "bold"))
             rb.pack(side=tk.LEFT, padx=(0, 6))
             radio_widgets.append(rb)
+
+        cb_sub._external_subtitle_tracks = []
+        lbl_ext_srt = tk.Label(row2, text=tr("lbl_ext_srt", "❏ خارجي:"), font=("Segoe UI", 9, "bold"), bg=c_panel, fg=c_text_bright)
+        lbl_ext_srt.pack(side=tk.LEFT, padx=(8, 4))
+        btn_ext_srt = tk.Button(
+            row2, text=format_ext_srt_button_text([]), font=("Segoe UI", 8, "bold"),
+            bg=c_input_bg, fg=c_text_bright, activebackground=c_accent, activeforeground="#0f172a",
+            relief="flat", bd=1, padx=8, pady=2, cursor="hand2"
+        )
+        btn_ext_srt.pack(side=tk.LEFT, padx=(0, 6))
+
+        def _set_ext_tracks(tracks: List[Dict[str, Any]], notify: bool = True):
+            clean = [dict(t) for t in (tracks or []) if isinstance(t, dict) and str(t.get("sub_id") or "").lower() != "none"]
+            cb_sub._external_subtitle_tracks = clean
+            if btn_ext_srt.winfo_exists():
+                btn_ext_srt.configure(text=format_ext_srt_button_text(clean))
+            if notify:
+                cb_fn = getattr(cb_sub, "_on_ext_srt_changed", None)
+                if callable(cb_fn):
+                    cb_fn(clean)
+
+        btn_ext_srt.configure(
+            command=lambda: open_ext_srt_popup_menu(
+                btn_ext_srt, subtitle_tracks, getattr(cb_sub, "_external_subtitle_tracks", []),
+                lambda picked: _set_ext_tracks(picked, notify=True), theme=theme
+            )
+        )
+        cb_sub._ext_srt_label = lbl_ext_srt
+        cb_sub._ext_srt_button = btn_ext_srt
+        cb_sub.get_external_subtitle_tracks = lambda: list(getattr(cb_sub, "_external_subtitle_tracks", []) or [])
+        cb_sub.set_external_subtitle_tracks = _set_ext_tracks
 
         def _on_mode_var_changed(*_):
             val = mode_var.get()
@@ -229,4 +327,4 @@ def build_audio_subtitle_row(
     return cb_audio, cb_sub
 
 
-__all__ = ["build_audio_subtitle_row"]
+__all__ = ["format_ext_srt_button_text", "open_ext_srt_popup_menu", "build_audio_subtitle_row"]

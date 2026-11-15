@@ -148,7 +148,7 @@ class TestStage82LiveUX(unittest.TestCase):
         self.assertIsNone(getattr(self.gui, "_quality_modal", None), "Quality modal must remain None")
 
     def test_interactive_selection_of_all_three_subtitle_modes(self):
-        """3. Interactive selection of all 3 subtitle modes (srt_only, hard_burn, soft_embed) + smart auto-select."""
+        """3. Interactive selection of internal video subtitle modes (soft_embed, hard_burn) + smart auto-select."""
         sample_info = {
             "title": "Subtitle Mode Test Video",
             "duration": 240,
@@ -189,38 +189,38 @@ class TestStage82LiveUX(unittest.TestCase):
         cb_sub = modal.cb_sub
         self.assertIsNotNone(cb_sub, "Subtitle dropdown must be present")
         self.assertTrue(hasattr(cb_sub, "_mode_radios"), "Mode radio buttons must be attached to cb_sub")
-        self.assertEqual(len(cb_sub._mode_radios), 3, "There must be exactly 3 subtitle mode radio buttons")
+        self.assertEqual(len(cb_sub._mode_radios), 2, "There must be exactly 2 internal subtitle mode radio buttons")
 
-        # Initially, subtitle combobox is at index 0 ('None / بدون ترجمة')
+        # Initially, subtitle combobox is at index 0 ('None / بدون ترجمة') and mode combobox is disabled
         self.assertEqual(cb_sub.current(), 0)
+        self.assertEqual(str(cb_sub._mode_combobox.cget("state")), "disabled")
 
         # Map radio buttons by their value
         radios = {r.cget("value"): r for r in cb_sub._mode_radios}
 
-        # 1. Click 'srt_only' radio button
-        radios["srt_only"].invoke()
-        self.root.update()
-        self.assertEqual(cb_sub.get_selected_mode(), "srt_only")
-        # Smart Auto-Select UX: must have advanced past 'none' (index 0) to index 1!
-        self.assertGreater(cb_sub.current(), 0, "Clicking subtitle mode must auto-select first subtitle track")
-        modal._attach_selected_tracks()
-        self.assertEqual(modal.selected_option.subtitle_embed_mode, "srt_only")
-        self.assertIsNotNone(modal.selected_option.selected_subtitle_track)
-        self.assertNotEqual(modal.selected_option.selected_subtitle_track.get("sub_id"), "none")
-
-        # 2. Click 'hard_burn' radio button
+        # 1. Click 'hard_burn' radio button -> smart auto-selects Arabic/first subtitle track!
         radios["hard_burn"].invoke()
         self.root.update()
         self.assertEqual(cb_sub.get_selected_mode(), "hard_burn")
+        self.assertGreater(cb_sub.current(), 0, "Clicking subtitle mode must auto-select first subtitle track")
+        self.assertEqual(str(cb_sub._mode_combobox.cget("state")), "readonly")
         modal._attach_selected_tracks()
         self.assertEqual(modal.selected_option.subtitle_embed_mode, "hard_burn")
+        self.assertIsNotNone(modal.selected_option.selected_subtitle_track)
+        self.assertNotEqual(modal.selected_option.selected_subtitle_track.get("sub_id"), "none")
 
-        # 3. Click 'soft_embed' radio button
+        # 2. Click 'soft_embed' radio button
         radios["soft_embed"].invoke()
         self.root.update()
         self.assertEqual(cb_sub.get_selected_mode(), "soft_embed")
         modal._attach_selected_tracks()
         self.assertEqual(modal.selected_option.subtitle_embed_mode, "soft_embed")
+
+        # 3. Independent external SRT control present and operational
+        self.assertTrue(hasattr(cb_sub, "set_external_subtitle_tracks"))
+        cb_sub.set_external_subtitle_tracks([s for s in subtitle_tracks if s.get("sub_id") != "none"], notify=True)
+        modal._attach_selected_tracks()
+        self.assertEqual(len(modal.selected_option.external_subtitle_tracks), 2)
 
         # Cleanup
         modal.destroy()
@@ -369,15 +369,15 @@ class TestStage82LiveUX(unittest.TestCase):
 
         cb_sub = modal.cb_sub
         self.assertIsNotNone(cb_sub)
-        cb_sub._mode_var.set("srt_only")
+        cb_sub._mode_var.set("soft_embed")
         self.root.update()
-        self.assertEqual(cb_sub.get_selected_mode(), "srt_only")
-        self.assertEqual(cb_sub._mode_combobox.current(), 1)
+        self.assertEqual(cb_sub.get_selected_mode(), "soft_embed")
+        self.assertEqual(cb_sub._mode_combobox.current(), 0)
 
         cb_sub._mode_var.set("hard_burn")
         self.root.update()
         self.assertEqual(cb_sub.get_selected_mode(), "hard_burn")
-        self.assertEqual(cb_sub._mode_combobox.current(), 2)
+        self.assertEqual(cb_sub._mode_combobox.current(), 1)
         modal.destroy()
 
     def test_candidates_modal_clean_destroy_and_modal_guard(self):
