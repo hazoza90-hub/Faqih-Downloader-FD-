@@ -668,6 +668,8 @@ def generate_architecture_markdown(records: List[Dict[str, Any]]) -> str:
     lines: List[str] = []
     lines.append("# Faqih Downloader (FD) | فقيه التنزيلات — Persistent AI Architecture & Dependency Map")
     lines.append("")
+    lines.append("> CRITICAL RULE (DO NOT VIOLATE): NEVER run `build_installer.py` or `release_publisher.py` or upload `FaqihDownloader-Setup.exe` / release binaries to GitHub Releases automatically after code edits. Only build or upload the installer to GitHub when the user explicitly commands 'ارفع برنامج التسطيب على جيت هاب' or 'upload installer to GitHub'.")
+    lines.append("")
     lines.append("> **Auto-generated and verified by `python scripts/update_arch_map.py`**.")
     lines.append("> This document provides the complete, authoritative architectural layout, mixin hierarchy,")
     lines.append("> data flow graph, and file-by-file inventory of Faqih Downloader (FD) | فقيه التنزيلات. Read this file at the start")

@@ -11,8 +11,8 @@ if os.path.isdir(_src_dir) and _src_dir not in sys.path:
     sys.path.insert(0, _src_dir)
 
 try:
-    from smart_download.config import APP_VERSION
-    from smart_download.services.core_patch_updater import build_core_patch_zip
+    from faqih_downloader.config import APP_VERSION
+    from faqih_downloader.services.core_patch_updater import build_core_patch_zip
 except Exception:
     APP_VERSION = "2.0.2"
     build_core_patch_zip = None
@@ -239,9 +239,10 @@ def main():
         _src_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "src")
         if os.path.isdir(_src_dir) and _src_dir not in sys.path:
             sys.path.insert(0, _src_dir)
-        from smart_download.services.core_patch_updater import build_core_patch_zip
+        from faqih_downloader.services.core_patch_updater import build_core_patch_zip
 
     is_full_build = "--full-build" in sys.argv
+    upload_installer = ("--upload-installer" in sys.argv) or is_full_build
 
     # Generate lightweight OTA core patch zip (<150 KB, <0.5s, zero PyInstaller required)
     os.makedirs("dist", exist_ok=True)
@@ -254,9 +255,9 @@ def main():
     fd_setup = os.path.abspath(r"dist\FaqihDownloader-Setup.exe")
     fd_standalone = os.path.abspath(r"dist\FaqihDownloader.exe")
 
-    if is_full_build:
+    if upload_installer:
         if not os.path.isfile(fd_setup):
-            raise FileNotFoundError(f"Setup executable requested via --full-build not found: {fd_setup}")
+            raise FileNotFoundError(f"Setup executable requested via --upload-installer / --full-build not found: {fd_setup}")
         assets_to_upload = [
             fd_setup,
             fd_core_patch,
@@ -271,12 +272,9 @@ def main():
             assets_to_upload.insert(0, fd_standalone)
             required_asset_names.add("FaqihDownloader.exe")
     else:
-        log("[*] Standard publish mode: Focusing on FaqihDownloader-Setup.exe and FaqihDownloader-CorePatch.zip.")
+        log("[*] Standard publish mode: Uploading ONLY FaqihDownloader-CorePatch.zip (pass --upload-installer or --full-build to upload FaqihDownloader-Setup.exe).")
         assets_to_upload = [fd_core_patch]
         required_asset_names = {"FaqihDownloader-CorePatch.zip"}
-        if os.path.isfile(fd_setup):
-            assets_to_upload.insert(0, fd_setup)
-            required_asset_names.add("FaqihDownloader-Setup.exe")
         if "--include-standalone" in sys.argv:
             if not os.path.isfile(fd_standalone):
                 raise FileNotFoundError(f"Standalone executable requested via --include-standalone not found: {fd_standalone}")
@@ -340,7 +338,10 @@ def main():
         missing = set(required_asset_names) - set(uploaded_names.keys())
         if missing:
             raise RuntimeError(f"Release verification failed: missing assets {missing}")
-        extra = set(uploaded_names.keys()) - set(required_asset_names)
+        allowed_asset_names = set(required_asset_names)
+        if not upload_installer:
+            allowed_asset_names.add("FaqihDownloader-Setup.exe")
+        extra = set(uploaded_names.keys()) - allowed_asset_names
         if extra:
             raise RuntimeError(f"Release verification failed: unexpected extra assets on release: {extra}")
     else:

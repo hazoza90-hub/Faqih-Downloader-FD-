@@ -1,5 +1,7 @@
 # Faqih Downloader (FD) | فقيه التنزيلات — Persistent AI Architecture & Dependency Map
 
+> CRITICAL RULE (DO NOT VIOLATE): NEVER run `build_installer.py` or `release_publisher.py` or upload `FaqihDownloader-Setup.exe` / release binaries to GitHub Releases automatically after code edits. Only build or upload the installer to GitHub when the user explicitly commands 'ارفع برنامج التسطيب على جيت هاب' or 'upload installer to GitHub'.
+
 > **Auto-generated and verified by `python scripts/update_arch_map.py`**.
 > This document provides the complete, authoritative architectural layout, mixin hierarchy,
 > data flow graph, and file-by-file inventory of Faqih Downloader (FD) | فقيه التنزيلات. Read this file at the start
@@ -266,7 +268,7 @@ YouTubeFormatBuilderMixin (services/youtube_format_builder.py)
 | `register_browser.py` | 37 | Backward-compatibility root shim for browser extension registration commands. | — | Edit when updating browser registration CLI entry point. |
 | `updater.py` | 48 | Backward-compatibility root shim re-exporting AppAutoUpdater and CoreHotPatchUpdater. | — | Edit when adding top-level updater exports. |
 | `youtube_resolver.py` | 65 | Backward-compatibility root shim re-exporting YouTube and media resolver interfaces. | `_YouTubeResolverShim` | Edit when updating YouTube resolver root exports. |
-| `release_publisher.py` | 353 | Automated GitHub Releases publisher supporting fast zero-rebuild core patch publishing. | `log()`, `get_git_credentials()`, `api_request()` | Edit when modifying release publishing workflow or asset upload logic. |
+| `release_publisher.py` | 354 | Automated GitHub Releases publisher supporting fast zero-rebuild core patch publishing. | `log()`, `get_git_credentials()`, `api_request()` | Edit when modifying release publishing workflow or asset upload logic. |
 | `build_installer.py` | 453 | Automated build script compiling PyInstaller bundles and Windows setup installer. | `clean_stale_shadow_modules()`, `verify_exe_startup()`, `clean_stale_dist_artifacts()` | Edit ONLY when user explicitly commands 'build installer' or 'ابنِ المثبت'. |
 | `installer.py` | 119 | Standalone installer runner executing SmartDownload setup wizard. | `_InstallerShim`, `main()` | Edit when modifying standalone installer CLI options. |
 | `tests/__init__.py` | 11 | Tests package initialization. | — | Edit when configuring test discovery fixtures. |
