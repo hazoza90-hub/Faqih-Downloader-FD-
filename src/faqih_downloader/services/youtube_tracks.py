@@ -10,7 +10,7 @@ from typing import Dict, List, Optional, Tuple, Callable, Any
 
 
 try:
-    from ...locales.i18n import tr
+    from ..locales.i18n import tr
 except Exception:
     def tr(key: str, default: str = "") -> str:  # type: ignore
         return default

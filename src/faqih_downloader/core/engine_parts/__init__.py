@@ -1,6 +1,6 @@
 """
 Engine parts subpackage: Socket helpers, keep-alive wrapper, connection pool,
-resumer, progress metrics, dynamic splitting, and chunk workers.
+resumer, progress metrics, dynamic splitting, chunk workers, prober, lifecycle, and supervisor.
 """
 from .socket_utils import (
     GOOGLEVIDEO_WINDOW_BYTES,
@@ -16,6 +16,9 @@ from .metrics import EngineMetricsMixin
 from .dynamic_split import EngineDynamicSplitMixin
 from .chunk_worker import EngineChunkWorkerMixin
 from .workers import EngineWorkersMixin
+from .prober import EngineProberMixin
+from .lifecycle import EngineLifecycleMixin
+from .supervisor import EngineSupervisorMixin
 
 __all__ = [
     "GOOGLEVIDEO_WINDOW_BYTES",
@@ -30,4 +33,7 @@ __all__ = [
     "EngineDynamicSplitMixin",
     "EngineChunkWorkerMixin",
     "EngineWorkersMixin",
+    "EngineProberMixin",
+    "EngineLifecycleMixin",
+    "EngineSupervisorMixin",
 ]

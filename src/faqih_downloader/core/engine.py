@@ -4,30 +4,30 @@ TurboDownloadEngine: Multi-threaded dynamic chunking, resume, assembly, and thro
 import os
 import sys
 import time
-import math
 import urllib.request
-import urllib.error
-import urllib.parse
 import threading
 import ssl
-import shutil
-import tempfile
-import json
 from collections import deque
-from typing import List, Optional, Callable, Dict, Any, Union, Tuple
+from typing import List, Optional, Callable, Dict, Any, Tuple
 
-from ..config import get_resource_path, get_setting, CHUNK_SIZE_KB, MAX_CONCURRENT_CHUNKS, DEFAULT_CHUNKS, MIN_CHUNK_BYTES, BUFFER_SIZE
 from .rate_limiter import TokenBucketRateLimiter
 from .chunk import DownloadChunk, get_permissive_ssl_context
-from .html_resolver import validate_refresh_url
 from .engine_persistence import EnginePersistenceMixin
-from ..utils.url_utils import is_downloadable_url, derive_download_filename, is_potential_html_url, parse_filename_from_cd_header
-from ..utils.file_ops import calculate_file_integrity, auto_unpack_archive, MagicBytesDetector
-
 from .engine_workers import EngineWorkersMixin
+from .engine_parts import (
+    EngineLifecycleMixin,
+    EngineProberMixin,
+    EngineSupervisorMixin,
+)
 
 
-class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
+class TurboDownloadEngine(
+    EngineLifecycleMixin,
+    EngineProberMixin,
+    EngineSupervisorMixin,
+    EngineWorkersMixin,
+    EnginePersistenceMixin
+):
     """
     High-throughput download engine featuring dynamic chunking, streaming buffers, and rate limiting.
     """
@@ -69,14 +69,18 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
         self.on_error = on_error
 
         self.total_size, self.supports_ranges = 0, False
-        self.expected_sha256: Optional[str] = None; self.expected_crc32: Optional[str] = None
+        self.expected_sha256: Optional[str] = None
+        self.expected_crc32: Optional[str] = None
         self.content_type: str = ""
         self.filename = os.path.basename(destination_path)
         self.temp_dir = destination_path + ".sd_parts"
         for leg in (destination_path + ".tdm_parts", destination_path + ".idm_parts"):
             if os.path.isdir(leg) and not os.path.exists(self.temp_dir):
-                try: os.replace(leg, self.temp_dir); break
-                except Exception: pass
+                try:
+                    os.replace(leg, self.temp_dir)
+                    break
+                except Exception:
+                    pass
 
         self.pre_probed_info = dict(pre_probed_info) if pre_probed_info else None
         self._has_pre_probed = False
@@ -129,419 +133,5 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
         self._last_active_start_mono: Optional[float] = None
         self._session_start_bytes: int = 0
 
-    @staticmethod
-    def _extract_googlevideo_clen(url: str) -> int:
-        """Extracts positive integer content length from a googlevideo URL's `clen` query parameter."""
-        try:
-            clen = urllib.parse.parse_qs(urllib.parse.urlsplit(str(url)).query).get("clen")
-            if clen and int(clen[0]) > 0:
-                return int(clen[0])
-        except Exception:
-            pass
-        return 0
-
-    def log(self, message: str):
-        if self.on_log:
-            try: self.on_log(f"[{time.strftime('%H:%M:%S')}] {message}")
-            except Exception: pass
-
-    def set_speed_limit(self, bytes_per_sec: float):
-        """Update speed limit on the fly."""
-        self.rate_limiter.set_limit(bytes_per_sec)
-        spd = "Unlimited" if bytes_per_sec <= 0 else (f"{bytes_per_sec / (1024*1024):.2f} MB/s" if bytes_per_sec >= 1024*1024 else f"{bytes_per_sec / 1024:.1f} KB/s")
-        self.log(f"Speed limit set to: {spd}")
-
-    def get_chunks_snapshot(self) -> List[DownloadChunk]:
-        """Returns a thread-safe snapshot copy of the current chunk list."""
-        with self._lock: return list(self.chunks)
-
-    def _handle_redirect(self, resp):
-        redirected_url = resp.geturl()
-        if redirected_url:
-            if urllib.parse.urlsplit(redirected_url).scheme.lower() not in ("http", "https", "ftp"):
-                raise ValueError("Unsupported redirect scheme")
-            if redirected_url != self.url:
-                self.url = redirected_url
-                if self.is_googlevideo_url(self.url): self.is_googlevideo = True
-
-    def probe(self):
-        """
-        Inspect target URL for Content-Length, HTTP 206 Accept-Ranges, and file name.
-        Uses HEAD with fallback to GET Range: bytes=0-0 to bypass servers blocking HEAD.
-        """
-        self.log(f"Probing server capabilities: {self.url}")
-        if self.is_googlevideo or "googlevideo.com" in self.url:
-            clen_val = self._extract_googlevideo_clen(self.url)
-            if clen_val > 0:
-                self.total_size, self.supports_ranges = clen_val, True
-                self.log(f"Fast clen probe: {self.total_size:,} bytes (Accept-Ranges verified)")
-                if not self.filename or os.path.isdir(self.destination_path) or self.filename in (".", "..", "download.bin"):
-                    url_fn = os.path.basename(urllib.parse.unquote(urllib.parse.urlsplit(self.url).path.rstrip("/")))
-                    if url_fn: self.filename = url_fn
-                if os.path.isdir(self.destination_path) or self.destination_path.endswith(("/", "\\")):
-                    self.destination_path = os.path.join(self.destination_path, self.filename or "download.bin")
-                    self.temp_dir = self.destination_path + ".sd_parts"
-                return
-
-        req = self._create_request(method="HEAD")
-
-        head_succeeded = False
-        try:
-            with urllib.request.urlopen(req, timeout=12, context=self.ssl_context) as resp:
-                self._handle_redirect(resp)
-                cl = resp.headers.get("Content-Length")
-                ar = resp.headers.get("Accept-Ranges", "").lower()
-                raw_ct = resp.headers.get("Content-Type", "")
-                self.content_type = raw_ct.split(";")[0].strip().lower()
-                self.total_size = int(cl) if cl and cl.isdigit() else 0
-                self.supports_ranges = (ar == "bytes") and (self.total_size > 0)
-                cd_fn = self._parse_filename_from_cd(resp.headers.get("Content-Disposition", ""))
-                if cd_fn: self.filename = cd_fn
-                head_succeeded = True
-        except ValueError: raise
-        except urllib.error.HTTPError as e: e.close(); head_succeeded = False
-        except Exception: head_succeeded = False
-
-        # If HEAD failed or did not confirm range support, test with GET Range: bytes=0-0
-        if not head_succeeded or not self.supports_ranges:
-            req = self._create_request()
-            req.add_header("Range", "bytes=0-0")
-            try:
-                with urllib.request.urlopen(req, timeout=12, context=self.ssl_context) as resp:
-                    self._handle_redirect(resp)
-                    raw_ct = resp.headers.get("Content-Type", "")
-                    if raw_ct:
-                        self.content_type = raw_ct.split(";")[0].strip().lower()
-
-                    cr = resp.headers.get("Content-Range", "")
-                    if "/" in cr:
-                        total_str = cr.split("/")[-1].strip()
-                        if total_str.isdigit():
-                            self.total_size = int(total_str)
-                            self.supports_ranges = True
-                    elif resp.getcode() == 206:
-                        self.supports_ranges = True
-
-                    if not self.total_size and resp.getcode() == 200:
-                        cl = resp.headers.get("Content-Length")
-                        self.total_size = int(cl) if cl and cl.isdigit() else 0
-
-                    cd = resp.headers.get("Content-Disposition", "")
-                    cd_fn = self._parse_filename_from_cd(cd)
-                    if cd_fn:
-                        self.filename = cd_fn
-            except ValueError:
-                raise
-            except Exception as e:
-                if isinstance(e, urllib.error.HTTPError):
-                    e.close()
-                    if e.code in (401, 403, 410):
-                        self.has_expired_link = True
-                        self.last_http_status = e.code
-                if not head_succeeded:
-                    try:
-                        req_plain = self._create_request()
-                        with urllib.request.urlopen(req_plain, timeout=12, context=self.ssl_context) as resp:
-                            self._handle_redirect(resp)
-                            raw_ct = resp.headers.get("Content-Type", "")
-                            if raw_ct:
-                                self.content_type = raw_ct.split(";")[0].strip().lower()
-
-                            cl = resp.headers.get("Content-Length")
-                            ar = resp.headers.get("Accept-Ranges", "").lower()
-                            self.total_size = int(cl) if cl and cl.isdigit() else 0
-                            self.supports_ranges = (ar == "bytes") and (self.total_size > 0)
-                            cd_fn = self._parse_filename_from_cd(resp.headers.get("Content-Disposition", ""))
-                            if cd_fn: self.filename = cd_fn
-                    except ValueError:
-                        raise
-                    except Exception as e_plain:
-                        if isinstance(e_plain, urllib.error.HTTPError):
-                            e_plain.close()
-                            if e_plain.code in (401, 403, 410):
-                                self.has_expired_link = True
-                                self.last_http_status = e_plain.code
-                        raise RuntimeError(f"Connection failed: {e_plain}")
-
-        # Additional defense for googlevideo.com streams: extract clen query parameter if total_size is missing
-        if (self.is_googlevideo or "googlevideo.com" in self.url) and self.total_size <= 0:
-            try:
-                clen = urllib.parse.parse_qs(urllib.parse.urlsplit(self.url).query).get("clen")
-                if clen and clen[0].isdigit(): self.total_size, self.supports_ranges = int(clen[0]), True
-            except Exception: pass
-        if self.is_googlevideo and self.total_size > 0: self.supports_ranges = True
-
-        # Fallback filename extraction from URL if Content-Disposition was absent
-        if not self.filename or os.path.isdir(self.destination_path) or self.filename in (".", "..", "download.bin"):
-            try:
-                parsed_path = urllib.parse.urlsplit(self.url).path
-                url_fn = os.path.basename(urllib.parse.unquote(parsed_path.rstrip("/")))
-                if url_fn:
-                    self.filename = url_fn
-            except Exception:
-                pass
-
-        if os.path.isdir(self.destination_path) or self.destination_path.endswith(("/", "\\")):
-            self.destination_path = os.path.join(self.destination_path, self.filename or "download.bin")
-            self.temp_dir = self.destination_path + ".sd_parts"
-            for leg in (self.destination_path + ".tdm_parts", self.destination_path + ".idm_parts"):
-                if os.path.isdir(leg) and not os.path.exists(self.temp_dir):
-                    try: os.replace(leg, self.temp_dir); break
-                    except Exception: pass
-
-        # HTML response safety net: abort if server returned an HTML page instead of a binary file
-        fn_to_check = self.filename or os.path.basename(self.destination_path)
-        dest_ext = os.path.splitext(fn_to_check)[1].lower() if fn_to_check else ""
-        if getattr(self, "content_type", "") == "text/html" and (not dest_ext or dest_ext == ".bin"):
-            raise RuntimeError("Server returned a web page (HTML), not a file")
-
-        if self.supports_ranges and self.total_size > 0:
-            self.log(f"Server supports HTTP 206 Multi-threading! Total Size: {self.total_size / (1024*1024):.2f} MB ({self.total_size:,} bytes).")
-        elif self.total_size > 0:
-            self.log(f"Server does not support HTTP Range requests. Size: {self.total_size:,} bytes. Single-stream fallback active.")
-        else:
-            self.log("Server does not support HTTP Range requests and size is dynamic/unknown. Single-stream fallback active.")
-
-    def start(self):
-        """Launches the download supervisor thread."""
-        self.is_running, self.is_paused = True, False
-        self._cancel_event.clear(); self._pause_event.clear()
-        now = time.monotonic()
-        self.start_time = time.time()
-        self._last_active_start_mono = self.last_speed_check_time = self._last_speed_time = now
-        dl_bytes = sum(c.downloaded_bytes for c in self.chunks)
-        self.last_downloaded_bytes = self._last_speed_bytes = self._session_start_bytes = dl_bytes
-        self._speed_samples = deque([(now, dl_bytes)])
-        threading.Thread(target=self._supervisor_loop, daemon=True).start()
-
-    @property
-    def is_cancelled(self) -> bool:
-        return self._cancel_event.is_set()
-
-    def _abort_active_conns(self, force: bool = True):
-        with self._lock:
-            for conn in list(self._active_connections):
-                sock = getattr(conn, "sock", None) or getattr(getattr(conn, "_conn", None), "sock", None)
-                if not isinstance(sock, ssl.SSLSocket): self._close_conn_safely(conn)
-            self._active_connections.clear()
-        self._drain_conn_pool()
-
-    def pause(self):
-        """Pauses all active chunk downloads and signals workers to exit cleanly."""
-        if not self.is_running or self.is_paused: return
-        with self._lock:
-            self.is_paused = True; self._pause_event.set()
-            if getattr(self, "_progress_emit_lock", None) is None: self._progress_emit_lock = threading.RLock()
-            if self._last_active_start_mono is not None:
-                self._accumulated_active_sec += max(0.0, time.monotonic() - self._last_active_start_mono)
-                self._last_active_start_mono = None
-            self.current_speed = 0.0
-            if hasattr(self, "_speed_samples"): self._speed_samples.clear()
-        self._abort_active_conns_on_pause()
-        with self._lock:
-            dl_bytes = sum(c.downloaded_bytes for c in self.chunks)
-            self.last_downloaded_bytes = self._last_speed_bytes = dl_bytes
-        threading.Thread(target=self.save_state, daemon=True).start()
-        with self._progress_emit_lock:
-            self.current_speed = 0.0
-            if self.on_progress:
-                try: self.on_progress(dl_bytes, self.total_size, 0.0, "Paused", 0)
-                except Exception: pass
-        self.log("Download paused by user.")
-
-    def resume(self):
-        """Resumes all active chunk downloads and spawns workers for dead/incomplete chunks."""
-        if not self.is_paused or self.is_cancelled: return
-        with self._lock:
-            if getattr(self, "_progress_emit_lock", None) is None:
-                self._progress_emit_lock = threading.RLock()
-            self.is_paused = False
-            now = time.monotonic()
-            self._last_active_start_mono = self.last_speed_check_time = self._last_speed_time = now
-            dl_bytes = sum(c.downloaded_bytes for c in self.chunks)
-            self.last_downloaded_bytes = self._last_speed_bytes = self._session_start_bytes = dl_bytes
-            self._speed_samples = deque([(now, dl_bytes)])
-            self._pause_event.clear()
-            incomplete = [c for c in self.chunks if not c.is_completed and c.status != "failed"]
-            wt = getattr(self, "_worker_threads", {})
-            active_cnt = sum(1 for c in incomplete if wt.get(c.chunk_id) is not None and wt[c.chunk_id].is_alive())
-            for c in incomplete:
-                t = wt.get(c.chunk_id)
-                if t is None or not t.is_alive():
-                    if active_cnt >= self.max_connections and c.status == "pending":
-                        continue
-                    c.status = "active"
-                    self._spawn_worker(c); active_cnt += 1
-        with self._progress_emit_lock:
-            if self.on_progress and not self.is_paused:
-                try: self.on_progress(dl_bytes, self.total_size, 0.0, "Downloading", active_cnt)
-                except Exception: pass
-        self.log("Download resumed.")
-
-    def cancel(self):
-        """Cancels download and stops all worker threads immediately."""
-        self.is_running, self.is_paused, self._last_active_start_mono = False, False, None
-        self._user_cancelled = True
-        self._cancel_event.set(); self._pause_event.clear()
-        self._abort_active_conns(force=True)
-        with self._lock: workers = list(self.active_workers)
-        for w in workers:
-            try: w.join(timeout=0.2)
-            except Exception: pass
-        self.log("Download cancelled by user.")
-        self.cleanup_temp_files()
-
-    def cleanup_temp_files(self):
-        """Safely cleans up temporary chunk directory and files."""
-        try:
-            lk = getattr(self, "_state_save_lock", None)
-            def _rm():
-                if getattr(self, "temp_dir", None) and os.path.exists(self.temp_dir):
-                    shutil.rmtree(self.temp_dir, ignore_errors=True)
-            if lk is not None:
-                with lk: _rm()
-            else:
-                _rm()
-        except Exception: pass
-
-    def _supervisor_loop(self):
-        """Master supervisor: manages initial connection, dynamic splitting, and assembly."""
-        try:
-            is_resuming = bool(
-                getattr(self, "_resume_mode", False)
-                or (self.chunks and any(c.downloaded_bytes > 0 for c in self.chunks))
-            )
-
-            # If not in resume mode, check if state file exists in temp_dir to restore
-            if not is_resuming and not self.chunks and os.path.exists(self.temp_dir):
-                if self.load_state() and self.chunks:
-                    is_resuming = True
-
-            if not is_resuming:
-                if not getattr(self, "_has_pre_probed", False):
-                    self.probe()
-                else:
-                    if os.path.isdir(self.destination_path) or self.destination_path.endswith(("/", "\\")):
-                        self.destination_path = os.path.join(self.destination_path, self.filename or "download.bin")
-                        self.temp_dir = self.destination_path + ".sd_parts"
-                    if self.supports_ranges and self.total_size > 0:
-                        self.log(f"Server supports HTTP 206 Multi-threading! Total Size: {self.total_size / (1024*1024):.2f} MB ({self.total_size:,} bytes).")
-                    else:
-                        self.log(f"Server does not support HTTP Range requests. Size: {self.total_size:,} bytes. Single-stream fallback active.")
-
-                if self.total_size > 0:
-                    dest_dir = os.path.dirname(os.path.abspath(self.destination_path)) or "."
-                    while dest_dir and not os.path.exists(dest_dir):
-                        parent = os.path.dirname(dest_dir)
-                        if parent == dest_dir: break
-                        dest_dir = parent
-                    try:
-                        if shutil.disk_usage(dest_dir or ".").free < self.total_size:
-                            raise OSError("Insufficient disk space for download")
-                    except OSError as oe:
-                        if "Insufficient disk space" in str(oe): raise
-                    except Exception: pass
-
-                if os.path.exists(self.temp_dir):
-                    shutil.rmtree(self.temp_dir, ignore_errors=True)
-                os.makedirs(self.temp_dir, exist_ok=True)
-
-                # Pre-split contiguous chunks immediately at start if multi-connection ranges supported
-                with self._lock:
-                    self.chunks.clear()
-                    if self.supports_ranges and self.allow_dynamic_split and self.total_size >= self.min_split_threshold and self.max_connections > 1:
-                        init_parts = min(self.max_connections, max(1, self.total_size // self.min_split_threshold))
-                        part_sz = self.total_size // init_parts
-                        for i in range(init_parts):
-                            s_b = i * part_sz
-                            e_b = (self.total_size - 1) if (i == init_parts - 1) else ((i + 1) * part_sz - 1)
-                            self.chunks.append(DownloadChunk(i, s_b, e_b, part_filepath=os.path.join(self.temp_dir, f"{self.filename}.part_{i}")))
-                    else:
-                        init_end = (self.total_size - 1) if self.total_size > 0 else 0
-                        self.chunks.append(DownloadChunk(0, 0, init_end, part_filepath=os.path.join(self.temp_dir, f"{self.filename}.part_0")))
-                    to_spawn = list(self.chunks)
-
-                self.save_state()
-                for c in to_spawn:
-                    self._spawn_worker(c)
-            else:
-                self._prepare_resume_chunks()
-
-            # Scheduling & Dynamic Splitting Loop
-            while self.is_running and not self._cancel_event.is_set():
-                ramp_up = (self.supports_ranges and len(self.chunks) < self.max_connections)
-                time.sleep(0.02 if ramp_up else 0.08)
-
-                if self.is_paused:
-                    self.current_speed = 0.0
-                    continue
-
-                # Schedule pending chunks if worker slots available
-                with self._lock:
-                    active_count = sum(1 for c in self.chunks if c.status == "active")
-                    if active_count < self.max_connections:
-                        pending = [c for c in self.chunks if c.status == "pending"]
-                        for c in pending[:self.max_connections - active_count]:
-                            self._spawn_worker(c)
-
-                # Check if we should dynamically split active chunks
-                if self.supports_ranges and self.total_size > 0:
-                    self._dynamic_split_check()
-
-                # Update progress & calculate real-time speed
-                self._update_progress_metrics()
-
-                # Check completion or failure
-                with self._lock:
-                    all_finished = all(c.status in ("completed", "failed") for c in self.chunks)
-                    any_failed = any(c.status == "failed" for c in self.chunks)
-
-                # Fail fast if a chunk failed permanently
-                if any_failed or self._error_abort_event.is_set():
-                    failed_chunks = [c for c in self.chunks if c.status == "failed"]
-                    err = failed_chunks[0].error_msg if failed_chunks else "Chunk transfer failure"
-                    self._stop_workers_for_error()
-                    self.save_state()
-                    raise RuntimeError(f"Download failed in chunk: {err}")
-
-                if all_finished:
-                    break
-
-            if self._cancel_event.is_set():
-                return
-
-            with self._lock:
-                _workers_to_join = list(self.active_workers)
-            for _w in _workers_to_join:
-                if _w.is_alive() and _w != threading.current_thread():
-                    _w.join(timeout=5.0)
-
-            # Perform strict sequential assembly
-            self.assemble()
-
-            active_elapsed = self._accumulated_active_sec
-            if self._last_active_start_mono is not None:
-                active_elapsed += max(0.0, time.monotonic() - self._last_active_start_mono)
-
-            elapsed = max(0.01, active_elapsed) if active_elapsed > 0.001 else max(0.01, time.time() - self.start_time)
-
-            total_downloaded = sum(c.downloaded_bytes for c in self.chunks)
-            if self.total_size > 0:
-                total_downloaded = max(total_downloaded, self.total_size)
-            session_transferred = max(0, total_downloaded - getattr(self, "_session_start_bytes", 0))
-            bytes_for_speed = session_transferred if session_transferred > 0 else (self.total_size if self.total_size > 0 else total_downloaded)
-
-            avg_speed = (bytes_for_speed / elapsed) if elapsed > 0 else 0
-            speed_str = f"{avg_speed / (1024*1024):.2f} MB/s" if avg_speed >= 1024*1024 else f"{avg_speed / 1024:.1f} KB/s"
-            self.log(f"[SUCCESS] Download finished successfully in {elapsed:.1f}s (Average Speed: {speed_str})!")
-            self.is_running = False
-            if self.on_complete: self.on_complete(self.destination_path, self.total_size, elapsed)
-        except Exception as e:
-            self.is_running = False
-            self.log(f"[ERROR] {e}")
-            if self.on_error: self.on_error(str(e))
-        finally:
-            self.is_running = False
-            if self._cancel_event.is_set(): self.cleanup_temp_files()
 
 __all__ = ["TurboDownloadEngine", "EngineWorkersMixin"]

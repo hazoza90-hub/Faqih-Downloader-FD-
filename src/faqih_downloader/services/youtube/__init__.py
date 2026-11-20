@@ -1,5 +1,5 @@
 """
-YouTube package: constants, URL matchers, stream models, extractors, and resolver.
+YouTube package: constants, URL matchers, stream models, extractors, format builders, and resolver.
 """
 from .constants import (
     YOUTUBE_URL_REGEX,
@@ -28,6 +28,10 @@ from .models import (
     MediaStreamInfo,
     resolve_preferred_option_index,
 )
+from .client_tier import get_format_client_tier
+from .format_options_builder import YouTubeFormatOptionsBuilderMixin
+from .stream_info_builder import YouTubeStreamInfoBuilderMixin
+from .format_builder import YouTubeFormatBuilderMixin
 from .tiktok_fallback import TikTokFallbackMixin
 from .format_extractor import YouTubeFormatExtractorMixin
 from .merger import YouTubeStreamMergerMixin
@@ -67,6 +71,10 @@ __all__ = [
     "YouTubeStreamInfo",
     "MediaStreamInfo",
     "resolve_preferred_option_index",
+    "get_format_client_tier",
+    "YouTubeFormatOptionsBuilderMixin",
+    "YouTubeStreamInfoBuilderMixin",
+    "YouTubeFormatBuilderMixin",
     "TikTokFallbackMixin",
     "YouTubeFormatExtractorMixin",
     "YouTubeStreamMergerMixin",
