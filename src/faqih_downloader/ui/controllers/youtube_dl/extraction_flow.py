@@ -241,7 +241,7 @@ class YouTubeExtractionFlowMixin:
                                         resolver=resolver
                                     )
                                 try:
-                                    from ..kanban_staged_helpers import stage_media_option_in_col1
+                                    from ...panels.kanban_staged_helpers import stage_media_option_in_col1
                                     dur = info.get("duration", 0) if isinstance(info, dict) else 0
                                     raw_title = info.get("title", "") if isinstance(info, dict) else ""
                                     stage_media_option_in_col1(self, url, raw_title, selected_opt, final_dest, dur)
