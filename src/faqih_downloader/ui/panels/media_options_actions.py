@@ -168,6 +168,16 @@ class MediaOptionsActionsMixin:
         clean_subs = [clone_clean_subtitle_track(t) for t in ctx.get("subtitle_tracks", []) if isinstance(t, dict)]
         sel_opt = options[sel_idx] if (sel_idx is not None and 0 <= sel_idx < len(options)) else (options[0] if options else None)
         pref_arg = preferred_dest or ctx.get("final_dest", "") or ctx.get("preferred_dest", "")
+        if pref_arg:
+            import re
+            p_dir, p_fn = os.path.split(pref_arg)
+            p_stem, p_ext = os.path.splitext(p_fn)
+            p_stem = re.sub(r'\s*\[Clip\]', '', p_stem, flags=re.IGNORECASE).strip()
+            for o in prev_opts:
+                ch = getattr(o, "selected_chapter_title", "")
+                if ch:
+                    p_stem = re.sub(r'\s*\[' + re.escape(str(ch)) + r'\]', '', p_stem, flags=re.IGNORECASE).strip()
+            pref_arg = os.path.join(p_dir, f"{p_stem}{p_ext}")
         dest = self._resolve_final_dest(pref_arg, raw_title, sel_opt)
 
         ctx["options"] = options
