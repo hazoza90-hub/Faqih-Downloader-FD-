@@ -162,8 +162,5 @@ class YouTubeStreamInfoBuilderMixin:
                 subtitle_text_color=sub_color, subtitle_bg_mode=sub_bg,
                 subtitle_pos_x=sub_px, subtitle_pos_y=sub_py, webpage_url=webpage_url, audio_format_id=af_id,
             )
-        try:
-            from ..clipper.enricher import enrich_stream_info_with_clip
-        except Exception:
-            from ..media_clipper_engine import enrich_stream_info_with_clip
+        from ..clipper.state_sync import enrich_stream_info_with_clip
         return enrich_stream_info_with_clip(res_info, opt)

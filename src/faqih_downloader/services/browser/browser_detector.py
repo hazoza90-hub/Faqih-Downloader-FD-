@@ -28,24 +28,50 @@ except (ImportError, ValueError):
         get_project_root,
     )
 
-from .extension_registry import register_browser_extensions as _local_register_extensions
-from .host_registry import (
-    register_native_host as _local_register_native_host,
-    unregister_native_host as _local_unregister_native_host,
-    get_status as _local_get_status,
-)
+try:
+    from .extension_registry import register_browser_extensions as _local_register_extensions
+    from .host_registry import (
+        register_native_host as _local_register_native_host,
+        unregister_native_host as _local_unregister_native_host,
+        get_status as _local_get_status,
+    )
+except (ImportError, ValueError):
+    from extension_registry import register_browser_extensions as _local_register_extensions
+    from host_registry import (
+        register_native_host as _local_register_native_host,
+        unregister_native_host as _local_unregister_native_host,
+        get_status as _local_get_status,
+    )
 
 try:
     import winreg
     HAS_WINREG = True
 except ImportError:
+    winreg = None
     HAS_WINREG = False
 
 
+def _get_winreg():
+    for mod_name in ("faqih_downloader.services.browser.registry", "register_browser"):
+        mod = sys.modules.get(mod_name)
+        if mod and hasattr(mod, "winreg") and getattr(mod, "winreg") is not None:
+            return getattr(mod, "winreg")
+    return winreg
+
+
+def _get_has_winreg():
+    for mod_name in ("faqih_downloader.services.browser.registry", "register_browser"):
+        mod = sys.modules.get(mod_name)
+        if mod and hasattr(mod, "HAS_WINREG"):
+            return getattr(mod, "HAS_WINREG")
+    return HAS_WINREG
+
+
 def _get_reg_op(name: str, fallback_fn: Any) -> Any:
-    mod = sys.modules.get("faqih_downloader.services.browser.registry")
-    if mod and hasattr(mod, name):
-        return getattr(mod, name)
+    for mod_name in ("faqih_downloader.services.browser.registry", "register_browser"):
+        mod = sys.modules.get(mod_name)
+        if mod and hasattr(mod, name):
+            return getattr(mod, name)
     return fallback_fn
 
 
@@ -63,7 +89,9 @@ def check_and_register_browser(
     4. If keys are missing or path changed, self-heals by cleanly updating the manifest
        and registry keys.
     """
-    if not HAS_WINREG or not sys.platform.startswith("win"):
+    wreg = _get_winreg()
+    has_wreg = _get_has_winreg()
+    if not has_wreg or not sys.platform.startswith("win") or wreg is None:
         return {"success": False, "skipped": True, "reason": "Not Windows OS"}
 
     t_start = time.perf_counter()
@@ -99,9 +127,9 @@ def check_and_register_browser(
         if not needs_registration:
             # 2. Check Chrome NativeMessagingHost
             try:
-                k = winreg.OpenKey(winreg.HKEY_CURRENT_USER, CHROME_REG_KEY, 0, winreg.KEY_READ)
-                val, _ = winreg.QueryValueEx(k, "")
-                winreg.CloseKey(k)
+                k = wreg.OpenKey(wreg.HKEY_CURRENT_USER, CHROME_REG_KEY, 0, wreg.KEY_READ)
+                val, _ = wreg.QueryValueEx(k, "")
+                wreg.CloseKey(k)
                 if not val or os.path.normcase(os.path.abspath(val)) != expected_manifest_path:
                     needs_registration = True
             except Exception:
@@ -110,9 +138,9 @@ def check_and_register_browser(
         if not needs_registration:
             # 3. Check Edge NativeMessagingHost
             try:
-                k = winreg.OpenKey(winreg.HKEY_CURRENT_USER, EDGE_REG_KEY, 0, winreg.KEY_READ)
-                val, _ = winreg.QueryValueEx(k, "")
-                winreg.CloseKey(k)
+                k = wreg.OpenKey(wreg.HKEY_CURRENT_USER, EDGE_REG_KEY, 0, wreg.KEY_READ)
+                val, _ = wreg.QueryValueEx(k, "")
+                wreg.CloseKey(k)
                 if not val or os.path.normcase(os.path.abspath(val)) != expected_manifest_path:
                     needs_registration = True
             except Exception:
@@ -121,24 +149,24 @@ def check_and_register_browser(
         if not needs_registration:
             # 4. Check Chrome Extension key
             try:
-                k = winreg.OpenKey(winreg.HKEY_CURRENT_USER, rf"{CHROME_EXT_KEY_PREFIX}\{ext_id}", 0, winreg.KEY_READ)
+                k = wreg.OpenKey(wreg.HKEY_CURRENT_USER, rf"{CHROME_EXT_KEY_PREFIX}\{ext_id}", 0, wreg.KEY_READ)
                 if os.path.isdir(ext_dir):
-                    p_val, _ = winreg.QueryValueEx(k, "path")
+                    p_val, _ = wreg.QueryValueEx(k, "path")
                     if os.path.normcase(os.path.abspath(p_val)) != os.path.normcase(os.path.abspath(ext_dir)):
                         needs_registration = True
-                winreg.CloseKey(k)
+                wreg.CloseKey(k)
             except Exception:
                 needs_registration = True
 
         if not needs_registration:
             # 5. Check Edge Extension key
             try:
-                k = winreg.OpenKey(winreg.HKEY_CURRENT_USER, rf"{EDGE_EXT_KEY_PREFIX}\{ext_id}", 0, winreg.KEY_READ)
+                k = wreg.OpenKey(wreg.HKEY_CURRENT_USER, rf"{EDGE_EXT_KEY_PREFIX}\{ext_id}", 0, wreg.KEY_READ)
                 if os.path.isdir(ext_dir):
-                    p_val, _ = winreg.QueryValueEx(k, "path")
+                    p_val, _ = wreg.QueryValueEx(k, "path")
                     if os.path.normcase(os.path.abspath(p_val)) != os.path.normcase(os.path.abspath(ext_dir)):
                         needs_registration = True
-                winreg.CloseKey(k)
+                wreg.CloseKey(k)
             except Exception:
                 needs_registration = True
 

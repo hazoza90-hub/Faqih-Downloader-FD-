@@ -30,23 +30,48 @@ except (ImportError, ValueError):
         generate_launcher_batch,
     )
 
-from .extension_registry import (
-    register_browser_extensions as _local_register_extensions,
-    unregister_browser_extensions as _local_unregister_extensions,
-    is_extension_registered as _local_is_extension_registered,
-)
+try:
+    from .extension_registry import (
+        register_browser_extensions as _local_register_extensions,
+        unregister_browser_extensions as _local_unregister_extensions,
+        is_extension_registered as _local_is_extension_registered,
+    )
+except (ImportError, ValueError):
+    from extension_registry import (
+        register_browser_extensions as _local_register_extensions,
+        unregister_browser_extensions as _local_unregister_extensions,
+        is_extension_registered as _local_is_extension_registered,
+    )
 
 try:
     import winreg
     HAS_WINREG = True
 except ImportError:
+    winreg = None
     HAS_WINREG = False
 
 
+def _get_winreg():
+    for mod_name in ("faqih_downloader.services.browser.registry", "register_browser"):
+        mod = sys.modules.get(mod_name)
+        if mod and hasattr(mod, "winreg") and getattr(mod, "winreg") is not None:
+            return getattr(mod, "winreg")
+    return winreg
+
+
+def _get_has_winreg():
+    for mod_name in ("faqih_downloader.services.browser.registry", "register_browser"):
+        mod = sys.modules.get(mod_name)
+        if mod and hasattr(mod, "HAS_WINREG"):
+            return getattr(mod, "HAS_WINREG")
+    return HAS_WINREG
+
+
 def _get_reg_op(name: str, fallback_fn: Any) -> Any:
-    mod = sys.modules.get("faqih_downloader.services.browser.registry")
-    if mod and hasattr(mod, name):
-        return getattr(mod, name)
+    for mod_name in ("faqih_downloader.services.browser.registry", "register_browser"):
+        mod = sys.modules.get(mod_name)
+        if mod and hasattr(mod, name):
+            return getattr(mod, name)
     return fallback_fn
 
 
@@ -60,7 +85,9 @@ def register_native_host(
     2. Writes host manifest JSON.
     3. Adds registry keys in HKCU for NativeMessagingHosts and Extensions.
     """
-    if not HAS_WINREG or not sys.platform.startswith("win"):
+    wreg = _get_winreg()
+    has_wreg = _get_has_winreg()
+    if not has_wreg or not sys.platform.startswith("win") or wreg is None:
         return {
             "success": False,
             "error": "Windows Registry operations are only supported on Windows OS."
@@ -97,9 +124,9 @@ def register_native_host(
         ("Edge", EDGE_REG_KEY)
     ]:
         try:
-            key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, reg_key_path)
-            winreg.SetValue(key, "", winreg.REG_SZ, manifest_abs_path)
-            winreg.CloseKey(key)
+            key = wreg.CreateKey(wreg.HKEY_CURRENT_USER, reg_key_path)
+            wreg.SetValue(key, "", wreg.REG_SZ, manifest_abs_path)
+            wreg.CloseKey(key)
             registry_results[browser_name] = True
         except Exception:
             registry_results[browser_name] = False
@@ -108,7 +135,7 @@ def register_native_host(
         for old_host in ("com.smartdownload.host", "com.turbodownloader.host"):
             try:
                 old_k = reg_key_path.replace(HOST_NAME, old_host)
-                winreg.DeleteKey(winreg.HKEY_CURRENT_USER, old_k)
+                wreg.DeleteKey(wreg.HKEY_CURRENT_USER, old_k)
             except Exception:
                 pass
 
@@ -137,7 +164,9 @@ def unregister_native_host(unregister_extensions: bool = True) -> Dict[str, Any]
     Also cleans up legacy SmartDownload and TurboDownloader host keys.
     Optionally unregisters extension keys.
     """
-    if not HAS_WINREG or not sys.platform.startswith("win"):
+    wreg = _get_winreg()
+    has_wreg = _get_has_winreg()
+    if not has_wreg or not sys.platform.startswith("win") or wreg is None:
         return {
             "success": False,
             "error": "Windows Registry operations are only supported on Windows OS."
@@ -150,7 +179,7 @@ def unregister_native_host(unregister_extensions: bool = True) -> Dict[str, Any]
     ]:
         # Delete primary key
         try:
-            winreg.DeleteKey(winreg.HKEY_CURRENT_USER, reg_key_path)
+            wreg.DeleteKey(wreg.HKEY_CURRENT_USER, reg_key_path)
             results[browser_name] = True
         except FileNotFoundError:
             results[browser_name] = True
@@ -161,7 +190,7 @@ def unregister_native_host(unregister_extensions: bool = True) -> Dict[str, Any]
         for old_host in ("com.smartdownload.host", "com.turbodownloader.host"):
             try:
                 old_k = reg_key_path.replace(HOST_NAME, old_host)
-                winreg.DeleteKey(winreg.HKEY_CURRENT_USER, old_k)
+                wreg.DeleteKey(wreg.HKEY_CURRENT_USER, old_k)
             except Exception:
                 pass
 
@@ -182,7 +211,9 @@ def is_registered(browser: str = "chrome") -> bool:
     Checks if Native Messaging Host registry key exists and points to a valid manifest file.
     Checks primary com.smartdownload.host first, then falls back to legacy com.turbodownloader.host.
     """
-    if not HAS_WINREG or not sys.platform.startswith("win"):
+    wreg = _get_winreg()
+    has_wreg = _get_has_winreg()
+    if not has_wreg or not sys.platform.startswith("win") or wreg is None:
         return False
 
     is_chrome = browser.lower() == "chrome"
@@ -191,9 +222,9 @@ def is_registered(browser: str = "chrome") -> bool:
 
     for reg_key_path in [primary_key, legacy_key]:
         try:
-            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, reg_key_path, 0, winreg.KEY_READ)
-            manifest_path, _ = winreg.QueryValueEx(key, "")
-            winreg.CloseKey(key)
+            key = wreg.OpenKey(wreg.HKEY_CURRENT_USER, reg_key_path, 0, wreg.KEY_READ)
+            manifest_path, _ = wreg.QueryValueEx(key, "")
+            wreg.CloseKey(key)
             if manifest_path and os.path.isfile(manifest_path):
                 return True
         except Exception:
@@ -214,12 +245,14 @@ def get_status() -> Dict[str, Any]:
     edge_ext_ok = is_ext_reg_fn("edge")
 
     manifest_path = ""
-    if HAS_WINREG:
+    wreg = _get_winreg()
+    has_wreg = _get_has_winreg()
+    if has_wreg and wreg is not None:
         for reg_key_path in [CHROME_REG_KEY, EDGE_REG_KEY]:
             try:
-                key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, reg_key_path, 0, winreg.KEY_READ)
-                val, _ = winreg.QueryValueEx(key, "")
-                winreg.CloseKey(key)
+                key = wreg.OpenKey(wreg.HKEY_CURRENT_USER, reg_key_path, 0, wreg.KEY_READ)
+                val, _ = wreg.QueryValueEx(key, "")
+                wreg.CloseKey(key)
                 if val:
                     manifest_path = val
                     break

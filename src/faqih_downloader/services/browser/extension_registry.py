@@ -33,7 +33,24 @@ try:
     import winreg
     HAS_WINREG = True
 except ImportError:
+    winreg = None
     HAS_WINREG = False
+
+
+def _get_winreg():
+    for mod_name in ("faqih_downloader.services.browser.registry", "register_browser"):
+        mod = sys.modules.get(mod_name)
+        if mod and hasattr(mod, "winreg") and getattr(mod, "winreg") is not None:
+            return getattr(mod, "winreg")
+    return winreg
+
+
+def _get_has_winreg():
+    for mod_name in ("faqih_downloader.services.browser.registry", "register_browser"):
+        mod = sys.modules.get(mod_name)
+        if mod and hasattr(mod, "HAS_WINREG"):
+            return getattr(mod, "HAS_WINREG")
+    return HAS_WINREG
 
 
 def register_browser_extensions(
@@ -46,7 +63,9 @@ def register_browser_extensions(
     - HKCU\\Software\\Microsoft\\Edge\\Extensions\\<extension_id>
     Sets 'path', 'version', and 'update_url' where appropriate.
     """
-    if not HAS_WINREG or not sys.platform.startswith("win"):
+    wreg = _get_winreg()
+    has_wreg = _get_has_winreg()
+    if not has_wreg or not sys.platform.startswith("win") or wreg is None:
         return {
             "success": False,
             "error": "Windows Registry operations are only supported on Windows OS."
@@ -89,24 +108,24 @@ def register_browser_extensions(
     for ext_id in ids_to_register:
         # Chrome
         try:
-            c_key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, rf"{CHROME_EXT_KEY_PREFIX}\{ext_id}")
+            c_key = wreg.CreateKey(wreg.HKEY_CURRENT_USER, rf"{CHROME_EXT_KEY_PREFIX}\{ext_id}")
             if extension_dir and os.path.isdir(extension_dir):
-                winreg.SetValueEx(c_key, "path", 0, winreg.REG_SZ, os.path.abspath(extension_dir))
-            winreg.SetValueEx(c_key, "version", 0, winreg.REG_SZ, ext_version)
-            winreg.SetValueEx(c_key, "update_url", 0, winreg.REG_SZ, CHROME_UPDATE_URL)
-            winreg.CloseKey(c_key)
+                wreg.SetValueEx(c_key, "path", 0, wreg.REG_SZ, os.path.abspath(extension_dir))
+            wreg.SetValueEx(c_key, "version", 0, wreg.REG_SZ, ext_version)
+            wreg.SetValueEx(c_key, "update_url", 0, wreg.REG_SZ, CHROME_UPDATE_URL)
+            wreg.CloseKey(c_key)
             results[f"Chrome_{ext_id}"] = True
         except Exception:
             results[f"Chrome_{ext_id}"] = False
 
         # Edge
         try:
-            e_key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, rf"{EDGE_EXT_KEY_PREFIX}\{ext_id}")
+            e_key = wreg.CreateKey(wreg.HKEY_CURRENT_USER, rf"{EDGE_EXT_KEY_PREFIX}\{ext_id}")
             if extension_dir and os.path.isdir(extension_dir):
-                winreg.SetValueEx(e_key, "path", 0, winreg.REG_SZ, os.path.abspath(extension_dir))
-            winreg.SetValueEx(e_key, "version", 0, winreg.REG_SZ, ext_version)
-            winreg.SetValueEx(e_key, "update_url", 0, winreg.REG_SZ, EDGE_UPDATE_URL)
-            winreg.CloseKey(e_key)
+                wreg.SetValueEx(e_key, "path", 0, wreg.REG_SZ, os.path.abspath(extension_dir))
+            wreg.SetValueEx(e_key, "version", 0, wreg.REG_SZ, ext_version)
+            wreg.SetValueEx(e_key, "update_url", 0, wreg.REG_SZ, EDGE_UPDATE_URL)
+            wreg.CloseKey(e_key)
             results[f"Edge_{ext_id}"] = True
         except Exception:
             results[f"Edge_{ext_id}"] = False
@@ -122,7 +141,9 @@ def unregister_browser_extensions(extension_ids: Optional[List[str]] = None) -> 
     """
     Removes extension registry keys for Chrome and Edge from HKCU.
     """
-    if not HAS_WINREG or not sys.platform.startswith("win"):
+    wreg = _get_winreg()
+    has_wreg = _get_has_winreg()
+    if not has_wreg or not sys.platform.startswith("win") or wreg is None:
         return {
             "success": False,
             "error": "Windows Registry operations are only supported on Windows OS."
@@ -145,7 +166,7 @@ def unregister_browser_extensions(extension_ids: Optional[List[str]] = None) -> 
         for browser_name, prefix in [("Chrome", CHROME_EXT_KEY_PREFIX), ("Edge", EDGE_EXT_KEY_PREFIX)]:
             full_key = rf"{prefix}\{clean_ext_id}"
             try:
-                winreg.DeleteKey(winreg.HKEY_CURRENT_USER, full_key)
+                wreg.DeleteKey(wreg.HKEY_CURRENT_USER, full_key)
                 results[f"{browser_name}_{clean_ext_id}"] = True
             except FileNotFoundError:
                 results[f"{browser_name}_{clean_ext_id}"] = True
@@ -160,14 +181,16 @@ def unregister_browser_extensions(extension_ids: Optional[List[str]] = None) -> 
 
 def is_extension_registered(browser: str = "chrome", extension_id: Optional[str] = None) -> bool:
     """Checks if browser extension registry key exists in HKCU."""
-    if not HAS_WINREG or not sys.platform.startswith("win"):
+    wreg = _get_winreg()
+    has_wreg = _get_has_winreg()
+    if not has_wreg or not sys.platform.startswith("win") or wreg is None:
         return False
     ext_id = extension_id or STATIC_EXTENSION_ID
     clean_ext_id = ext_id.strip().rstrip("/").replace("chrome-extension://", "")
     prefix = CHROME_EXT_KEY_PREFIX if browser.lower() == "chrome" else EDGE_EXT_KEY_PREFIX
     try:
-        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, rf"{prefix}\{clean_ext_id}", 0, winreg.KEY_READ)
-        winreg.CloseKey(key)
+        key = wreg.OpenKey(wreg.HKEY_CURRENT_USER, rf"{prefix}\{clean_ext_id}", 0, wreg.KEY_READ)
+        wreg.CloseKey(key)
         return True
     except Exception:
         return False

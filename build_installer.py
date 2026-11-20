@@ -270,6 +270,11 @@ def prepare_payload():
     hm_script = os.path.join(BASE_DIR, "src", "faqih_downloader", "services", "browser", "host_manifest.py")
     if os.path.isfile(hm_script):
         shutil.copy2(hm_script, os.path.join(PAYLOAD_DIR, "host_manifest.py"))
+    browser_pkg_dir = os.path.join(BASE_DIR, "src", "faqih_downloader", "services", "browser")
+    for extra_name in ("extension_registry.py", "host_registry.py", "browser_detector.py"):
+        src_extra = os.path.join(browser_pkg_dir, extra_name)
+        if os.path.isfile(src_extra):
+            shutil.copy2(src_extra, os.path.join(PAYLOAD_DIR, extra_name))
 
     # 5. FFmpeg binary bundling if available
     try:
