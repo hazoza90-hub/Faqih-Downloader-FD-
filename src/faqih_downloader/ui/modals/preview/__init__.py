@@ -20,6 +20,9 @@ from .clipper_js import get_clipper_js
 from .subtitle_studio_css import get_studio_css
 from .subtitle_studio_html import get_studio_toolbar_html
 from .subtitle_studio_js import get_studio_js
+from .player_css import _CSS
+from .player_js import _JS_TEMPLATE
+from .player_html import generate_preview_html
 
 __all__ = [
     "IS_WINDOWS",
@@ -37,4 +40,7 @@ __all__ = [
     "get_studio_css",
     "get_studio_toolbar_html",
     "get_studio_js",
+    "_CSS",
+    "_JS_TEMPLATE",
+    "generate_preview_html",
 ]
