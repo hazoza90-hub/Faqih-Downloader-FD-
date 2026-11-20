@@ -15,24 +15,25 @@ class TestStreamCoordinatorDubbingFixes(unittest.TestCase):
     """Verifies audio engine parameters and error isolation in StreamDownloadCoordinator."""
 
     def test_audio_engine_single_connection_and_no_split(self):
-        """Verifies a_conn=1 and allow_dynamic_split=False for audio stream download."""
-        from faqih_downloader.core.stream_coordinator import StreamDownloadCoordinator
+        """Verifies audio stream caps connections and disables dynamic split when single-connection."""
+        from faqih_downloader.core.coordinator.dual_stream import run_dual_stream_download
 
-        src = inspect.getsource(StreamDownloadCoordinator._run_coordinator)
-        self.assertIn("a_conn = 1", src)
-        self.assertIn("allow_dynamic_split=False", src)
+        src = inspect.getsource(run_dual_stream_download)
+        self.assertIn("a_conn = min(2, max(1, coordinator.max_connections))", src)
+        self.assertIn("(a_conn > 1)", src)
         a_error_func = src.split("def _on_a_error")[1].split("def _on_a_progress")[0]
         self.assertNotIn("v_completed.set()", a_error_func)
         self.assertNotIn("v_engine.cancel()", a_error_func)
         self.assertIn("while not (v_completed.is_set() and a_completed.is_set())", src)
-        self.assertIn("if v_error:\n                    break", src)
+        self.assertIn("if v_error:\n            break", src)
 
     def test_audio_error_resets_metrics_without_cancelling_video(self):
-        from faqih_downloader.core.stream_coordinator import StreamDownloadCoordinator
-        src = inspect.getsource(StreamDownloadCoordinator._run_coordinator)
+        from faqih_downloader.core.coordinator.dual_stream import run_dual_stream_download
+
+        src = inspect.getsource(run_dual_stream_download)
         a_error_func = src.split("def _on_a_error")[1].split("def _on_a_progress")[0]
-        self.assertIn("self._a_speed = 0.0", a_error_func)
-        self.assertIn("self._a_active = 0", a_error_func)
+        self.assertIn("coordinator._a_speed = 0.0", a_error_func)
+        self.assertIn("coordinator._a_active = 0", a_error_func)
         self.assertIn("_report_combined()", a_error_func)
         self.assertNotIn("v_engine.cancel()", a_error_func)
 
