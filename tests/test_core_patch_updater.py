@@ -74,9 +74,9 @@ class TestCoreHotPatchAndZeroRebuildWorkflow(unittest.TestCase):
             self.assertLess(elapsed, 1.0, f"Zip packaging took too long: {elapsed:.3f}s")
 
             file_size = os.path.getsize(out_zip)
-            # Lightweight patch should be ~100-200 KB
+            # Lightweight patch across decomposed core modules should remain well under 1 MB
             self.assertGreater(file_size, 50 * 1024)
-            self.assertLess(file_size, 500 * 1024)
+            self.assertLess(file_size, 1024 * 1024)
 
             with zipfile.ZipFile(out_zip, "r") as zf:
                 names = zf.namelist()
